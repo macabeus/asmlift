@@ -14,7 +14,7 @@ import type { AsmLayout, Block, Fn, ParamEvidence, SlotHomes, Value, WriteOrder 
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { raiseRecovered, structureReturnTailReading } from '@asmlift/core/pipeline';
 import { type FnProto, type Prototypes, declaresVoidReturn, prototypesFromSymbols } from '@asmlift/core/proto';
-import { type ContextGlobals, ownParamNames, splitOwnContext } from '@asmlift/core/proto-context';
+import { type ContextGlobals, splitOwnContext } from '@asmlift/core/proto-context';
 import { structuringOptions } from '@asmlift/core/structuring-options';
 import { type SymbolInfo, symbolsByName } from '@asmlift/core/symbols';
 import type { ResolvedTarget, TargetDescription } from '@asmlift/core/target';
@@ -83,7 +83,8 @@ export async function decompileWithReport(
           inferredSymbols,
           mapSymbols,
           opts.contextGlobals,
-          ownParamNames(own.prototypes, name, target, own.ownContextProto),
+          name,
+          own.ownContextProto,
           opts.roleNames === true,
         )
     : undefined;
@@ -170,7 +171,8 @@ function probedSource(
   inferredSymbols: Map<string, SymbolInfo>,
   mapSymbols: Map<string, SymbolInfo> | undefined,
   contextGlobals: ContextGlobals | undefined,
-  paramNames: readonly string[] | undefined,
+  name: string,
+  ownContextProto: FnProto | undefined,
   roleNames: boolean,
 ): string | undefined {
   try {
@@ -199,13 +201,14 @@ function probedSource(
       // The two forced readings are absent as in the trace: neither options type offers them.
       structuringOptions({
         target,
+        name,
         returnsVoid,
         prototypes,
         backend,
         symbols: mapSymbols,
         contextGlobals,
         inferredSymbols,
-        paramNames,
+        ownContextProto,
         roleNames,
       }),
       (t) => backend.emit(t),

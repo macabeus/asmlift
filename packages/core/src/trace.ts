@@ -22,7 +22,7 @@ import {
   stubResult,
 } from './pipeline';
 import { type FnProto, type Prototypes, declaresVoidReturn, prototypesFromSymbols } from './proto';
-import { type ContextGlobals, ownParamNames, splitOwnContext } from './proto-context';
+import { type ContextGlobals, splitOwnContext } from './proto-context';
 import { assumedShapes, inferGlobalArrays, orderLicensedGlobals } from './raise/globalshape';
 import { OFFSET_NAME_PASS } from './raise/offsetnames';
 import { structuringOptions } from './structuring-options';
@@ -349,6 +349,7 @@ function traceTower(
     // which TraceOptions does not offer: a trace explains the default lift.
     structuringOptions({
       target,
+      name,
       returnsVoid,
       prototypes,
       backend,
@@ -357,7 +358,7 @@ function traceTower(
       contextGlobals: opts.contextGlobals,
       inferredSymbols,
       orderLicensedGlobals: orderLicensed,
-      paramNames: ownParamNames(prototypes, name, target, ownContext.ownContextProto),
+      ownContextProto: ownContext.ownContextProto,
       roleNames: opts.roleNames,
     }),
     (t) => backend.emit(t),

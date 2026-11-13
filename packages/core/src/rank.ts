@@ -75,7 +75,7 @@ import {
   structureReturnTailReading,
 } from './pipeline';
 import { type FnProto, type Prototypes, declaresVoidReturn, prototypesFromSymbols } from './proto';
-import { type ContextGlobals, ownParamNames, splitOwnContext } from './proto-context';
+import { type ContextGlobals, splitOwnContext } from './proto-context';
 import { inferGlobalArrays, orderLicensedGlobals, sameDerivedShape } from './raise/globalshape';
 import { OFFSET_NAME_PASS } from './raise/offsetnames';
 import { runPreRecovery } from './raise/pre-recovery';
@@ -585,12 +585,13 @@ export function enumerateCandidates(
   //     'strict' is the policy.
   const baseOpts = structuringOptions({
     target,
+    name,
     returnsVoid: declaresVoidReturn(prototypes[name]),
     prototypes,
     backend,
     symbols: opts.symbols ? symbolsByName(opts.symbols) : undefined,
     contextGlobals: opts.contextGlobals,
-    paramNames: ownParamNames(prototypes, name, target, ownContext.ownContextProto),
+    ownContextProto: ownContext.ownContextProto,
     roleNames: opts.roleNames,
   });
   // Branch-sense is a differ-ranked VARIATION, the same class as param signedness: a divergent `if`

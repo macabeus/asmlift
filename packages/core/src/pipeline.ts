@@ -46,7 +46,7 @@ import {
   ownReturnWidth,
   prototypesFromSymbols,
 } from './proto';
-import { type ContextGlobals, ownParamNames, splitOwnContext } from './proto-context';
+import { type ContextGlobals, splitOwnContext } from './proto-context';
 import { type StampBehaviors, stampDeclaredVolatileUnder } from './raise/declared-volatile';
 import { RaiseUnsupportedError } from './raise/errors';
 import { assumedShapes, inferGlobalArrays, orderLicensedGlobals } from './raise/globalshape';
@@ -303,6 +303,7 @@ function runTower(
     // tree this backend would refuse.
     structuringOptions({
       target,
+      name,
       returnsVoid: declaresVoidReturn(prototypes[name]),
       prototypes,
       backend,
@@ -313,7 +314,7 @@ function runTower(
       contextGlobals: opts.contextGlobals,
       inferredSymbols,
       orderLicensedGlobals: orderLicensed,
-      paramNames: ownParamNames(prototypes, name, target, own.ownContextProto),
+      ownContextProto: own.ownContextProto,
       roleNames: opts.roleNames,
     }),
     (t) => backend.emit(t),

@@ -14,8 +14,8 @@
 import { aggregateTag, aggregateType } from './aggregate';
 import type { IrType } from './ir/types';
 import type { LanguageBackend } from './l3/ast';
-import type { Prototypes } from './proto';
-import type { ContextGlobals } from './proto-context';
+import type { FnProto, Prototypes } from './proto';
+import { type ContextGlobals, ownParamNames } from './proto-context';
 import type { StructureOptions } from './structure/structure-options';
 import type { SymbolInfo } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
@@ -24,6 +24,9 @@ import { type TargetDescription, structureOptionsFor } from './target';
  *  absent, false or empty, exactly as each site's `...(x ? { x } : {})` spread did. */
 export interface StructuringInputs {
   target: TargetDescription;
+  /** The function being lifted: its own entries in `prototypes` and `ownContextProto` are what
+   *  its printed parameter names are derived from (see `ownContextProto`). */
+  name: string;
   /** The function's own declared return (`declaresVoidReturn`), from the caller's table. */
   returnsVoid: boolean;
   /** The prototype table the target's declared argument and return types are read from. */
@@ -45,9 +48,13 @@ export interface StructuringInputs {
   inferredSymbols?: Map<string, SymbolInfo>;
   /** The order half of the same reading (raise/globalshape.ts `orderLicensedGlobals`). */
   orderLicensedGlobals?: ReadonlySet<string>;
-  /** The names the function's own declaration gives its parameters (proto-context.ts
-   *  `ownParamNames`): printed by the C-family printer, read by nothing else (`SFn.paramNames`). */
-  paramNames?: readonly string[];
+  /** The context's own declaration of `name`, split out of the table (proto-context.ts
+   *  `splitOwnContext`). Read here for the printed parameter names only (`SFn.paramNames`, from
+   *  `ownParamNames` over `prototypes` and this entry), derived here and at no site: the four
+   *  sites once each called `ownParamNames` by hand, and the cli probe's call read the caller's
+   *  table before the symbol merge while its structuring read the merged one, so the probe printed
+   *  declared names the headline lift refused. */
+  ownContextProto?: FnProto;
   /** Print loop counters and the returned local under role names (`SFn.roleNames`). */
   roleNames?: boolean;
 }
@@ -56,7 +63,8 @@ export interface StructuringInputs {
  *  `returnsVoid` and the declared types), then the backend's spellings, then each optional input
  *  that is present. */
 export function structuringOptions(inputs: StructuringInputs): StructureOptions & { joinPastReturns?: boolean } {
-  const { target, returnsVoid, prototypes, backend } = inputs;
+  const { target, returnsVoid, prototypes, backend, name, ownContextProto } = inputs;
+  const paramNames = ownParamNames(prototypes, name, target, ownContextProto);
   return {
     ...structureOptionsFor(target, returnsVoid, prototypes),
     spellSwitchFallthrough: backend.spellsSwitchFallthrough,
@@ -70,7 +78,7 @@ export function structuringOptions(inputs: StructuringInputs): StructureOptions 
     ...contextArrayElementsOf(inputs.contextGlobals, target),
     ...(inputs.inferredSymbols?.size ? { inferredSymbols: inputs.inferredSymbols } : {}),
     ...(inputs.orderLicensedGlobals?.size ? { orderLicensedGlobals: inputs.orderLicensedGlobals } : {}),
-    ...(inputs.paramNames?.length ? { paramNames: inputs.paramNames } : {}),
+    ...(paramNames?.length ? { paramNames } : {}),
     ...(inputs.roleNames ? { roleNames: true } : {}),
   };
 }

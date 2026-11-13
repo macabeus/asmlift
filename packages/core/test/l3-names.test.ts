@@ -9,7 +9,9 @@ import { T } from '../src/ir/types';
 import { type Expr, type SFn, type Stmt, renameVariables } from '../src/l3/ast';
 import { nameVariables } from '../src/l3/names';
 import { decompile } from '../src/pipeline';
-import type { FnProto } from '../src/proto';
+import { type FnProto, prototypesFromSymbols } from '../src/proto';
+import { structuringOptions } from '../src/structuring-options';
+import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 
 const s32 = T.s(32);
@@ -85,6 +87,37 @@ describe("the declaration's parameter names", () => {
     expect(lift({ params: ['s32', 'u8'], returns: 's32', paramNames: ['x', 'shift'] })).toContain('x << shift');
     // a parameter that is not one argument word names none
     expect(lift({ params: ['s32', 'float'], returns: 's32', paramNames: ['x', 'shift'] })).not.toContain('shift');
+  });
+
+  // The names are derived where the structuring options are, over the table those options read:
+  // a site cannot hand the structurer names off another table. The cli's score probe once passed
+  // names read off the caller's table, before the symbol merge, while its structuring read the
+  // merged one, whose map-given struct return through memory refuses them.
+  test('are derived from the table the structuring options read, the symbol merge included', () => {
+    const table: Record<string, FnProto> = { F: { params: ['u8', 'u8'], paramNames: ['x', 'y'] } };
+    const symbols = new Map([
+      [
+        0x08000000,
+        [{ name: 'F', kind: 'code', signature: { returns: { size: 8, signed: null, pointer: false }, params: [] } }],
+      ],
+    ]) as unknown as SymbolMap;
+    const names = (prototypes: Record<string, FnProto>) =>
+      structuringOptions({ target: ARMV4T_AGBCC, name: 'F', returnsVoid: false, prototypes, backend: cBackend })
+        .paramNames;
+    expect(names(table)).toEqual(['x', 'y']);
+    expect(names(prototypesFromSymbols(symbols, table))).toBeUndefined();
+    // and from the context's own entry beside the table
+    const own: FnProto = { params: ['s32'], paramNames: ['n'] };
+    expect(
+      structuringOptions({
+        target: ARMV4T_AGBCC,
+        name: 'F',
+        returnsVoid: false,
+        prototypes: {},
+        backend: cBackend,
+        ownContextProto: own,
+      }).paramNames,
+    ).toEqual(['n']);
   });
 });
 
