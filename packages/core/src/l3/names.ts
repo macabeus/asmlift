@@ -210,10 +210,12 @@ export function nameVariables(fn: SFn, printed: () => string): SFn {
 // condition reads it. An integer stepped in a loop that does not test it (a tally) stays one. It
 // is assigned on every path into each return (`assignedBeforeEveryReturn`): a local set on one
 // arm only is a register's leftover, not the function's value (snowboardkids2's
-// `func_800154A8_160A8`, a void function whose lift returns what one path left in v0). No local
-// is the result of a function whose own declaration returns void (`SFn.declaredVoid`): kleod's
-// `void EepromTimerIntr(void);` lifts returning r0's leftover, and `result` would call that
-// leftover the function's value.
+// `func_800154A8_160A8`, a void function whose lift returns what one path left in v0). And it is
+// read nowhere ahead of its last write but in its own update (`readBeforeItsLastWrite`): such a
+// read is the coalescer's carrier holding another value first, tested or copied before the result
+// is computed. No local is the result of a function whose own declaration returns void
+// (`SFn.declaredVoid`): kleod's `void EepromTimerIntr(void);` lifts returning r0's leftover, and
+// `result` would call that leftover the function's value.
 //
 // Both are print-only like the parameter names: a local's name is no codegen fact, and the
 // collision check is the same.
@@ -405,7 +407,7 @@ function resultOf(fn: SFn, eligible: ReadonlySet<string>, otherRole: (v: string)
         (s.k !== 'for' || visit([s.init, s.inc])) &&
         stmtLists(s).every(visit),
     );
-  return visit(fn.body) && assignedBeforeEveryReturn(fn.body, r) ? r : undefined;
+  return visit(fn.body) && assignedBeforeEveryReturn(fn.body, r) && !readBeforeItsLastWrite(fn.body, r) ? r : undefined;
 }
 
 /** Whether `r` is assigned on every path into each `return` of `body`. Read conservatively, as a
@@ -457,6 +459,54 @@ function assignedBeforeEveryReturn(body: readonly Stmt[], r: string): boolean {
   };
   run(body, 'unset');
   return ok;
+}
+
+/** Whether `r` is read ahead of its last write, in the order the statements are written: anywhere
+ *  but a `return` or the value of an assignment to `r` itself (`r = r + x`, an accumulator). Such
+ *  a read is a second role: the coalescer's one carrier for a value tested or copied before the
+ *  result is computed (pokeemerald's `GetImprisonedMovesCount`: `v0 = 0; if (v0 < gBattlersCount)
+ *  { v3 = v0; …; v0 = v3; } return v0;`). A read after the last write reads the result itself. */
+function readBeforeItsLastWrite(body: readonly Stmt[], r: string): boolean {
+  let order = 0;
+  let lastWrite = -1;
+  let firstRead = Number.POSITIVE_INFINITY;
+  // a step of `r` (`r++`) is a write that reads only itself, as an accumulator's assignment is
+  const reads = (e: Expr) => {
+    for (const x of walkExprs([{ k: 'exprstmt', value: e }])) {
+      if (x.k === 'var' && x.name === r) {
+        firstRead = Math.min(firstRead, order);
+      } else if (x.k === 'postincr' && x.name === r) {
+        lastWrite = order;
+      }
+    }
+  };
+  const visit = (list: readonly Stmt[]) => {
+    for (const s of list) {
+      order++;
+      if (s.k === 'assign' && s.name === r) {
+        lastWrite = order;
+      } else if (s.k === 'dowhile') {
+        // written `do { … } while (c);`: the condition comes after the body
+        visit(s.body);
+        order++;
+        reads(s.cond);
+        continue;
+      } else if (s.k !== 'return') {
+        for (const e of stmtExprs(s)) {
+          reads(e);
+        }
+      }
+      if (s.k === 'for') {
+        visit([s.init, ...s.body, s.inc]);
+      } else {
+        for (const l of stmtLists(s)) {
+          visit(l);
+        }
+      }
+    }
+  };
+  visit(body);
+  return firstRead < lastWrite;
 }
 
 /** `fn` with every variable `renames` names spelled under its new name: its declaration and each

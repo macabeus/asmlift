@@ -251,6 +251,41 @@ describe('role names', () => {
     ).toContain('return v0;');
   });
 
+  // pokeemerald's GetImprisonedMovesCount: `v0 = 0; if (v0 < gBattlersCount) { v3 = v0; …; v0 = v3; }`
+  test('the result is not read ahead of its last write, save by its own update', () => {
+    const ret: Stmt = { k: 'return', value: v('v0') };
+    const named = (locals: string[], body: Stmt[]) => cBackend.emit(fn(locals, body, s32));
+    // the carrier's constant tested and copied before the count is written back
+    const carried: Stmt[] = [
+      set('v0', c(0)),
+      {
+        k: 'if',
+        cond: lt('v0', 7),
+        then: [
+          set('v1', v('v0')),
+          work(v('v1')),
+          set('v1', { k: 'bin', op: '+', l: v('v1'), r: c(1) }),
+          set('v0', v('v1')),
+        ],
+        else: [],
+      },
+      ret,
+    ];
+    expect(named(['v0', 'v1'], carried)).toContain('return v0;');
+    // an accumulator reads itself only in its own update
+    const sum: Stmt[] = [
+      set('v0', c(0)),
+      { k: 'while', cond: v('a0'), body: [set('v0', { k: 'bin', op: '+', l: v('v0'), r: v('a0') }), work()] },
+      ret,
+    ];
+    expect(named(['v0'], sum)).toContain('return result;');
+    // a read after the last write reads the result itself, a do-while's condition included
+    expect(named(['v0'], [set('v0', c(3)), work(v('v0')), ret])).toContain('return result;');
+    expect(
+      named(['v0'], [{ k: 'dowhile', cond: v('v0'), body: [set('v0', { k: 'call', fn: 'g', args: [] })] }, ret]),
+    ).toContain('return result;');
+  });
+
   // kleod's EepromTimerIntr, declared `void EepromTimerIntr(void);` and lifted returning r0
   test('no local is the result of a function its own declaration says returns void', () => {
     const body: Stmt[] = [set('v0', c(0)), work(), { k: 'return', value: v('v0') }];
