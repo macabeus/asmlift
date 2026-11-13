@@ -51,7 +51,14 @@ describe('refuses what would otherwise decompile at a guessed arity', () => {
   test('a misspelled key, which would simply do nothing', () => {
     expect(validatePrototypes({ f: { returnVoid: true } })).toEqual([
       'f: unknown key "returnVoid" (expected "params", "returnsVoid", "returns", "returnLayout", "wordParams", ' +
-        '"byValueParams", "byValueLayouts", "variadicParams" or "fromContext")',
+        '"byValueParams", "byValueLayouts", "variadicParams", "fromContext", "paramNames" or "declaredVoid")',
+    ]);
+  });
+
+  test("the context's void on a stated own entry, which is true", () => {
+    expect(validatePrototypes({ f: { params: [], declaredVoid: true } })).toEqual([]);
+    expect(validatePrototypes({ f: { declaredVoid: false } })).toEqual([
+      'f: "declaredVoid" must be true where it is stated',
     ]);
   });
 

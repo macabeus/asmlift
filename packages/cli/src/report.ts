@@ -83,6 +83,9 @@ export async function decompileWithReport(
           inferredSymbols,
           mapSymbols,
           opts.contextGlobals,
+          name,
+          own.ownContextProto,
+          opts.roleNames === true,
         )
     : undefined;
 
@@ -168,6 +171,9 @@ function probedSource(
   inferredSymbols: Map<string, SymbolInfo>,
   mapSymbols: Map<string, SymbolInfo> | undefined,
   contextGlobals: ContextGlobals | undefined,
+  name: string,
+  ownContextProto: FnProto | undefined,
+  roleNames: boolean,
 ): string | undefined {
   try {
     const clone = structuredCloneFn(fn);
@@ -195,12 +201,15 @@ function probedSource(
       // The two forced readings are absent as in the trace: neither options type offers them.
       structuringOptions({
         target,
+        name,
         returnsVoid,
         prototypes,
         backend,
         symbols: mapSymbols,
         contextGlobals,
         inferredSymbols,
+        ownContextProto,
+        roleNames,
       }),
       (t) => backend.emit(t),
     );

@@ -542,6 +542,23 @@ export interface SFn {
   /** Each declared callee's return type as the project spells it, never printed: whether a call a
    *  pointer cell is compared with returns a pointer (l3/ptrcell.ts). */
   declaredReturns?: Readonly<Record<string, string>>;
+  /** The names the function's own declaration gives its parameters, in order (proto-context.ts
+   *  `ownParamNames`), set by the structurer from `StructureOptions.paramNames`. An emission
+   *  policy like `slotOrder`: no pass reads it, and the C-family printer prints the parameters
+   *  under these names where they pair one to one with `params` and collide with nothing
+   *  (l3/names.ts). Every pass keeps naming the parameters `aN` in the tree. */
+  paramNames?: readonly string[];
+  /** Print each loop counter as `i`/`j`/`k` and the one returned local as `result` (l3/names.ts),
+   *  an emission policy like `paramNames`. Set by the structurer where the caller asks for it
+   *  (`StructureOptions.roleNames`): the CLI, the benchmark and the web app do; the library's own
+   *  default keeps the structurer's `vN`, which is the name every test of a lift's shape reads. */
+  roleNames?: true;
+  /** The function's own declaration — the caller's stated entry or the context's own — returns
+   *  void, set by the structurer from `StructureOptions.declaredVoid` beside `roleNames`. The lift
+   *  may still return a value (the context's own entry does not bound the lift's return), and
+   *  l3/names.ts then names no local `result`: that name would say the function returns what its
+   *  own declaration says it does not. */
+  declaredVoid?: true;
   /** The emitted C is compiled AS C++. An emission policy like `slotOrder`. */
   dialect?: 'c++';
   /** The compiler parses a designated element in an initializer (`[8] = 2`) — a fact of its
@@ -1472,6 +1489,45 @@ export function stmtLists(s: Stmt): Stmt[][] {
     case 'caseEndGoto':
       return [];
   }
+}
+
+/** How a rename treats an ADDRESS of a renamed name (`&v`). The printed names rename it with the
+ *  rest. The coalescer and the register spelling keep it as it was: the coalescer's `addr` gap is
+ *  pinned in coalesce.test.ts ("KNOWN GAP, PINNED RATHER THAN FIXED"), because closing it changes
+ *  which candidates compile — a measured change, not this walk's to make. */
+export interface RenameOptions {
+  /** rename `addr` nodes too (default true) */
+  addresses?: boolean;
+}
+
+/** `e` with every mention of a variable `renames` names ({@link mentionedName}: a read, an
+ *  address, a step) spelled under its new name; an address only under `opts.addresses`. */
+export function renameInExpr(e: Expr, renames: ReadonlyMap<string, string>, opts: RenameOptions = {}): Expr {
+  const m = mapExprChildren(e, (c) => renameInExpr(c, renames, opts));
+  const name = m.k === 'addr' && opts.addresses === false ? undefined : mentionedName(m);
+  const to = name === undefined ? undefined : renames.get(name);
+  return to === undefined ? m : ({ ...m, name: to } as Expr);
+}
+
+/** `body` with every variable `renames` names spelled under its new name: each mention of it
+ *  ({@link renameInExpr}) and each assignment to it, at any depth, a `for`'s init and step
+ *  included. THE ONE RENAME WALK of L3: the coalescer's merge, the register spelling's phi split
+ *  and the printed names (l3/names.ts) all go through it, so a node kind that comes to name a
+ *  variable is one edit to `mentionedName`, never a declared name its use was not renamed to. */
+export function renameVariables(
+  body: readonly Stmt[],
+  renames: ReadonlyMap<string, string>,
+  opts: RenameOptions = {},
+): Stmt[] {
+  const target = (s: Stmt): Stmt => {
+    if (s.k === 'assign') {
+      const to = renames.get(s.name);
+      return to === undefined ? s : { ...s, name: to };
+    }
+    const m = mapStmtLists(s, (l) => l.map(target));
+    return m.k === 'for' ? { ...m, init: target(m.init), inc: target(m.inc) } : m;
+  };
+  return body.map((s) => target(mapStmtExprs(s, (e) => renameInExpr(e, renames, opts))));
 }
 
 /** The SETTER half of {@link stmtLists}: `s` with each of its nested lists replaced by `f` applied

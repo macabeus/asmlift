@@ -133,6 +133,21 @@ export interface FnProto {
    *  entry a `--context` lift was handed: a benchmark row publishes it so its `--proto` replay
    *  lifts as the harness did. On a callee's entry it is ignored. */
   fromContext?: boolean;
+  /** The NAMES a declaration gives its parameters, one per entry of a typed `params` list, in its
+   *  order — or, on an own entry that states nothing of its parameters (`{ "returnsVoid": true }`),
+   *  one per lifted parameter, put there only where the declaration's own list pairs one to one
+   *  (proto-context.ts `withOwnParamNames`). A context states it where every parameter is named, no
+   *  two alike. READ FOR NOTHING BUT THE PRINTED NAME of the function's own parameters (l3/names.ts,
+   *  through proto-context.ts `ownParamNames`): no lift, bound or call reads it, so an entry
+   *  carrying it lifts exactly as one without it. A callee's entry never keeps it. */
+  paramNames?: readonly string[];
+  /** ON THE FUNCTION'S OWN STATED ENTRY, `true` says its declaration context declares it void
+   *  where the entry itself does not (proto-context.ts `withOwnDeclaredVoid`): a `--proto` entry
+   *  restating the function takes the place of the context's own entry, and with it the void that
+   *  entry declared. READ FOR NOTHING BUT THE PRINTED NAMES (l3/names.ts names no local `result` in
+   *  such a function, `SFn.declaredVoid`): it is not `returnsVoid`, and no lift, bound or call reads
+   *  it, so an entry carrying it lifts exactly as one without it. */
+  declaredVoid?: true;
 }
 
 /** A struct or union a declaration spells: what it is, and its members as the header lists them.
@@ -1030,16 +1045,35 @@ export function validatePrototypes(value: unknown): string[] {
         key !== 'byValueParams' &&
         key !== 'byValueLayouts' &&
         key !== 'variadicParams' &&
-        key !== 'fromContext'
+        key !== 'fromContext' &&
+        key !== 'paramNames' &&
+        key !== 'declaredVoid'
       ) {
         problems.push(
           `${sym}: unknown key "${key}" (expected "params", "returnsVoid", "returns", "returnLayout", "wordParams", ` +
-            '"byValueParams", "byValueLayouts", "variadicParams" or "fromContext")',
+            '"byValueParams", "byValueLayouts", "variadicParams", "fromContext", "paramNames" or "declaredVoid")',
         );
       }
     }
     if ('fromContext' in proto && typeof (proto as { fromContext?: unknown }).fromContext !== 'boolean') {
       problems.push(`${sym}: "fromContext" must be a boolean`);
+    }
+    if ('declaredVoid' in proto && (proto as { declaredVoid?: unknown }).declaredVoid !== true) {
+      problems.push(`${sym}: "declaredVoid" must be true where it is stated`);
+    }
+    if ('paramNames' in proto) {
+      const names = (proto as { paramNames?: unknown }).paramNames;
+      const typed = (proto as { params?: unknown }).params;
+      if (
+        !Array.isArray(names) ||
+        !names.every((n) => typeof n === 'string' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(n)) ||
+        new Set(names).size !== names.length ||
+        (typed !== undefined && (!Array.isArray(typed) || typed.length !== names.length))
+      ) {
+        problems.push(
+          `${sym}: "paramNames" must be a list of distinct identifiers, one per entry of a "params" list where one is stated`,
+        );
+      }
     }
     const { params, returnsVoid, returns, returnLayout, wordParams, byValueParams, byValueLayouts, variadicParams } =
       proto as {

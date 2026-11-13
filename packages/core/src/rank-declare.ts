@@ -156,11 +156,15 @@ const DECL_RESERVED = new Set<string>([
   ).split(' '),
 ]);
 
-/** The emitter's own NAME GRAMMAR for storage it invents: parameters `a0, a1, …` (structure.ts
- *  names them positionally, so no rename can move one) and coalesced/temp locals `v0…`/`t0…`
- *  (structure.ts's `localNames` accepts exactly `/^[vt]\d+$/`). A global the target names with one
- *  of these names cannot be declared beside the C that spells it — see the refusal in `refsOf`,
- *  which is the one that kills the spelling rather than the line.
+/** The structurer's own NAME GRAMMAR for storage it invents: parameters `a0, a1, …` (structure.ts
+ *  names them positionally) and coalesced/temp locals `v0…`/`t0…` (structure.ts's `localNames`
+ *  accepts exactly `/^[vt]\d+$/`). This is the grammar of the TREE this module reads, not of the
+ *  printed C: the C-family printer renames parameters to their declared names and locals to role
+ *  names (`i`, `j`, `k`, `result`) at emit (l3/names.ts), after this check, refusing any name the
+ *  printed function already spells; so refusing a global spelled `aN` or `vN` here is
+ *  conservative where the rename would not print it.
+ *  A global the target names with one of these names cannot be declared beside the C that spells
+ *  it — see the refusal in `refsOf`, which is the one that kills the spelling rather than the line.
  *
  *  Checked as a grammar IN ADDITION to the tree's own bound names, because the collision that
  *  matters is the one the tree cannot show: `localNames` DROPS a local whose name a written

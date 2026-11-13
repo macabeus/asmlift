@@ -141,7 +141,7 @@ describe('the struct element of an array a declaration context declares', () => 
   test('laid out for the structurer on agbcc alone, the one compiler the declared spelling is measured on', () => {
     const contextGlobals = globalsFromContext(CTX, 'c');
     const laid = (target: typeof ARMV4T_AGBCC) =>
-      structuringOptions({ target, returnsVoid: true, prototypes: {}, backend: cBackend, contextGlobals })
+      structuringOptions({ target, name: 'f', returnsVoid: true, prototypes: {}, backend: cBackend, contextGlobals })
         .contextArrayElements;
     expect(laid(ARMV4T_AGBCC)?.has('gBgInfo')).toBe(true);
     // a union element, however spelled, is no struct the IR names

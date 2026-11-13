@@ -25,12 +25,15 @@ describe('a real row prototype table', () => {
     expect(p).toEqual({
       callee: { returns: 's32', params: ['s32'] },
       other: { params: 3 },
-      self: { returnsVoid: true, params: ['s32'], fromContext: true },
+      // …carrying the names its declaration gives its parameters, which only the printer reads
+      self: { returnsVoid: true, params: ['s32'], paramNames: ['x'], fromContext: true },
     });
     expect(validatePrototypes(p)).toEqual([]);
-    // a manifest entry for the row states it, and the context's is not carried
+    // a manifest entry for the row states it, and the context's is not carried — but for the void
+    // it declares, which only the printed names read (`declaredVoid`)
     expect(rowPrototypes({ self: { params: 2 } }, at(CTX), 'c', 'self', undefined, ARMV4T_AGBCC)?.self).toEqual({
       params: 2,
+      declaredVoid: true,
     });
     // nor is one the bound cannot lay out
     const variadic = 'typedef signed long s32; void self(s32 x, ...);';
@@ -75,7 +78,8 @@ describe('a real row prototype table', () => {
     const p = rowPrototypes({ self: { returnsVoid: true } }, at(CTX), 'c', 'self', undefined, ARMV4T_AGBCC);
     const asm = 'self:\n  mflr r0\n  bl callee\n  blr\n';
     expect(referencedPrototypes(p, asm, 'self')).toEqual({
-      self: { returnsVoid: true },
+      // the context's `void self(s32 x);` names the parameter the manifest's entry leaves unstated
+      self: { returnsVoid: true, paramNames: ['x'] },
       callee: { returns: 's32', params: ['s32'] },
     });
     expect(referencedPrototypes(undefined, asm, 'self')).toBeUndefined();

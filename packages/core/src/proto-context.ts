@@ -1,3 +1,4 @@
+import { returnedAggregate, returnsInMemory } from './aggregate';
 import { constantValue, integerLiteral } from './cdecl/constant';
 import type { Tokens } from './cdecl/lex';
 import {
@@ -64,11 +65,14 @@ import type { TargetDescription } from './target';
 type LayoutOf = (t: DeclaredType, depth: number) => AggregateLayout | undefined;
 
 /** The callee prototypes a preprocessed declaration context states. `language` decides what an
- *  empty parameter list means: none in C++, unstated in C (a pre-ANSI declaration). */
-export function prototypesFromContext(src: string, language: Language): Prototypes {
+ *  empty parameter list means: none in C++, unstated in C (a pre-ANSI declaration). With `names`,
+ *  each entry also carries the names its declaration gives its parameters (`FnProto.paramNames`),
+ *  which only the printed names of the function being lifted read: a reader that hands the table
+ *  on to a lift asks for them, one that reads a callee's types does not need them. */
+export function prototypesFromContext(src: string, language: Language, opts?: { names?: boolean }): Prototypes {
   const ctx = parseDeclarations(src, language);
   const table = typeTable(ctx);
-  return functionPrototypes(ctx, table, layoutReader(ctx, table));
+  return functionPrototypes(ctx, table, layoutReader(ctx, table), opts?.names === true);
 }
 
 /** What a preprocessed declaration context states about the globals it declares, beyond their
@@ -1170,7 +1174,7 @@ type ParameterList =
 /** Every function the declarations name by a plain identifier, keyed by it. A declaration that
  *  spells no type is a constructor's, a destructor's or a conversion operator's; one that defines a
  *  body, or spells a `class`, declares no C function. */
-function functionPrototypes(ctx: ParsedContext, table: TypeTable, layoutOf: LayoutOf): Prototypes {
+function functionPrototypes(ctx: ParsedContext, table: TypeTable, layoutOf: LayoutOf, names: boolean): Prototypes {
   const found = new Map<string, Read | null>();
   const written = typedefTypes(ctx);
   // a function one of whose declarations retypes a parameter with `mode`, which gives it the type
@@ -1227,6 +1231,7 @@ function functionPrototypes(ctx: ParsedContext, table: TypeTable, layoutOf: Layo
     byValueParams: _copies,
     byValueLayouts: _layouts,
     variadicParams: _fixed,
+    paramNames: _names,
     ...rest
   }: FnProto): FnProto => rest;
   for (const d of ctx.declarations) {
@@ -1270,7 +1275,10 @@ function functionPrototypes(ctx: ParsedContext, table: TypeTable, layoutOf: Layo
       // (`byValueRefusal`, `variadicRefusal`): the call would take the arity guess they exist to
       // refuse. The entry kept is the later declaration's, spelled as written.
       const typed = reading('dropped');
-      const [proto, key] = unreadParams.has(x.name) ? [returnOnly(read), returnOnly(typed)] : [read, typed];
+      // …and the names it gives its parameters, on the entry and never on the `key`: two
+      // declarations that name a parameter differently declare one function (C99 6.7.5.3p15)
+      const named = names ? withParamNames(read, fn) : read;
+      const [proto, key] = unreadParams.has(x.name) ? [returnOnly(read), returnOnly(typed)] : [named, typed];
       const lists = [parameterList(fn, ctx, table.typedefs, (t) => passingOf(t, table, written))];
       const prior = found.get(x.name);
       const had =
@@ -1292,6 +1300,24 @@ function functionPrototypes(ctx: ParsedContext, table: TypeTable, layoutOf: Layo
     }
   }
   return out;
+}
+
+/** `p` with the names `fn` gives its parameters (`FnProto.paramNames`), where it has a typed
+ *  `params` list of at least one parameter and names every one of them, no two alike; `p` as it is
+ *  otherwise. A declaration that leaves one parameter unnamed (`void f(u8, s16 x);`) names none:
+ *  a list that pairs a name with only some positions is a list a reader could misalign. */
+function withParamNames(p: FnProto, fn: Extract<Derivation, { kind: 'function' }>): FnProto {
+  const names = (fn.params ?? []).map((q) => q.declarator.name);
+  if (
+    !Array.isArray(p.params) ||
+    p.params.length === 0 ||
+    p.params.length !== names.length ||
+    !names.every((n): n is string => n !== undefined && WORD.test(n)) ||
+    new Set(names).size !== names.length
+  ) {
+    return p;
+  }
+  return { ...p, paramNames: names };
 }
 
 /** Whether declarations that state no parameters (`unstated`, each `()` or a list this could not
@@ -1596,7 +1622,17 @@ export function withContextPrototypes(
   symbols: SymbolMap | undefined,
   target: Pick<TargetDescription, 'doubleArgWords'>,
 ): Prototypes {
-  const { [own]: _own, ...callees } = contextPrototypesUnder(context, symbols, target);
+  const { [own]: _own, ...heardCallees } = contextPrototypesUnder(context, symbols, target);
+  // a callee's parameter names are read by nothing (`FnProto.paramNames`), so they are not carried
+  const callees = Object.fromEntries(
+    Object.entries(heardCallees).map(([name, p]): [string, FnProto] => {
+      if (p.paramNames === undefined) {
+        return [name, p];
+      }
+      const { paramNames: _names, ...rest } = p;
+      return [name, rest];
+    }),
+  );
   const out: Prototypes = { ...callees, ...stated };
   for (const [name, p] of Object.entries(stated ?? {})) {
     const heard = Object.hasOwn(callees, name) ? callees[name] : undefined;
@@ -1690,6 +1726,125 @@ export function withOwnContextMark(
   }
   const entry = ownContextEntry(context, own);
   return entry === undefined ? prototypes : { ...prototypes, [own]: { ...entry, fromContext: true } };
+}
+
+/** `prototypes` with the parameter names the context's declaration of `own` gives
+ *  (`FnProto.paramNames`) carried on the table's own entry, where the table has one — stated, or
+ *  carried under the mark — that names none, and that either states a typed list of as many
+ *  parameters or STATES NOTHING OF ITS PARAMETERS (`{ "returnsVoid": true }`: no list, count, word
+ *  or by-value key). In the second case the names pair with the lifted parameters by position, so
+ *  they are carried only where the declaration itself would hand them over ({@link ownParamNames}
+ *  on the context's entry, on `target`: every parameter one word, no variadic list, no struct
+ *  returned through memory).
+ *  A table without an entry for `own` is returned as it is: the context's own entry reaches the lift
+ *  under the mark (`withOwnContextMark`) or beside the table (`ownContextEntry`), and either carries
+ *  its names. Names are read for nothing but printing (l3/names.ts), so a stated entry that takes
+ *  them still bounds and lifts as it did; this is how a row whose manifest restates its own
+ *  function's types, or states only its void return, still prints the header's names. */
+export function withOwnParamNames(
+  prototypes: Prototypes | undefined,
+  own: string,
+  context: Prototypes,
+  target: TargetDescription,
+): Prototypes | undefined {
+  const p = prototypes !== undefined && Object.hasOwn(prototypes, own) ? prototypes[own] : undefined;
+  const heard = Object.hasOwn(context, own) ? context[own] : undefined;
+  const names = heard?.paramNames;
+  if (p === undefined || p === null || p.paramNames !== undefined || names === undefined) {
+    return prototypes;
+  }
+  const pairs = Array.isArray(p.params)
+    ? p.params.length === names.length
+    : statesNoParams(p) && ownParamNames({ [own]: heard! }, own, target) !== undefined;
+  return pairs ? { ...prototypes, [own]: { ...p, paramNames: names } } : prototypes;
+}
+
+/** `prototypes` with `declaredVoid` (`FnProto.declaredVoid`) on the table's own stated entry for
+ *  `own`, where the context's declaration of `own` returns void and that entry does not say so
+ *  itself; otherwise the table as it is. An entry carried under the mark is the context's own and
+ *  states its void already. Read for nothing but the printed names, so the entry lifts as it did. */
+export function withOwnDeclaredVoid(
+  prototypes: Prototypes | undefined,
+  own: string,
+  context: Prototypes,
+): Prototypes | undefined {
+  const p = prototypes !== undefined && Object.hasOwn(prototypes, own) ? prototypes[own] : undefined;
+  const heard = Object.hasOwn(context, own) ? context[own] : undefined;
+  if (
+    p === undefined ||
+    p === null ||
+    p.fromContext === true ||
+    p.declaredVoid === true ||
+    declaresVoidReturn(p) ||
+    !declaresVoidReturn(heard)
+  ) {
+    return prototypes;
+  }
+  return { ...prototypes, [own]: { ...p, declaredVoid: true } };
+}
+
+/** Whether `p` says nothing about its parameters: no list or count, and no key that describes one. */
+function statesNoParams(p: FnProto): boolean {
+  return (
+    p.params === undefined &&
+    p.wordParams === undefined &&
+    p.byValueParams === undefined &&
+    p.byValueLayouts === undefined &&
+    p.variadicParams === undefined
+  );
+}
+
+/** The names the function `own` prints its parameters under (l3/names.ts), from the entry that
+ *  states them — the table's, stated or marked, else the context's own entry handed beside it — where
+ *  that entry's declared parameters pair one to one, in order, with the argument words the lift
+ *  numbers its parameters by. Undefined, so every parameter keeps its `aN`, where they may not:
+ *   - an entry that names no parameter, or states a count or a variadic list — an entry that
+ *     states nothing of its parameters keeps the names `withOwnParamNames` checked against the
+ *     declaration's own list before carrying them there;
+ *   - a parameter that is not ONE WORD (`paramClassOf`): a 64-bit one takes a register pair, a
+ *     floating one travels in the FPU's own registers on mwcc and IDO, and a struct passed by value
+ *     fills any number of words (kleod's `sub_0800BEF0`) — each moves every later parameter off
+ *     its position;
+ *   - a struct or union returned by value through memory, or where `target`'s rule cannot say
+ *     (aggregate.ts `returnsInMemory`), whose hidden pointer takes argument 0 — one it hands back in
+ *     registers takes no argument word (agbcc's one-word struct in r0), as
+ *     the lift's own bound reads it (`ownArgumentWordsOn`);
+ *   - a C++ member function or a mangled free function, whose receiver is no declared parameter.
+ *  The lifted parameter count is checked against the list where the names are printed, and a
+ *  function lifted with any other count keeps every `aN` (kleod's `sub_0803F68C`, declared with
+ *  three and lifted with four). */
+export function ownParamNames(
+  prototypes: Prototypes | undefined,
+  own: string,
+  target: TargetDescription,
+  ownContextProto?: FnProto,
+): readonly string[] | undefined {
+  const stated = prototypes !== undefined && Object.hasOwn(prototypes, own) ? prototypes[own] : undefined;
+  // the entry that names them: a table entry the symbol map supplied names none, and may stand
+  // beside the context's own entry; each entry's names pair with its own list, checked below
+  const p = [stated, ownContextProto].find((e) => e?.paramNames !== undefined);
+  const names = p?.paramNames;
+  if (
+    p === undefined ||
+    p === null ||
+    names === undefined ||
+    p.variadicParams !== undefined ||
+    (declaresAggregateReturn(p) && returnsInMemory(returnedAggregate(p), target) !== false) ||
+    demangledName(own) !== null ||
+    implicitArgumentWords(own) !== 0
+  ) {
+    return undefined;
+  }
+  if (!Array.isArray(p.params)) {
+    // an entry that states nothing of its parameters carries names only where the declaration's
+    // own list passed this check when they were put there (`withOwnParamNames`)
+    return statesNoParams(p) ? names : undefined;
+  }
+  const params = p.params;
+  if (params.length !== names.length) {
+    return undefined;
+  }
+  return params.every((_, k) => paramClassOf(p, params, k) === 'word') ? names : undefined;
 }
 
 /** The caller's stated entry for `own`, with the struct or union its stated `returns` names laid out

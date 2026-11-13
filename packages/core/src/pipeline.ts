@@ -116,6 +116,11 @@ export interface DecompileOptions {
    *  `fromContext` is read as this, and taken out of the table (proto-context.ts
    *  `splitOwnContext`). */
   ownContextProto?: FnProto;
+  /** Print each loop counter and the one returned local under a role name (`i`/`j`/`k`, `result`;
+   *  l3/names.ts). Off by default, so a lift reads the structurer's own `vN`; the CLI, the
+   *  benchmark and the web app turn it on. A name is no codegen fact: it moves no score. Both
+   *  C-family backends print them (C and C++); the Pascal backend does not. */
+  roleNames?: boolean;
   /** OPTIONAL bodies of callees the input does not define, found elsewhere by the driver (the CLI
    *  reads them off `tools.asmlift.elf`): each answers what its callee can read of its arguments
    *  where the input holds no label of that name (frontend/callee-body.ts). Absent ⇒ only the
@@ -298,6 +303,7 @@ function runTower(
     // tree this backend would refuse.
     structuringOptions({
       target,
+      name,
       returnsVoid: declaresVoidReturn(prototypes[name]),
       prototypes,
       backend,
@@ -308,6 +314,8 @@ function runTower(
       contextGlobals: opts.contextGlobals,
       inferredSymbols,
       orderLicensedGlobals: orderLicensed,
+      ownContextProto: own.ownContextProto,
+      roleNames: opts.roleNames,
     }),
     (t) => backend.emit(t),
     {},

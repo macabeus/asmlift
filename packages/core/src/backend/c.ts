@@ -18,9 +18,12 @@ export const cBackend: LanguageBackend = {
   emit(fn: SFn): string {
     // The SAME declarator placement the local list and the struct-field printer use, so one
     // function cannot spell the `*` on the type in its signature and on the declarator in its
-    // body.
-    const params = fn.params.map((p) => cDeclare(p.type, p.name)).join(', ') || 'void';
-    return emitCFamily(`${cType(fn.retType)} ${fn.name}(${params})`, fn);
+    // body. Spelled over the function as named (cfamily.ts `emitCFamily`, l3/names.ts).
+    return emitCFamily(
+      (named) =>
+        `${cType(named.retType)} ${named.name}(${named.params.map((p) => cDeclare(p.type, p.name)).join(', ') || 'void'})`,
+      fn,
+    );
   },
   comment: cComment,
 };

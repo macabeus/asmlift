@@ -15,8 +15,8 @@ import type { Expr, SFn, Stmt } from './ast';
 import {
   exprChildren,
   isLoop,
-  mapExprChildren,
   mentionedName,
+  renameVariables,
   stmtChildren,
   stmtExprs,
   switchArmSuccessors,
@@ -175,27 +175,8 @@ function spans(body: Stmt[]): Map<string, Span> {
   return out;
 }
 function rename(body: Stmt[], from: string, to: string): Stmt[] {
-  const inExpr = (e: Expr): Expr =>
-    (e.k === 'var' || e.k === 'postincr') && e.name === from ? { ...e, name: to } : mapExprChildren(e, inExpr);
-  const inStmt = (s: Stmt): Stmt => {
-    const r = { ...s } as Record<string, unknown>;
-    if (s.k === 'assign' && s.name === from) r.name = to;
-    for (const key of ['value', 'lval', 'cond', 'scrutinee'] as const) {
-      const v = (s as Record<string, unknown>)[key];
-      if (v !== undefined) r[key] = inExpr(v as Expr);
-    }
-    for (const key of ['then', 'else', 'body', 'default'] as const) {
-      const v = (s as Record<string, unknown>)[key];
-      if (Array.isArray(v)) r[key] = (v as Stmt[]).map(inStmt);
-    }
-    if (s.k === 'for') {
-      r.init = inStmt(s.init);
-      r.inc = inStmt(s.inc);
-    }
-    if (s.k === 'switch') r.cases = s.cases.map((c) => ({ ...c, body: c.body.map(inStmt) }));
-    return r as Stmt;
-  };
-  return body.map(inStmt);
+  // no `&from`: the pinned gap in coalesce.test.ts (ast.ts `RenameOptions`)
+  return renameVariables(body, new Map([[from, to]]), { addresses: false });
 }
 /** One candidate merge under consideration: absorb `a` into `b`. */
 export interface MergePair {

@@ -784,6 +784,9 @@ function structureRanked(
     spillSlotOrder,
     declaredArgs,
     declaredReturns,
+    paramNames: declaredParamNames,
+    roleNames = false,
+    declaredVoid = false,
     dialect,
     designatedInitializers = false,
     strictPointerConversions = false,
@@ -8616,6 +8619,9 @@ function structureRanked(
     // absent stays absent: the backend asks "is a direction known?", and there is no third state
     // at this boundary — `structureOptionsFor` dropped the target's `'unknown'` already.
     ...(spillSlotOrder !== undefined ? { slotOrder: spillSlotOrder } : {}),
+    ...(declaredParamNames !== undefined ? { paramNames: declaredParamNames } : {}),
+    ...(roleNames ? { roleNames: true as const } : {}),
+    ...(roleNames && declaredVoid ? { declaredVoid: true as const } : {}),
     ...calledOnly({ declaredArgs, declaredReturns }, body),
     ...(dialect !== undefined ? { dialect } : {}),
     ...(designatedInitializers ? { designators: true as const } : {}),

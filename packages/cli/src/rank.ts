@@ -41,6 +41,8 @@ export interface RankOptions {
   contextGlobals?: ContextGlobals;
   /** same contract as DecompileOptions.ownContextProto */
   ownContextProto?: FnProto;
+  /** same contract as DecompileOptions.roleNames */
+  roleNames?: boolean;
   /** same contract as DecompileOptions.calleeBodies */
   calleeBodies?: CalleeBodies;
   /** a project's own toolchain — overrides the compiler registry */
@@ -86,6 +88,7 @@ export const enumerateRanked = (name: string, asm: string, target: TargetDescrip
     symbols: opts.symbols,
     ...(opts.contextGlobals ? { contextGlobals: opts.contextGlobals } : {}),
     ...(opts.ownContextProto ? { ownContextProto: opts.ownContextProto } : {}),
+    ...(opts.roleNames ? { roleNames: true } : {}),
     ...(opts.calleeBodies ? { calleeBodies: opts.calleeBodies } : {}),
     ...(opts.onEnumerationError ? { onEnumerationError: opts.onEnumerationError } : {}),
     ...perSiteSenseProbe(),
