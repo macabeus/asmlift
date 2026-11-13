@@ -33,6 +33,11 @@ describe('polish: the tail of a void function', () => {
     expect(polished(cBackend, { literal: true }).emit(fn)).toContain('    return;');
   });
 
+  test('kept beside an early return: gcc lays its blocks out by the returns it is given', () => {
+    const fn = fnOf([{ k: 'if', cond: v('a0'), then: [call('g')], else: [call('h'), ret] }, call('k'), ret]);
+    expect(pc.emit(fn)).toMatch(/k\(\);\n {4}return;\n\}/);
+  });
+
   test('a final switch keeps its returns: `break` there is other code on mwcc and IDO', () => {
     const fn = fnOf([
       {
