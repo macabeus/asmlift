@@ -196,7 +196,10 @@ export function nameVariables(fn: SFn, printed: () => string): SFn {
 // function being one of those returns — and no counter or cursor, which would give it two roles:
 // not a loop's counter, not a pointer stepped by one inside a loop (a cursor returned where it
 // stopped, ac-decomp's `mMck_search_sep`), and not an integer stepped by one inside a loop whose
-// condition reads it. An integer stepped in a loop that does not test it (a tally) stays one.
+// condition reads it. An integer stepped in a loop that does not test it (a tally) stays one. No
+// local is the result of a function whose own declaration returns void (`SFn.declaredVoid`):
+// kleod's `void EepromTimerIntr(void);` lifts returning r0's leftover, and `result` would call that
+// leftover the function's value.
 //
 // Both are print-only like the parameter names: a local's name is no codegen fact, and the
 // collision check is the same.
@@ -369,11 +372,11 @@ function counts(ws: readonly Write[], loop: Loop): boolean {
   );
 }
 
-/** The local every `return` of `fn` returns, bare, where the last statement is one of them and it
- *  plays no other role (`otherRole`). */
+/** The local every `return` of `fn` returns, bare, where the last statement is one of them, it
+ *  plays no other role (`otherRole`) and the function's own declaration is not void. */
 function resultOf(fn: SFn, eligible: ReadonlySet<string>, otherRole: (v: string) => boolean): string | undefined {
   const last = fn.body[fn.body.length - 1];
-  if (last?.k !== 'return' || last.value?.k !== 'var') {
+  if (fn.declaredVoid || last?.k !== 'return' || last.value?.k !== 'var') {
     return undefined;
   }
   const r = last.value.name;

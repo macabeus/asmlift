@@ -14,7 +14,7 @@
 import { aggregateTag, aggregateType } from './aggregate';
 import type { IrType } from './ir/types';
 import type { LanguageBackend } from './l3/ast';
-import type { FnProto, Prototypes } from './proto';
+import { type FnProto, type Prototypes, declaresVoidReturn } from './proto';
 import { type ContextGlobals, ownParamNames } from './proto-context';
 import type { StructureOptions } from './structure/structure-options';
 import type { SymbolInfo } from './symbols';
@@ -49,8 +49,9 @@ export interface StructuringInputs {
   /** The order half of the same reading (raise/globalshape.ts `orderLicensedGlobals`). */
   orderLicensedGlobals?: ReadonlySet<string>;
   /** The context's own declaration of `name`, split out of the table (proto-context.ts
-   *  `splitOwnContext`). Read here for the printed parameter names only (`SFn.paramNames`, from
-   *  `ownParamNames` over `prototypes` and this entry), derived here and at no site: the four
+   *  `splitOwnContext`). Read here for the printed names only: the parameter names
+   *  (`SFn.paramNames`, from `ownParamNames` over `prototypes` and this entry) and whether either
+   *  entry declares a void return (`SFn.declaredVoid`), each derived here and at no site: the four
    *  sites once each called `ownParamNames` by hand, and the cli probe's call read the caller's
    *  table before the symbol merge while its structuring read the merged one, so the probe printed
    *  declared names the headline lift refused. */
@@ -65,6 +66,7 @@ export interface StructuringInputs {
 export function structuringOptions(inputs: StructuringInputs): StructureOptions & { joinPastReturns?: boolean } {
   const { target, returnsVoid, prototypes, backend, name, ownContextProto } = inputs;
   const paramNames = ownParamNames(prototypes, name, target, ownContextProto);
+  const stated = Object.hasOwn(prototypes, name) ? prototypes[name] : undefined;
   return {
     ...structureOptionsFor(target, returnsVoid, prototypes),
     spellSwitchFallthrough: backend.spellsSwitchFallthrough,
@@ -80,6 +82,11 @@ export function structuringOptions(inputs: StructuringInputs): StructureOptions 
     ...(inputs.orderLicensedGlobals?.size ? { orderLicensedGlobals: inputs.orderLicensedGlobals } : {}),
     ...(paramNames?.length ? { paramNames } : {}),
     ...(inputs.roleNames ? { roleNames: true } : {}),
+    // read by the role names alone, so carried only beside them: the context's own entry does not
+    // bound the lift's return, so a function it declares void may still be lifted returning a value
+    ...(inputs.roleNames && (declaresVoidReturn(stated) || declaresVoidReturn(ownContextProto))
+      ? { declaredVoid: true }
+      : {}),
   };
 }
 

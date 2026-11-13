@@ -553,6 +553,12 @@ export interface SFn {
    *  (`StructureOptions.roleNames`): the CLI, the benchmark and the web app do; the library's own
    *  default keeps the structurer's `vN`, which is the name every test of a lift's shape reads. */
   roleNames?: true;
+  /** The function's own declaration — the caller's stated entry or the context's own — returns
+   *  void, set by the structurer from `StructureOptions.declaredVoid` beside `roleNames`. The lift
+   *  may still return a value (the context's own entry does not bound the lift's return), and
+   *  l3/names.ts then names no local `result`: that name would say the function returns what its
+   *  own declaration says it does not. */
+  declaredVoid?: true;
   /** The emitted C is compiled AS C++. An emission policy like `slotOrder`. */
   dialect?: 'c++';
   /** The compiler parses a designated element in an initializer (`[8] = 2`) — a fact of its

@@ -229,6 +229,19 @@ describe('role names', () => {
     expect(cBackend.emit(fn(['v0'], counted, s32))).toContain('return i;');
   });
 
+  // kleod's EepromTimerIntr, declared `void EepromTimerIntr(void);` and lifted returning r0
+  test('no local is the result of a function its own declaration says returns void', () => {
+    const body: Stmt[] = [set('v0', c(0)), work(), { k: 'return', value: v('v0') }];
+    expect(cBackend.emit({ ...fn(['v0'], body, s32), declaredVoid: true })).toContain('return v0;');
+    // end to end: the context's own entry says void, the lift still returns r0's leftover
+    const asm =
+      'f:\n\tpush\t{r4, lr}\n\tbl\tg\n\tadd\tr4, r0, #0\n\tbl\th\n\tadd\tr0, r4, #0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    const lift = (ownContextProto?: FnProto) =>
+      decompile('f', asm, ARMV4T_AGBCC, { roleNames: true, ...(ownContextProto ? { ownContextProto } : {}) }).source;
+    expect(lift()).toContain('return result;');
+    expect(lift({ params: [], returns: 'void' })).toContain('return v0;');
+  });
+
   test('only where the caller asks for them', () => {
     const body: Stmt[] = [set('v0', c(0)), work(), { k: 'return', value: v('v0') }];
     const { roleNames: _asked, ...plain } = fn(['v0'], body, s32);

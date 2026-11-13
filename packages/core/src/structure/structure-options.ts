@@ -203,6 +203,9 @@ export interface StructureOptions extends ArithCompilerFacts {
   paramNames?: readonly string[];
   // Print each loop counter and the returned local under a role name (`SFn.roleNames`, l3/names.ts).
   roleNames?: boolean;
+  // The function's own declaration, stated or the context's, returns void (`SFn.declaredVoid`).
+  // Built by `structuringOptions`, and only beside `roleNames`, its one reader.
+  declaredVoid?: boolean;
   // The compiler parses a designated initializer element (`SFn.designators`; the compiler behavior
   // of the same name says which do).
   designatedInitializers?: boolean;
