@@ -207,9 +207,12 @@ export function nameVariables(fn: SFn, printed: () => string): SFn {
 // function being one of those returns — and no counter or cursor, which would give it two roles:
 // not a loop's counter, not a pointer stepped by one inside a loop (a cursor returned where it
 // stopped, ac-decomp's `mMck_search_sep`), and not an integer stepped by one inside a loop whose
-// condition reads it. An integer stepped in a loop that does not test it (a tally) stays one. No
-// local is the result of a function whose own declaration returns void (`SFn.declaredVoid`):
-// kleod's `void EepromTimerIntr(void);` lifts returning r0's leftover, and `result` would call that
+// condition reads it. An integer stepped in a loop that does not test it (a tally) stays one. It
+// is assigned on every path into each return (`assignedBeforeEveryReturn`): a local set on one
+// arm only is a register's leftover, not the function's value (snowboardkids2's
+// `func_800154A8_160A8`, a void function whose lift returns what one path left in v0). No local
+// is the result of a function whose own declaration returns void (`SFn.declaredVoid`): kleod's
+// `void EepromTimerIntr(void);` lifts returning r0's leftover, and `result` would call that
 // leftover the function's value.
 //
 // Both are print-only like the parameter names: a local's name is no codegen fact, and the
@@ -402,7 +405,58 @@ function resultOf(fn: SFn, eligible: ReadonlySet<string>, otherRole: (v: string)
         (s.k !== 'for' || visit([s.init, s.inc])) &&
         stmtLists(s).every(visit),
     );
-  return visit(fn.body) ? r : undefined;
+  return visit(fn.body) && assignedBeforeEveryReturn(fn.body, r) ? r : undefined;
+}
+
+/** Whether `r` is assigned on every path into each `return` of `body`. Read conservatively, as a
+ *  forward walk that may answer "unset" for a path that sets it: an `if` sets it only where both
+ *  arms do, a `while` or `for` body may run no times, a `do`-`while` body counts only where nothing
+ *  in it jumps out early (`break`, `continue`, a `goto`), and a `switch` sets nothing. A statement
+ *  entered with the local unset may still find it set, because a write is never undone, so each
+ *  body is walked from the state its statement was entered with. */
+function assignedBeforeEveryReturn(body: readonly Stmt[], r: string): boolean {
+  type Reach = 'set' | 'unset' | 'gone';
+  const join = (a: Reach, b: Reach): Reach =>
+    a === 'gone' ? b : b === 'gone' ? a : a === 'set' && b === 'set' ? 'set' : 'unset';
+  const jumpsOut = (list: readonly Stmt[]): boolean =>
+    list.some(
+      (s) =>
+        s.k === 'break' || s.k === 'continue' || s.k === 'goto' || s.k === 'caseEndGoto' || stmtLists(s).some(jumpsOut),
+    );
+  let ok = true;
+  const run = (list: readonly Stmt[], entered: Reach): Reach => {
+    let at = entered;
+    for (const s of list) {
+      if (at === 'gone') {
+        return at;
+      }
+      if (s.k === 'assign' && s.name === r) {
+        at = 'set';
+      } else if (s.k === 'return') {
+        ok &&= at === 'set';
+        at = 'gone';
+      } else if (s.k === 'break' || s.k === 'continue' || s.k === 'goto' || s.k === 'caseEndGoto') {
+        at = 'gone';
+      } else if (s.k === 'if') {
+        at = join(run(s.then, at), run(s.else, at));
+      } else if (s.k === 'for') {
+        at = run([s.init], at);
+        run([...s.body, s.inc], at);
+      } else if (s.k === 'dowhile') {
+        const end = run(s.body, at);
+        at = jumpsOut(s.body) ? at : end;
+      } else {
+        // a `while`, a `switch` or any other statement holding lists: each is walked for its
+        // returns, and none is read as setting the local
+        for (const l of stmtLists(s)) {
+          run(l, at);
+        }
+      }
+    }
+    return at;
+  };
+  run(body, 'unset');
+  return ok;
 }
 
 /** `fn` with every variable `renames` names spelled under its new name: its declaration and each

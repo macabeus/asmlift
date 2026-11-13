@@ -229,6 +229,28 @@ describe('role names', () => {
     expect(cBackend.emit(fn(['v0'], counted, s32))).toContain('return i;');
   });
 
+  // snowboardkids2's func_800154A8_160A8 (kmc): `if (n != 0) { do { … } while (…); v1 = …; } return v1;`
+  test('the result is assigned on every path into each return', () => {
+    const ret: Stmt = { k: 'return', value: v('v0') };
+    const loop = (body: Stmt[]): Stmt => ({ k: 'dowhile', cond: v('a0'), body });
+    const named = (body: Stmt[]) => cBackend.emit(fn(['v0'], body, s32));
+    // set inside an if with no else: unset on the other path
+    expect(named([{ k: 'if', cond: v('a0'), then: [work(), set('v0', c(1))], else: [] }, ret])).toContain('return v0;');
+    // set in a while body, which may run no times
+    expect(named([{ k: 'while', cond: v('a0'), body: [set('v0', c(1))] }, ret])).toContain('return v0;');
+    // unset ahead of an early return
+    expect(named([{ k: 'if', cond: v('a0'), then: [ret], else: [] }, set('v0', c(1)), ret])).toContain('return v0;');
+    // set in both arms, or in a do-while body that always runs to its end
+    expect(named([{ k: 'if', cond: v('a0'), then: [set('v0', c(1))], else: [set('v0', c(2))] }, ret])).toContain(
+      'return result;',
+    );
+    expect(named([loop([work(), set('v0', c(1))]), ret])).toContain('return result;');
+    // a do-while body left early may skip its write
+    expect(
+      named([loop([{ k: 'if', cond: v('a0'), then: [{ k: 'break' }], else: [] }, set('v0', c(1))]), ret]),
+    ).toContain('return v0;');
+  });
+
   // kleod's EepromTimerIntr, declared `void EepromTimerIntr(void);` and lifted returning r0
   test('no local is the result of a function its own declaration says returns void', () => {
     const body: Stmt[] = [set('v0', c(0)), work(), { k: 'return', value: v('v0') }];
