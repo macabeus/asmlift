@@ -305,12 +305,13 @@ function roleNames(fn: SFn): { counters: Map<string, readonly string[]>; result?
   };
   visit(fn.body, []);
 
-  // the locals each loop's condition reads, in the order it reads them
+  // the locals each loop's condition reads, in the order it reads them — a step there reads its
+  // local too (`while (i++ <= n)`)
   const tested = new Map<Loop, string[]>();
   for (const { loop } of loopsOrder) {
     const read: string[] = [];
     for (const e of walkExprs([{ k: 'exprstmt', value: loop.cond }])) {
-      if (e.k === 'var' && !read.includes(e.name)) {
+      if ((e.k === 'var' || e.k === 'postincr') && !read.includes(e.name)) {
         read.push(e.name);
       }
     }

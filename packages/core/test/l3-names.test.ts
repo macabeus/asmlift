@@ -263,6 +263,29 @@ describe('role names', () => {
     expect(cBackend.emit(fn(['v0'], tally, s32))).toContain('return result;');
   });
 
+  // synthetic preupdate_cond_effect: `do { v0 = cb(a0); } while (v1++ <= a0 && v0 != 0); return v1;`
+  test('a step in the loop condition reads its local: the counter, so no result', () => {
+    const post = (name: string): Expr => ({ k: 'postincr', name, by: 1 });
+    const body: Stmt[] = [
+      set('v1', c(0)),
+      {
+        k: 'dowhile',
+        cond: {
+          k: 'bin',
+          op: '&&',
+          l: { k: 'bin', op: '<=', l: post('v1'), r: v('a0') },
+          r: { k: 'bin', op: '!=', l: v('v0'), r: c(0) },
+        },
+        body: [set('v0', { k: 'call', fn: 'cb', args: [v('a0')] })],
+      },
+      { k: 'return', value: v('v1') },
+    ];
+    const out = cBackend.emit(fn(['v0', 'v1'], body, s32));
+    expect(out).toContain('} while (i++ <= a0 && v0 != 0);');
+    expect(out).toContain('return i;');
+    expect(out).not.toMatch(/\bresult\b/);
+  });
+
   test('a local whose address is taken, or that is a frame object, keeps its name', () => {
     const body: Stmt[] = [set('v0', c(0)), work({ k: 'addr', name: 'v0' }), { k: 'return', value: v('v0') }];
     expect(cBackend.emit(fn(['v0'], body, s32))).toContain('return v0;');
