@@ -518,10 +518,10 @@ interface TreeSource {
 }
 
 /** A tree's published text and its draft (`LanguageBackend.draft`), one string where the polish
- *  changed nothing. */
+ *  changed nothing — and printed once on a backend with no polish, whose draft IS its text. */
 function emitted(backend: LanguageBackend, t: SFn): { source: string; draft: string } {
   const source = backend.emit(t);
-  const draft = emitDraft(backend, t);
+  const draft = backend.draft ? backend.draft(t) : source;
   return { source, draft: draft === source ? source : draft };
 }
 
