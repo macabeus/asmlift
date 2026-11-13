@@ -523,15 +523,10 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
       const op = s.compound ? compoundSpelling({ k: 'var', name: s.name }, s.value, vt, pe) : null;
       return [`${indent}${op === null ? `${lhs} = ${printConverted(s.value, vt, leaf)}` : `${lhs}${op}`};`];
     }
-    case 'store': {
+    case 'store':
       // The lvalue is a full Expr (`index` or `field`), so the leaf hook spells a member write
       // (`this->x = …`) exactly as it spells a member read.
-      const op = s.compound ? compoundSpelling(s.lval, s.value, vt, pe) : null;
-      // `++`/`--` are POSTFIX: the target binds tighter than them, so a prefix-shaped one
-      // parenthesizes (`(*p)++`, never `*p++`, which increments the pointer)
-      const lhs = pe(s.lval, op === '++' || op === '--' ? 1 : 2);
-      return [`${indent}${op === null ? `${lhs} = ${printConverted(s.value, vt, leaf)}` : `${lhs}${op}`};`];
-    }
+      return [`${indent}${pe(s.lval, 2)} = ${printConverted(s.value, vt, leaf)};`];
     case 'exprstmt':
       if (s.value.k === 'call' && s.value.sret !== undefined) {
         return [`${indent}${structReturnCall(s.value, vt, leaf)};`];
