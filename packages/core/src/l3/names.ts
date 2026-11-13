@@ -204,9 +204,12 @@ export function nameVariables(fn: SFn, printed: () => string): SFn {
 //
 // THE RESULT is the one local every `return` returns, read bare, the last statement of the
 // function being one of those returns. It plays no second role: no loop's counter, no pointer
-// stepped by one inside a loop (a cursor returned where it stopped, ac-decomp's
-// `mMck_search_sep`), no integer stepped by one inside a loop whose condition reads it (an index;
-// a tally its loop does not test stays one). It is assigned on every path into each return
+// stepped by a constant inside a loop (a cursor returned where it stopped, ac-decomp's
+// `mMck_search_sep`), no integer stepped by a constant inside a loop that tests it — in its
+// condition, or in the condition of an `if` in its body that leaves it (`return`, `break`, a
+// `goto`): pokeemerald's `AllocOamMatrix` and `CountTrailingZeroBits` exit `for (i = 0; …)` by an
+// `if (…) return i;`, and `while (p[r] != 0) r += 2;` walks by two. Such a local is an index; a
+// tally its loop does not test stays one. It is assigned on every path into each return
 // (`assignedBeforeEveryReturn`) — a local set on one arm only is a register's leftover, not the
 // function's value — and read nowhere ahead of its last write but in its own update
 // (`readBeforeItsLastWrite`). No local is the result of a function whose own declaration returns
@@ -221,6 +224,8 @@ interface Write {
   loops: readonly Loop[];
   /** a step of the local by one */
   step: boolean;
+  /** a step of the local by any constant (`step` is one of these) */
+  stride: boolean;
   /** the statement list and index holding it, for an `assign` statement */
   at?: { list: readonly Stmt[]; index: number };
   /** the `for` whose init it is */
@@ -263,6 +268,26 @@ function stepsByOne(name: string, value: Expr): boolean {
   return (isVar(e.l) && isOne(e.r)) || (e.op === '+' && isOne(e.l) && isVar(e.r));
 }
 
+/** Whether `value`, assigned to `name`, steps it by a nonzero integer constant: `name ± k` or
+ *  `k + name`, under any integer cast. */
+function stepsByConstant(name: string, value: Expr): boolean {
+  const e = value.k === 'cast' && value.to.kind === 'int' ? value.e : value;
+  if (e.k !== 'bin' || (e.op !== '+' && e.op !== '-')) {
+    return false;
+  }
+  const isVar = (x: Expr) => x.k === 'var' && x.name === name;
+  const isStep = (x: Expr) => x.k === 'const' && x.value !== 0;
+  return (isVar(e.l) && isStep(e.r)) || (e.op === '+' && isStep(e.l) && isVar(e.r));
+}
+
+/** Whether `list` leaves the loop around it early: a `return`, a `break` or a `goto` anywhere in it
+ *  (read conservatively: a `break` out of a nested loop or switch counts too). */
+function leaves(list: readonly Stmt[]): boolean {
+  return list.some(
+    (s) => s.k === 'return' || s.k === 'break' || s.k === 'goto' || s.k === 'caseEndGoto' || stmtLists(s).some(leaves),
+  );
+}
+
 /** The counter and result names `fn` asks for (see above). */
 function roleNames(fn: SFn): { counters: Map<string, readonly string[]>; result?: string } {
   const eligible = candidates(fn);
@@ -277,12 +302,14 @@ function roleNames(fn: SFn): { counters: Map<string, readonly string[]>; result?
     }
   };
   const loopsOrder: { loop: Loop; loops: readonly Loop[] }[] = [];
+  // the conditions of the `if`s inside each loop's body that leave it (`leaves`), which test it too
+  const exitTests = new Map<Loop, Expr[]>();
   const steps = (e: Expr, loops: readonly Loop[]) => {
     const stack = [e];
     while (stack.length > 0) {
       const x = stack.pop()!;
       if (x.k === 'postincr') {
-        record(x.name, { loops, step: true });
+        record(x.name, { loops, step: true, stride: true });
       }
       stack.push(...exprChildren(x));
     }
@@ -293,7 +320,7 @@ function roleNames(fn: SFn): { counters: Map<string, readonly string[]>; result?
         // the init runs once, outside the loop; the step runs with the body
         const inner = [...loops, s];
         if (s.init.k === 'assign') {
-          record(s.init.name, { loops, step: false, initOf: s });
+          record(s.init.name, { loops, step: false, stride: false, initOf: s });
           steps(s.init.value, loops);
         } else {
           visit([s.init], loops);
@@ -305,7 +332,17 @@ function roleNames(fn: SFn): { counters: Map<string, readonly string[]>; result?
         return;
       }
       if (s.k === 'assign') {
-        record(s.name, { loops, step: stepsByOne(s.name, s.value), at: { list, index } });
+        record(s.name, {
+          loops,
+          step: stepsByOne(s.name, s.value),
+          stride: stepsByConstant(s.name, s.value),
+          at: { list, index },
+        });
+      }
+      if (s.k === 'if' && (leaves(s.then) || leaves(s.else))) {
+        for (const l of loops) {
+          (exitTests.get(l) ?? exitTests.set(l, []).get(l)!).push(s.cond);
+        }
       }
       // every other loop (ast.ts `isLoop`, so a new repeating kind is one too): its condition and
       // body run per iteration
@@ -356,9 +393,15 @@ function roleNames(fn: SFn): { counters: Map<string, readonly string[]>; result?
       counters.set(v, COUNTERS.slice(depth));
     }
   }
-  // a local stepped inside a loop that is a cursor (any pointer) or the loop's own tested index
+  // a local stepped inside a loop that is a cursor (any pointer) or an index the loop tests, in its
+  // condition or in an `if` that leaves it
+  const testsIt = (l: Loop, v: string) =>
+    tested.get(l)!.includes(v) ||
+    [...walkExprs((exitTests.get(l) ?? []).map((e): Stmt => ({ k: 'exprstmt', value: e })))].some(
+      (e) => (e.k === 'var' || e.k === 'postincr') && e.name === v,
+    );
   const walks = (v: string) =>
-    (writes.get(v) ?? []).some((w) => w.step && w.loops.some((l) => !integer.has(v) || tested.get(l)!.includes(v)));
+    (writes.get(v) ?? []).some((w) => w.stride && w.loops.some((l) => !integer.has(v) || testsIt(l, v)));
   return { counters, result: resultOf(fn, eligible, (v) => counters.has(v) || walks(v)) };
 }
 
@@ -463,7 +506,7 @@ function assignedBeforeEveryReturn(body: readonly Stmt[], r: string): boolean {
  *  v0;`, and the `v0 = a * b; w0 = v0; …; v0 = w0 >> 8;` of `MathUtil_Mul16`). A read after the
  *  last write reads the result itself, and one inside a loop that writes it reads the value that
  *  loop is computing (sa3's `sa2__sub_8085654`, `do { v1 = … (v2 - a1) …; v2 = v2 - v1; } while
- *  (…);`, or a count a loop tests before it resets it). */
+ *  (…);`). */
 function readBeforeItsLastWrite(body: readonly Stmt[], r: string): boolean {
   type Loops = readonly Stmt[];
   let order = 0;

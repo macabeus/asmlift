@@ -376,6 +376,38 @@ describe('role names', () => {
     expect(cBackend.emit(fn(['v0'], tally, s32))).toContain('return result;');
   });
 
+  // pokeemerald AllocOamMatrix / CountTrailingZeroBits: `for (i = 0; i < 32; i++) … return i;`,
+  // lifted with the bound test in the body; and `while (p[r] != 0) r += 2; return r;`
+  test('an index its loop tests in an if that leaves the loop, or steps by more than one, is no result', () => {
+    const exitTested: Stmt[] = [
+      set('v0', c(0)),
+      {
+        k: 'while',
+        cond: v('a0'),
+        body: [
+          step('v0'),
+          { k: 'if', cond: lt('v0', 32), then: [], else: [set('v0', c(255)), { k: 'return', value: v('v0') }] },
+        ],
+      },
+      { k: 'return', value: v('v0') },
+    ];
+    expect(cBackend.emit(fn(['v0'], exitTested, s32))).toContain('return v0;');
+    // an if in the body that does not leave the loop tests nothing: a tally still
+    const readOnly: Stmt[] = [
+      set('v0', c(0)),
+      { k: 'while', cond: v('a0'), body: [step('v0'), { k: 'if', cond: lt('v0', 32), then: [work()], else: [] }] },
+      { k: 'return', value: v('v0') },
+    ];
+    expect(cBackend.emit(fn(['v0'], readOnly, s32))).toContain('return result;');
+    const byTwo = (cond: Expr): Stmt[] => [
+      set('v0', c(0)),
+      { k: 'while', cond, body: [set('v0', { k: 'bin', op: '+', l: v('v0'), r: c(2) })] },
+      { k: 'return', value: v('v0') },
+    ];
+    expect(cBackend.emit(fn(['v0'], byTwo(lt('v0', 8)), s32))).toContain('return v0;');
+    expect(cBackend.emit(fn(['v0'], byTwo(v('a0')), s32))).toContain('return result;');
+  });
+
   // synthetic preupdate_cond_effect: `do { v0 = cb(a0); } while (v1++ <= a0 && v0 != 0); return v1;`
   test('a step in the loop condition reads its local: the counter, so no result', () => {
     const post = (name: string): Expr => ({ k: 'postincr', name, by: 1 });
