@@ -55,6 +55,7 @@ import { parkParamsFirst } from './l3/parkfirst';
 import { pointerFields } from './l3/ptrfield';
 import { type RegcopyTail, registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
+import { splitReturnedMerges } from './l3/retsplit';
 import { hoistScopedBases } from './l3/scopebase';
 import { sinkInitsToFirstUse } from './l3/sinkinit';
 import type { SymbolRef } from './l3/symbol-refs';
@@ -1410,6 +1411,12 @@ export function enumerateCandidates(
     // referees; its gate keeps it off every shape where the fold rule does not apply, which is
     // every operand but a shared subtraction.
     respell(['zerosub'], () => zeroSubNegates(sfn));
+    // `/ret-split` — return from each arm of an if whose merged local is only returned
+    // (l3/retsplit.ts). The first of the SHAPE READINGS: each is one program with the tree as
+    // recovered and a different tree to some compiler (each module states its measurements), so it
+    // rides beside that tree and the differ referees. Its polarity is the structured tree's, so
+    // `/flip-join` gives the other one.
+    respell(['ret-split'], () => splitReturnedMerges(sfn));
     // `/volatile` — declare a pointer local holding a NUMERIC address as pointing to volatile
     // data (l3/volatileptr.ts). A raw constant has no declaration anywhere, so the original
     // qualifier is not derivable — and it is codegen-visible (a volatile MEM is barred from

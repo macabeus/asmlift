@@ -1781,6 +1781,24 @@ export const SYNTHETIC: SynthSpec[] = [
       vtailret: { returnsVoid: true },
     },
   },
+  // AN EARLY RETURN WHERE A MERGED LOCAL COULD STAND (pokeemerald MathUtil_Div16Shift's body). The
+  // source returns from the arm that tests for zero and then returns the quotient. On agbcc the
+  // published winner is `/flip-join/ret-split`, which ties the merged spelling and prints the source's
+  // shape; on IDO and mwcc, where the probe pair compiles apart, other candidates reach it.
+  {
+    sym: 'retsplit_div',
+    src: 's32 retsplit_div(u8 a0, u16 a1, s16 a2){ if (a2 == 0) { return 0; } return (s16)(((s16)a1 << a0) / a2); }',
+    features: ['branch'],
+    toolchains: ALL,
+  },
+  // THE SAME SHAPE WHERE agbcc SEES IT TOO: returning from each arm of a subtraction-or-constant
+  // choice is other code than the merged local on agbcc, IDO, gcc 2.7.2 and KMC gcc (l3/retsplit.ts).
+  {
+    sym: 'retsplit_sub',
+    src: 's32 retsplit_sub(s32 a, s32 b){ if (a > b) { return a - b; } return 7; }',
+    features: ['branch'],
+    toolchains: ALL,
+  },
   // Dense 8-case switch → a jump table on every toolchain (agbcc `mov pc` inline table; IDO/KMC
   // `jr` + `.rodata`; mwcc `bctr` + `.data`); MIPS/PPC recovery needs the AsmData side-table.
   {

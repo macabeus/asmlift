@@ -1237,6 +1237,30 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     },
     implementedIn: l3('zerosub'),
   },
+  'ret-split': {
+    title: 'Return from each arm',
+    summary: 'an if whose arms set a local that is then only returned returns from each arm instead',
+    detail:
+      '`if (c) { v = a; } else { v = b; } return v;` becomes `if (c) { return a; } return b;` when `v` is ' +
+      'declared at the return type: one program, since both convert `a` to the same type and nothing reads ' +
+      '`v` afterwards. The assembly does not say whether the source merged the value first. Which arm ' +
+      'returns first is the branch sense of the tree it rides, so `/flip-join` gives the other polarity.',
+    compilerBehavior:
+      'Over the same body agbcc, IDO, KMC gcc and gcc 2.7.2 allocate the merged value and the two returns ' +
+      'differently on some shapes and alike on others; mwcc collapses most of them.',
+    offeredWhen: {
+      when: 'An if with both arms before `return v;`, each arm ending by setting `v` (a local at the return type) or by leaving.',
+      decidedBy: { symbol: 'splitReturnedMerges', file: l3('retsplit') },
+    },
+    example: {
+      compiler: 'agbcc',
+      unit: 's32 example(s32 a, s32 b) { @ }',
+      before: 's32 r; if (a > b) { r = a - b; } else { r = 7; } return r;',
+      after: 'if (a > b) { return a - b; } return 7;',
+    },
+    implementedIn: l3('retsplit'),
+    seeAlso: ['flip-join', 'ret-join'],
+  },
   volatile: {
     title: 'Volatile pointer local',
     summary: 'a pointer local holding a numeric address points at volatile data',
