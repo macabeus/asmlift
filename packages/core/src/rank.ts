@@ -43,6 +43,7 @@ import { argCopyCandidates } from './l3/argcopy';
 import { type LanguageBackend, type SFn, emitDraft } from './l3/ast';
 import { type BaseKey, admittedBases, hoistBaseLocals } from './l3/basecse';
 import { armDisjointCandidates, coalesceCandidates } from './l3/coalesce';
+import { readDoWhileAsFor } from './l3/forread';
 import type { Gate } from './l3/gates';
 import type { HoistPlacement } from './l3/hoist';
 import { homeSplitTag, homeSplitWithholds, splitHomeBases } from './l3/homesplit';
@@ -1423,6 +1424,8 @@ export function enumerateCandidates(
     respell(['switch-break'], () => breakFinalSwitchReturns(sfn));
     // `/compound-expr` — `x += e` for a non-literal `e` (l3/polish/compound.ts).
     respell(['compound-expr'], () => compoundExpressionAssignments(sfn));
+    // `/for-read` — a do/while whose first test is known to pass, as a `for` (l3/forread.ts).
+    respell(['for-read'], () => readDoWhileAsFor(sfn));
     // `/volatile` — declare a pointer local holding a NUMERIC address as pointing to volatile
     // data (l3/volatileptr.ts). A raw constant has no declaration anywhere, so the original
     // qualifier is not derivable — and it is codegen-visible (a volatile MEM is barred from

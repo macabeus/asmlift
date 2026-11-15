@@ -1799,6 +1799,16 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['branch'],
     toolchains: ALL,
   },
+  // A `for` over a `u8` counter whose first test is known to pass, the pair mwcc -O4 schedules apart
+  // from the `do`/`while` it rotates into (l3/forread.ts). No toolchain matches it yet.
+  {
+    sym: 'forread_u8',
+    src: 'void use(s32 x);\nvoid forread_u8(void){ u8 i; for (i = 0; i < 7; i++) { if (i & 1) use(i); } }',
+    features: ['narrow'],
+    toolchains: ALL,
+    ctx: 'void use(s32 x); void forread_u8(void);',
+    proto: { use: { params: 1, returnsVoid: true }, forread_u8: { returnsVoid: true } },
+  },
   // A void function's final switch whose every arm, the default included, leaves by `break;`. IDO
   // 7.1 builds the default's `break;` apart from a `return;` (l3/switchbreak.ts).
   {

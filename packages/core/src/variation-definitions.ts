@@ -1301,6 +1301,28 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     },
     implementedIn: 'packages/core/src/l3/polish/compound.ts',
   },
+  'for-read': {
+    title: 'For loop',
+    summary: 'a do/while whose first test is known to pass is written as a for',
+    detail:
+      '`i = K; do { B; i = step; } while (i < L);` with `K < L` is `for (i = K; i < L; i = step) { B }`: the ' +
+      "for's first test holds, so both run the body and the step and then test. Compilers turn such a for " +
+      'into exactly that do/while, so the assembly does not say which the source wrote.',
+    compilerBehavior:
+      'mwcc -O4 schedules a narrow counter or a pointer walk differently for the two; at -O0 every compiler ' +
+      'builds the for with its own entry test.',
+    offeredWhen: {
+      when: 'A do/while after `v = K;` whose literal test of `v` passes for `K`, its body ending by setting `v`, with no `continue`.',
+      decidedBy: { symbol: 'readDoWhileAsFor', file: l3('forread') },
+    },
+    example: {
+      compiler: 'mwcc',
+      unit: 'void use(s32); void example(void) { u8 i; @ }',
+      before: 'i = 0; do { if (i & 1) use(i); i++; } while (i < 7);',
+      after: 'for (i = 0; i < 7; i++) { if (i & 1) use(i); }',
+    },
+    implementedIn: l3('forread'),
+  },
   volatile: {
     title: 'Volatile pointer local',
     summary: 'a pointer local holding a numeric address points at volatile data',

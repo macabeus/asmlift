@@ -7,6 +7,7 @@ import { describe, expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
+import { readDoWhileAsFor } from '../src/l3/forread';
 import { compoundExpressionAssignments } from '../src/l3/polish/compound';
 import { splitReturnedMerges } from '../src/l3/retsplit';
 import { breakFinalSwitchReturns } from '../src/l3/switchbreak';
@@ -119,5 +120,32 @@ describe('/compound-expr: x += e for a non-literal e', () => {
       locals: [{ name: 'v0', type: T.int(8, false) }],
     });
     expect(compoundExpressionAssignments(fn)).toBeNull();
+  });
+});
+
+describe('/for-read: a do/while whose first test passes, as a for', () => {
+  const loop = (init: number, op: '<' | '<=' | '!=', bound: number, body: Stmt[]): SFn =>
+    fnOf([set('v0', c(init)), { k: 'dowhile', cond: bin(op, v('v0'), c(bound)), body }, ret(v('v0'))]);
+  const step = set('v0', bin('+', v('v0'), c(1)));
+
+  test('reads as a for with the init and the last statement as its step', () => {
+    expect(print(readDoWhileAsFor(loop(0, '<=', 6, [call('g', v('v0')), step])))).toContain(
+      'for (v0 = 0; v0 <= 6; v0 = v0 + 1) {\n        g(v0);\n    }',
+    );
+  });
+
+  test('declines: an init that fails the test, a continue, a step that is not last, a bound that is not literal', () => {
+    expect(readDoWhileAsFor(loop(7, '<=', 6, [call('g'), step]))).toBeNull();
+    expect(
+      readDoWhileAsFor(loop(0, '<', 6, [{ k: 'if', cond: v('a0'), then: [{ k: 'continue' }], else: [] }, step])),
+    ).toBeNull();
+    expect(readDoWhileAsFor(loop(0, '<', 6, [step, call('g')]))).toBeNull();
+    const fn = fnOf([set('v0', c(0)), { k: 'dowhile', cond: bin('<', v('v0'), v('a0')), body: [step] }, ret(v('v0'))]);
+    expect(readDoWhileAsFor(fn)).toBeNull();
+  });
+
+  test('declines an init the counter type cannot hold', () => {
+    const fn = { ...loop(200, '!=', 7, [step]), locals: [{ name: 'v0', type: T.int(8, true) }] };
+    expect(readDoWhileAsFor(fn)).toBeNull();
   });
 });

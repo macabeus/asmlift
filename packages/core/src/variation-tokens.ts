@@ -106,6 +106,7 @@ const TOKENS = [
   { name: 'ret-split', variationKind: 'respell' },
   { name: 'switch-break', variationKind: 'respell' },
   { name: 'compound-expr', variationKind: 'respell' },
+  { name: 'for-read', variationKind: 'respell' },
   { name: 'volatile', variationKind: 'respell', subject: LOCALS },
   { name: 'vol-slot', variationKind: 'respell' },
   { name: 'vol-store', variationKind: 'respell' },
