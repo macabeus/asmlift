@@ -154,7 +154,6 @@ export async function rankCandidatesInBrowser(
     // the readability polish (core l3/polish/), at the flags every candidate compiles with; this
     // scorer compiles with agbcc and nothing else
     backend: polished(cBackend, polishFactsOf(targetFor('agbcc', flags).target)),
-    roleNames: true,
     ...(symbols ? { symbols } : {}),
     onRefusedDeclaration: (n, reason) => refused.push({ name: n, reason }),
   });

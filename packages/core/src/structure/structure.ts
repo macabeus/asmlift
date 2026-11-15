@@ -785,7 +785,6 @@ function structureRanked(
     declaredArgs,
     declaredReturns,
     paramNames: declaredParamNames,
-    roleNames = false,
     declaredVoid = false,
     dialect,
     designatedInitializers = false,
@@ -8620,8 +8619,7 @@ function structureRanked(
     // at this boundary — `structureOptionsFor` dropped the target's `'unknown'` already.
     ...(spillSlotOrder !== undefined ? { slotOrder: spillSlotOrder } : {}),
     ...(declaredParamNames !== undefined ? { paramNames: declaredParamNames } : {}),
-    ...(roleNames ? { roleNames: true as const } : {}),
-    ...(roleNames && declaredVoid ? { declaredVoid: true as const } : {}),
+    ...(declaredVoid ? { declaredVoid: true as const } : {}),
     ...calledOnly({ declaredArgs, declaredReturns }, body),
     ...(dialect !== undefined ? { dialect } : {}),
     ...(designatedInitializers ? { designators: true as const } : {}),

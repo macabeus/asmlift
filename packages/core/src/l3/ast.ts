@@ -2,7 +2,7 @@
 // concrete language (C / Pascal / C++) and prints it. "Return a value" and binary ops
 // are neutral nodes here; each backend owns its own spelling.
 import { type IrType, typeEquals } from '../ir/types';
-import type { PolishFacts } from './polish';
+import type { PrintPolish } from './polish';
 
 export type Expr =
   | { k: 'var'; name: string }
@@ -555,13 +555,8 @@ export interface SFn {
    *  under these names where they pair one to one with `params` and collide with nothing
    *  (l3/names.ts). Every pass keeps naming the parameters `aN` in the tree. */
   paramNames?: readonly string[];
-  /** Print each loop counter as `i`/`j`/`k` and the one returned local as `result` (l3/names.ts),
-   *  an emission policy like `paramNames`. Set by the structurer where the caller asks for it
-   *  (`StructureOptions.roleNames`): the CLI, the benchmark and the web app do; the library's own
-   *  default keeps the structurer's `vN`, which is the name every test of a lift's shape reads. */
-  roleNames?: true;
   /** The function's own declaration — the caller's stated entry or the context's own — returns
-   *  void, set by the structurer from `StructureOptions.declaredVoid` beside `roleNames`. The lift
+   *  void, set by the structurer from `StructureOptions.declaredVoid`. The lift
    *  may still return a value (the context's own entry does not bound the lift's return), and
    *  l3/names.ts then names no local `result`: that name would say the function returns what its
    *  own declaration says it does not. */
@@ -651,15 +646,15 @@ export interface LanguageBackend {
   readonly spellsEarlyReturn: boolean;
   emit(fn: SFn): string;
   /** The text `emit` printed BEFORE its readability polish (l3/polish/), on a backend `polished`
-   *  made. The polish only re-spells, and the bytes are the draft's; but two decisions that read
-   *  PRINTED TEXT — the return-tail reading's size bound (pipeline.ts `structureReturnTailReading`)
-   *  and rank's duplicate-source collapse (rank.ts) — read this, so a polish that drops a line or
-   *  prints two trees as one text moves no reading and merges no candidates. Read it through
-   *  {@link emitDraft}; absent ⇒ `emit` has no polish. */
+   *  made: the published names, and no other re-spelling. The polish only re-spells, and the bytes
+   *  are the draft's; but two decisions that read PRINTED TEXT — the return-tail reading's size
+   *  bound (pipeline.ts `structureReturnTailReading`) and rank's duplicate-source collapse (rank.ts)
+   *  — read this, so a polish that drops a line or prints two trees as one text moves no reading and
+   *  merges no candidates. Read it through {@link emitDraft}; absent ⇒ `emit` has no polish. */
   draft?(fn: SFn): string;
-  /** `emit` through the readability polish for a compiler with these facts, where the backend has
-   *  one (the C family). Callers do not call it: `polished` (l3/polish/) builds a backend from it. */
-  polishedEmit?(fn: SFn, facts: PolishFacts): string;
+  /** `emit` through the readability polish, or its draft, where the backend has one (the C family).
+   *  Callers do not call it: `polished` (l3/polish/) builds a backend from it. */
+  polishedEmit?(fn: SFn, polish: PrintPolish): string;
   // Spell ONE LINE of text as a comment in this language (C block comments, Pascal `(* … *)`).
   // Used by the annotate-mode stub path to carry the failure reason + the original asm
   // alongside the emitted marker, so a human/LLM has the raw material to finish by hand.

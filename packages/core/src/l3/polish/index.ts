@@ -18,12 +18,14 @@
 // reader will), and both the text that is COMPILED and the text that is PUBLISHED carry it: a
 // candidate is scored on what the report shows. It is a PRINT POLICY the caller chooses, so it lives
 // on the backend the caller hands in, `polished(backend, facts)`, and nowhere in the structurer: the
-// core library's default backends print the tree as structured, which hundreds of tests pin.
+// core library's default backends print the tree as structured, which hundreds of tests pin. The
+// same backend asks l3/names.ts for the print-only names (`NamePolicy`), so one seam carries every
+// print policy.
 //
-// A polished backend keeps the inner printer as its `draft`, and the return-tail reading's size bound
-// reads that (pipeline.ts `structureReturnTailReading`), as does rank's duplicate collapse: a polish
-// that drops a line must not move a reading, and two trees the polish prints as one text are still
-// two candidates. Rank's goto/cast/line tie-break reads the PUBLISHED text, the one the report's
+// A polished backend's `draft` is its text with the role names and none of the re-spellings here
+// (nor the dense local numbers), and the return-tail reading's size bound reads that (pipeline.ts
+// `structureReturnTailReading`), as does rank's duplicate collapse: a polish that drops a line must
+// not move a reading, and two trees the polish prints as one text are still two candidates. Rank's goto/cast/line tie-break reads the PUBLISHED text, the one the report's
 // quality metric counts (rank.ts `compareScored`).
 //
 // WHAT THE COMPILER SEES DEPENDS ON THE LEVEL. At a level that compiles each statement as it is
@@ -38,7 +40,6 @@ import type { LanguageBackend, SFn } from '../ast';
 import { compoundAssignments } from './compound';
 import { hexBitLiterals } from './hex';
 import { subscriptZeroBesideConstants } from './ptr0';
-import { renumberLocals } from './renumber';
 import { callTruthTests } from './truthcall';
 import { voidTail } from './voidtail';
 
@@ -51,6 +52,14 @@ export interface PolishFacts {
    *  IDO at -O1); mwcc at -O0 differs for some of them too. A level this answers wrongly as
    *  optimizing would publish other code, so the answer errs to `true`: an unknown level keeps. */
   readonly literal: boolean;
+}
+
+/** What a polished printer prints (`LanguageBackend.polishedEmit`): the published text, or its
+ *  `draft` — the published text's names (l3/names.ts `NamePolicy`: role names, but no dense
+ *  numbers) with no other re-spelling. */
+export interface PrintPolish {
+  readonly facts: PolishFacts;
+  readonly draft: boolean;
 }
 
 /** The {@link PolishFacts} of a resolved target (target.ts `targetFor`). */
@@ -66,8 +75,6 @@ const PASSES: readonly ((fn: SFn, facts: PolishFacts) => SFn)[] = [
   subscriptZeroBesideConstants,
   hexBitLiterals,
   compoundAssignments,
-  // last: the rewrites above can only drop mentions, never add one
-  renumberLocals,
 ];
 
 /** The finished tree, re-spelled by every tree-level polish rewrite, in order. */
@@ -76,12 +83,16 @@ export function polishTree(fn: SFn, facts: PolishFacts): SFn {
 }
 
 /** `backend`, printing through the readability polish for a compiler with these `facts`: its
- *  `emit` polishes, and its `draft` is `backend`'s own `emit`. A backend with no polished printer
+ *  `emit` polishes and its `draft` is the polish's draft. A backend with no polished printer
  *  (`LanguageBackend.polishedEmit`) is returned as it is, and so is one already polished. */
 export function polished(backend: LanguageBackend, facts: PolishFacts): LanguageBackend {
   const { polishedEmit, ...inner } = backend;
   if (polishedEmit === undefined) {
     return backend;
   }
-  return { ...inner, emit: (fn) => polishedEmit(fn, facts), draft: (fn) => backend.emit(fn) };
+  return {
+    ...inner,
+    emit: (fn) => polishedEmit(fn, { facts, draft: false }),
+    draft: (fn) => polishedEmit(fn, { facts, draft: true }),
+  };
 }

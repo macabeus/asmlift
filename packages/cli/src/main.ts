@@ -917,8 +917,6 @@ export async function runCli(
         symbols,
         contextGlobals,
         ...(ownContextProto ? { ownContextProto } : {}),
-        // loop counters and the returned local under role names (core l3/names.ts)
-        roleNames: true,
         ...(calleeBodies ? { calleeBodies } : {}),
         onEnumerationError: (variations: readonly string[], error: string) => {
           const step = threwStep(variations);
@@ -987,7 +985,6 @@ export async function runCli(
       symbols,
       contextGlobals,
       ...(ownContextProto ? { ownContextProto } : {}),
-      roleNames: true,
       ...(calleeBodies ? { calleeBodies } : {}),
     });
     // THE ASSUMPTIONS THE SOURCE RESTS ON, on the path that prints no declarations. Every other

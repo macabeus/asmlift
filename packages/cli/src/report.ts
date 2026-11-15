@@ -85,7 +85,6 @@ export async function decompileWithReport(
           opts.contextGlobals,
           name,
           own.ownContextProto,
-          opts.roleNames === true,
         )
     : undefined;
 
@@ -173,7 +172,6 @@ function probedSource(
   contextGlobals: ContextGlobals | undefined,
   name: string,
   ownContextProto: FnProto | undefined,
-  roleNames: boolean,
 ): string | undefined {
   try {
     const clone = structuredCloneFn(fn);
@@ -209,7 +207,6 @@ function probedSource(
         contextGlobals,
         inferredSymbols,
         ownContextProto,
-        roleNames,
       }),
       (t) => emitDraft(backend, t),
     );

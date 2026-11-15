@@ -659,16 +659,18 @@ already does on `cast`.
 
 The C-family backends can also print through a **readability polish**
 ([`l3/polish/`](../packages/core/src/l3/polish)): `*p` as `p[0]` beside constant subscripts, a bit
-mask in hex, `x = x + 1` as `x++`, a void function's trailing `return;` dropped, dense local
-numbers. It runs last, inside the C-family printer, on the tree already legalized for printing, and
-only where the caller asks for it: `polished(backend, facts)` wraps a backend whose `emit` polishes
+mask in hex, `x = x + 1` as `x++`, a void function's trailing `return;` dropped. It runs last, inside
+the C-family printer, on the tree already legalized for printing, and only where the caller asks for
+it: `polished(backend, facts)` wraps a backend whose `emit` polishes
 (`LanguageBackend.polishedEmit`), with the level facts taken from the caller's resolved target. The
-CLI, the benchmark and the web app ask; the library's default backends print the tree as
-structured. A polish rewrite must compile to the same bytes as the text it replaces at every level
+same backend asks [`l3/names.ts`](../packages/core/src/l3/names.ts) for its print-only names, loop
+counters as `i`/`j`/`k`, the returned local as `result` and the other `vN` locals numbered densely,
+so one opt-in seam carries every print policy. The CLI, the benchmark and the web app ask; the
+library's default backends print the tree as structured, under the declaration's parameter names. A polish rewrite must compile to the same bytes as the text it replaces at every level
 it fires at, so the text compiled and the text published are one. Two decisions read printed text
 and must not move with a print policy, the return-tail reading's size bound and rank's
-duplicate-source collapse, so they measure the backend's `draft`, the text before the polish
-(`emitDraft`). Two fields on the neutral tree exist only for this stage and are pure C-family
+duplicate-source collapse, so they measure the backend's `draft`, the text before the polish with
+the role names but not the dense numbers (`emitDraft`). Two fields on the neutral tree exist only for this stage and are pure C-family
 spelling, the second and third exceptions to the rule above: `const.hex` (print the literal in hex)
 and `assign.compound` (`x += e` / `x++`). Only the polish sets them, and no other backend reads
 them: Pascal prints the same tree with its own spelling.

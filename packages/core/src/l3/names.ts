@@ -3,6 +3,9 @@
 // WHAT IT RENAMES. A parameter takes the name the function's own declaration gives it
 // (`SFn.paramNames`, from proto-context.ts `ownParamNames`): `s16 F(u8 s, s16 x, s16 y);` in the
 // context prints `F(u8 s, s16 x, s16 y)` where the lift alone prints `F(u8 a0, u16 a1, s16 a2)`.
+// Where the printer asks for them (`NamePolicy`, from a backend l3/polish/ `polished` made), loop
+// counters print as `i`/`j`/`k`, the returned local as `result`, and the other `vN` locals numbered
+// densely in the order the body first mentions them.
 //
 // A NAME IS NO CODEGEN FACT. No compiler this project serves lays out, allocates or schedules by an
 // identifier's spelling: a parameter's home is its position, a local's frame slot is its declaration
@@ -26,7 +29,8 @@
 //      the body reads nor be shadowed. Read off the printed text, which holds every identifier the
 //      printer spells and nothing it does not, rather than off a walk of the tree that a new node
 //      kind could slip past. A name the context declares and the function never mentions may be
-//      shadowed: a block-scope name hides a file-scope one only where it is spelled;
+//      shadowed: a block-scope name hides a file-scope one only where it is spelled. A dense number
+//      may take a name another renamed variable gives up, since every rename is made at once;
 //   4. no two renamed variables take one name;
 //   5. in a unit compiled as C++ (`SFn.dialect`), the name is no C++ keyword (`CXX_KEYWORDS`): a C
 //      header may name a parameter `new` or `class`. The receiver and the mangled signature are
@@ -41,8 +45,10 @@ import {
   type Loop,
   type SFn,
   type Stmt,
+  calleeOf,
   exprChildren,
   isLoop,
+  mentionedName,
   renameVariables,
   stmtExprs,
   stmtLists,
@@ -140,9 +146,19 @@ interface Proposal {
 /** The counter names, by how many counted loops enclose the loop: `i`, then `j`, then `k`. */
 const COUNTERS = ['i', 'j', 'k'] as const;
 
+/** What a printer asks of this module beyond the declaration's parameter names, which it is
+ *  always given: a print policy the caller opts into (l3/polish/ `polished`), off in the core
+ *  library's default backends, whose `vN` every test of a lift's shape reads. */
+export interface NamePolicy {
+  /** each loop counter as `i`/`j`/`k` and the one returned local as `result` */
+  readonly roles?: boolean;
+  /** the remaining `vN` locals numbered densely in the order the body first mentions them */
+  readonly dense?: boolean;
+}
+
 /** The renames `fn` asks for: the declaration's parameter names where they pair one to one, then
  *  each loop counter's name, then `result`. */
-function proposed(fn: SFn): Proposal[] {
+function proposed(fn: SFn, policy: NamePolicy): Proposal[] {
   const out: Proposal[] = [];
   const names = fn.paramNames;
   if (names !== undefined && names.length === fn.params.length) {
@@ -152,7 +168,7 @@ function proposed(fn: SFn): Proposal[] {
       }
     });
   }
-  const roles = fn.roleNames ? roleNames(fn) : { counters: new Map<string, readonly string[]>() };
+  const roles = policy.roles ? roleNames(fn) : { counters: new Map<string, readonly string[]>() };
   for (const [from, to] of roles.counters) {
     out.push({ from, to });
   }
@@ -165,9 +181,9 @@ function proposed(fn: SFn): Proposal[] {
 /** `fn` with its parameters and locals printed under the names this module gives them, or `fn`
  *  itself where it gives none. `printed` is `fn` as the backend prints it, asked for only where a
  *  rename is proposed: every identifier it spells is one no new name may take. */
-export function nameVariables(fn: SFn, printed: () => string): SFn {
-  const asked = proposed(fn);
-  if (asked.length === 0) {
+export function nameVariables(fn: SFn, printed: () => string, policy: NamePolicy = {}): SFn {
+  const asked = proposed(fn, policy);
+  if (asked.length === 0 && !policy.dense) {
     return fn;
   }
   const spelled = new Set(printed().match(IDENTIFIER) ?? []);
@@ -185,6 +201,9 @@ export function nameVariables(fn: SFn, printed: () => string): SFn {
       renames.set(from, free);
       taken.add(free);
     }
+  }
+  for (const [from, to] of denseNumbers(fn, renames, spelled, taken)) {
+    renames.set(from, to);
   }
   return renames.size === 0 ? fn : renamed(fn, renames);
 }
@@ -561,6 +580,84 @@ function readBeforeItsLastWrite(body: readonly Stmt[], r: string): boolean {
   };
   visit(body, []);
   return readAt.some((x) => x.order < lastWrite && !x.loops.some((l) => writtenIn.has(l)));
+}
+
+// ── dense numbers ────────────────────────────────────────────────────────────────────────────────
+//
+// The `vN` locals no other name took, numbered as a reader meets them: `v0`, `v1`, `v2` in the order
+// the body first mentions them, with no gaps; a declared local the body never mentions takes the
+// next number after the mentioned ones. Only a local named `vN` is numbered: one that carries
+// another name (a counter's `i`, a frame object's `sp<N>`) was named on purpose.
+//
+// A RENAME, NOT A REORDER. The declarations keep their positions, because a position is no spelling:
+// agbcc hands spilled locals their frame slots by declaration rank (l3/slotorder.ts). A local the body
+// never mentions is kept, not dropped: at a level that compiles each statement as written it still
+// takes a frame slot and moves every other slot's offset (`sub sp, #16` against `#12` on agbcc at
+// -O0, and the same on IDO 7.1 at -O0 and -O1 and on gcc 2.7.2 and KMC gcc at -O0, compiled).
+//
+// The numbering is all or nothing: it is skipped whole where any new name is spelled in the function
+// other than as one of the locals being numbered, or is a name another rename took. The variation
+// names a candidate is published under (`coalesce-v4-v0`) keep the names the tree had when the
+// variation ran.
+
+const GENERIC = /^v\d+$/;
+
+/** Every variable and callee the body mentions, in the order the printer prints them. */
+function mentionOrder(fn: SFn): string[] {
+  const out = new Set<string>();
+  const expr = (e: Expr): void => {
+    const n = mentionedName(e) ?? (e.k === 'call' ? calleeOf(e) : undefined);
+    if (n !== undefined) {
+      out.add(n);
+    }
+    exprChildren(e).forEach(expr);
+  };
+  const stmt = (s: Stmt): void => {
+    switch (s.k) {
+      case 'assign':
+        out.add(s.name);
+        expr(s.value);
+        return;
+      case 'dowhile':
+        s.body.forEach(stmt);
+        expr(s.cond);
+        return;
+      case 'for':
+        stmt(s.init);
+        expr(s.cond);
+        stmt(s.inc);
+        s.body.forEach(stmt);
+        return;
+      case 'switch': {
+        expr(s.scrutinee);
+        const arms = s.cases.map((c) => c.body);
+        arms.splice(s.defaultAt ?? s.cases.length, 0, s.default ?? []);
+        arms.forEach((a) => a.forEach(stmt));
+        return;
+      }
+      default:
+        stmtExprs(s).forEach(expr);
+        stmtLists(s).forEach((l) => l.forEach(stmt));
+    }
+  };
+  fn.body.forEach(stmt);
+  return [...out];
+}
+
+/** The dense numbers of the `vN` locals `renames` leaves alone, or none where one would collide
+ *  with a name `spelled` holds outside those locals, or one `taken` by another rename. */
+function denseNumbers(
+  fn: SFn,
+  renames: ReadonlyMap<string, string>,
+  spelled: ReadonlySet<string>,
+  taken: ReadonlySet<string>,
+): Map<string, string> {
+  const generic = new Set(fn.locals.map((l) => l.name).filter((n) => GENERIC.test(n) && !renames.has(n)));
+  const ranked = new Set([...mentionOrder(fn).filter((n) => generic.has(n)), ...generic]);
+  const to = new Map([...ranked].map((n, i) => [n, `v${i}`]));
+  const freed = (n: string) => generic.has(n) || renames.has(n);
+  const clash = [...to.values()].some((n) => taken.has(n) || (spelled.has(n) && !freed(n)));
+  return clash || [...to].every(([a, b]) => a === b) ? new Map() : to;
 }
 
 /** `fn` with every variable `renames` names spelled under its new name: its declaration and each

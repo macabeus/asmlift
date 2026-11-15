@@ -99,10 +99,8 @@ export function rankOptionsFor(
     ...(symbols ? { symbols } : {}),
     ...(contextGlobals ? { contextGlobals } : {}),
     ...(calleeBodies ? { calleeBodies } : {}),
-    // loop counters and the returned local under role names, as the CLI the repro script runs prints
-    // them (core l3/names.ts): print-only, so no candidate scores differently
-    roleNames: true,
-    // the readability polish (core l3/polish/), as the CLI prints it
+    // the readability polish and the role names (core l3/polish/, l3/names.ts), as the CLI the repro
+    // script runs prints them: print-only, so no candidate scores differently
     backend: polished(cBackend, polishFactsOf(codegen.target)),
   };
 }

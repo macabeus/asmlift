@@ -104,7 +104,6 @@ export interface TraceOptions {
   symbols?: SymbolMap; // address→symbol map (symbols.ts), as in decompile(); absent ⇒ inert
   contextGlobals?: ContextGlobals; // the declaration context's globals, as in decompile()
   ownContextProto?: FnProto; // the context's own entry, as in decompile()
-  roleNames?: boolean; // role names for counters and the result, as in decompile()
   calleeBodies?: CalleeBodies; // bodies of callees outside the input, as in decompile()
   onGap?: OnGap; // "strict" (default) | "annotate", as in decompile()
   /** Source probe at pattern boundaries: the source asmlift would emit there, which the cli report
@@ -359,7 +358,6 @@ function traceTower(
       inferredSymbols,
       orderLicensedGlobals: orderLicensed,
       ownContextProto: ownContext.ownContextProto,
-      roleNames: opts.roleNames,
     }),
     (t) => emitDraft(backend, t),
   );

@@ -55,8 +55,6 @@ export interface StructuringInputs {
    *  `FnProto.declaredVoid`, proto-context.ts `withOwnDeclaredVoid`), both derived here and at no call site, so
    *  they are read off the same merged table the structuring reads. */
   ownContextProto?: FnProto;
-  /** Print loop counters and the returned local under role names (`SFn.roleNames`). */
-  roleNames?: boolean;
 }
 
 /** The structurer's options for one lift: `structureOptionsFor` (the target's compiler behaviours,
@@ -80,11 +78,9 @@ export function structuringOptions(inputs: StructuringInputs): StructureOptions 
     ...(inputs.inferredSymbols?.size ? { inferredSymbols: inputs.inferredSymbols } : {}),
     ...(inputs.orderLicensedGlobals?.size ? { orderLicensedGlobals: inputs.orderLicensedGlobals } : {}),
     ...(paramNames?.length ? { paramNames } : {}),
-    ...(inputs.roleNames ? { roleNames: true } : {}),
-    // read by the role names alone, so carried only beside them: the context's own entry does not
-    // bound the lift's return, so a function it declares void may still be lifted returning a value
-    ...(inputs.roleNames &&
-    (declaresVoidReturn(stated) || stated?.declaredVoid === true || declaresVoidReturn(ownContextProto))
+    // read by the role names alone: the context's own entry does not bound the lift's return, so a
+    // function it declares void may still be lifted returning a value
+    ...(declaresVoidReturn(stated) || stated?.declaredVoid === true || declaresVoidReturn(ownContextProto)
       ? { declaredVoid: true }
       : {}),
   };

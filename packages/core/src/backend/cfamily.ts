@@ -15,7 +15,7 @@ import { IrType, T, scalarTypeForAccess, typeEquals, typeToString } from '../ir/
 import { BinOp, Expr, InitAddress, SFn, SStatic, Stmt, caseGotoViolation, dotBase } from '../l3/ast';
 import { foldConstantImages } from '../l3/constinit';
 import { nameVariables } from '../l3/names';
-import { type PolishFacts, polishTree } from '../l3/polish';
+import { type PrintPolish, polishTree } from '../l3/polish';
 import { compoundSum } from '../l3/polish/compound';
 import { legalizePointerCells } from '../l3/ptrcell';
 import { orderSlotLocals } from '../l3/slotorder';
@@ -799,12 +799,12 @@ function legalizePointerWrites(fn: SFn): SFn {
 /** The body of a C-family function: local declarations + statements, one string per line. The
  *  SIGNATURE (return type + name + params, plus any C++ scope/`this`/mangling) is the caller's —
  *  that is the language-divergent part each backend owns. */
-function cFamilyBody(fn0: SFn, leaf: LeafHook | undefined, designators: boolean, polish?: PolishFacts): string[] {
+function cFamilyBody(fn0: SFn, leaf: LeafHook | undefined, designators: boolean, polish?: PrintPolish): string[] {
   // The readability polish (l3/polish/) runs last, over the legalized tree, so it sees every cast
   // the reader will. A pass that throws throws out of `emit`, as any refusal of the printer does:
   // the polish only re-spells a tree the printer accepts, so a throw there is a bug to see.
   const legal = legalizePointerWrites(fn0);
-  const fn = polish ? polishTree(legal, polish) : legal;
+  const fn = polish && !polish.draft ? polishTree(legal, polish.facts) : legal;
   // The legalization env: every printed var's declared type and pointee volatility, from the SAME
   // params/locals the emitted declarations come from — so the printer judges exactly the C the
   // reader will see.
@@ -953,7 +953,7 @@ function structDecls(fn: SFn, printed: string): string[] {
  *  `designators`: the LANGUAGE spells an array element by index in an initializer (C, not C++).
  *  Whether the compiler's dialect parses one is the function's own fact (`SFn.designators`); an
  *  initializer is spelled by index only where both say yes. `polish`: print through the readability
- *  polish (l3/polish/) for a compiler with these facts — given only by a backend's `polishedEmit`.
+ *  polish (l3/polish/) — given only by a backend's `polishedEmit`.
  *
  *  The names a reader would give the parameters and locals (l3/names.ts) are applied HERE too, for
  *  the reason the slot order is: both C-family backends print them, and the collision check reads
@@ -965,12 +965,13 @@ export function emitCFamily(
   fn0: SFn,
   leaf?: LeafHook,
   designators = true,
-  polish?: PolishFacts,
+  polish?: PrintPolish,
 ): string {
   const print = (fn: SFn) =>
     assembleCFamily(typeof signature === 'string' ? signature : signature(fn), fn, leaf, designators, polish);
   let plain: string | undefined;
-  const fn = nameVariables(fn0, () => (plain ??= print(fn0)));
+  const policy = { roles: polish !== undefined, dense: polish !== undefined && !polish.draft };
+  const fn = nameVariables(fn0, () => (plain ??= print(fn0)), policy);
   return fn === fn0 ? (plain ?? print(fn0)) : print(fn);
 }
 
@@ -979,7 +980,7 @@ function assembleCFamily(
   fn0: SFn,
   leaf: LeafHook | undefined,
   designators: boolean,
-  polish: PolishFacts | undefined,
+  polish: PrintPolish | undefined,
 ): string {
   // The declaration list is put into the target's own frame order, and a pointer cell's integer
   // uses converted (l3/ptrcell.ts), HERE — in the shared C-family assembler, reached only from

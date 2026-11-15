@@ -25,7 +25,7 @@ const fnOf = (locals: SFn['locals'], body: Stmt[]): SFn => ({
   body,
 });
 
-describe('polish: locals numbered densely in first-use order', () => {
+describe('names: locals numbered densely in first-use order', () => {
   test('renames by first mention and keeps declaration positions; an unused local is numbered last', () => {
     const fn = fnOf(
       [local('v5'), local('v0'), local('v7'), local('v2')],
@@ -48,7 +48,7 @@ describe('polish: locals numbered densely in first-use order', () => {
       [
         { k: 'assign', name: 'v0', value: v('a0') },
         { k: 'assign', name: 'v2', value: v('v0') },
-        { k: 'return', value: v('v2') },
+        { k: 'return', value: bin('+', v('v2'), v('a0')) }, // no local is the `result`
       ],
     );
     // renamed — a name is no frame slot — with the unused one numbered after the used ones
@@ -63,10 +63,32 @@ describe('polish: locals numbered densely in first-use order', () => {
       [
         { k: 'assign', name: 'i', value: v('a0') },
         { k: 'assign', name: 'v3', value: v('i') },
-        { k: 'return', value: v('v3') },
+        { k: 'return', value: bin('+', v('v3'), v('a0')) }, // no local is the `result`
       ],
     );
     expect(pc.emit(fn)).toContain('    s32 i;\n    s32 v0;\n');
+  });
+
+  test('a number a role name frees is taken by the next local, in the same rename', () => {
+    const fn = fnOf(
+      [local('v0'), local('v3')],
+      [
+        { k: 'assign', name: 'v3', value: v('a0') },
+        { k: 'assign', name: 'v0', value: { k: 'const', value: 0 } },
+        {
+          k: 'while',
+          cond: bin('<', v('v0'), { k: 'const', value: 4 }),
+          body: [
+            { k: 'exprstmt', value: { k: 'call', fn: 'work', args: [v('v3')] } },
+            { k: 'assign', name: 'v0', value: bin('+', v('v0'), { k: 'const', value: 1 }) },
+          ],
+        },
+        { k: 'return', value: bin('+', v('v3'), v('a0')) },
+      ],
+    );
+    const out = pc.emit(fn);
+    expect(out).toContain('    s32 i;\n    s32 v0;\n');
+    expect(out).toContain('work(v0);');
   });
 
   test('a collision with any other name the function uses skips the renumbering', () => {
@@ -74,7 +96,7 @@ describe('polish: locals numbered densely in first-use order', () => {
       [local('v3')],
       [
         { k: 'assign', name: 'v3', value: v('v0') }, // `v0` is a global here
-        { k: 'return', value: v('v3') },
+        { k: 'return', value: bin('+', v('v3'), v('a0')) }, // no local is the `result`
       ],
     );
     expect(pc.emit(fn)).toContain('    s32 v3;\n    v3 = v0;');

@@ -8,6 +8,7 @@ import { cppBackend } from '../src/backend/cpp';
 import { T } from '../src/ir/types';
 import { type Expr, type SFn, type Stmt, renameVariables } from '../src/l3/ast';
 import { nameVariables } from '../src/l3/names';
+import { polishFactsOf, polished } from '../src/l3/polish';
 import { decompile } from '../src/pipeline';
 import { type FnProto, prototypesFromSymbols } from '../src/proto';
 import { structuringOptions } from '../src/structuring-options';
@@ -15,6 +16,8 @@ import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 
 const s32 = T.s(32);
+/** An optimizing level: every polish pass may fire. */
+const OPT = { literal: false };
 
 /** `s32 f(s32 a0, s32 a1) { return a0 + a1; }`, with `extra` statements ahead of the return. */
 const sum = (paramNames?: readonly string[], extra: SFn['body'] = []): SFn => ({
@@ -122,6 +125,9 @@ describe("the declaration's parameter names", () => {
 // Role names: `i`/`j`/`k` for a loop's counter by how many counted loops enclose it, and `result`
 // for the one local every return returns.
 describe('role names', () => {
+  // the role names are a print policy a polished backend asks for; its draft prints them with no
+  // other re-spelling
+  const roles = (f: SFn) => polished(cBackend, OPT).draft!(f);
   const v = (name: string): Expr => ({ k: 'var', name });
   const c = (value: number): Expr => ({ k: 'const', value });
   const set = (name: string, value: Expr): Stmt => ({ k: 'assign', name, value });
@@ -134,7 +140,6 @@ describe('role names', () => {
     locals: locals.map((name) => ({ name, type: s32 })),
     retType,
     body,
-    roleNames: true,
   });
 
   test('nested counters are i, j and k, outermost first, in a for or a do-while', () => {
@@ -158,7 +163,7 @@ describe('role names', () => {
         ],
       },
     ];
-    const out = cBackend.emit(fn(['v0', 'v1', 'v2'], body));
+    const out = roles(fn(['v0', 'v1', 'v2'], body));
     expect(out).toContain('i = 0;');
     expect(out).toContain('for (j = 0; j < 8; j = j + 1)');
     expect(out).toContain('k = 0;');
@@ -168,7 +173,7 @@ describe('role names', () => {
 
   test('two loops in sequence, each with its own counter, take i and then j', () => {
     const loop = (n: string): Stmt[] => [set(n, c(0)), { k: 'while', cond: lt(n, 3), body: [work(v(n)), step(n)] }];
-    const out = cBackend.emit(fn(['v0', 'v1'], [...loop('v0'), ...loop('v1')]));
+    const out = roles(fn(['v0', 'v1'], [...loop('v0'), ...loop('v1')]));
     expect(out).toContain('work(i);');
     expect(out).toContain('work(j);');
   });
@@ -176,19 +181,19 @@ describe('role names', () => {
   test('a local with two roles is no counter: reset for a second loop, or written past a step', () => {
     const loop = (n: string): Stmt[] => [set(n, c(0)), { k: 'while', cond: lt(n, 3), body: [work(v(n)), step(n)] }];
     // the coalescer's one carrier for two loops' counters
-    expect(cBackend.emit(fn(['v0'], [...loop('v0'), ...loop('v0')]))).not.toMatch(/\bi\b/);
+    expect(roles(fn(['v0'], [...loop('v0'), ...loop('v0')]))).not.toMatch(/\bi\b/);
     // written by something other than a step inside the loop
     const scaled: Stmt[] = [
       set('v0', c(0)),
       { k: 'while', cond: lt('v0', 9), body: [work(v('v0')), set('v0', { k: 'bin', op: '*', l: v('v0'), r: c(2) })] },
     ];
-    expect(cBackend.emit(fn(['v0'], scaled))).toContain('work(v0);');
+    expect(roles(fn(['v0'], scaled))).toContain('work(v0);');
     // stepped only inside a nested loop
     const deep: Stmt[] = [
       set('v0', c(0)),
       { k: 'while', cond: lt('v0', 9), body: [{ k: 'while', cond: v('a0'), body: [step('v0')] }] },
     ];
-    expect(cBackend.emit(fn(['v0'], deep))).toContain('v0 = 0;');
+    expect(roles(fn(['v0'], deep))).toContain('v0 = 0;');
   });
 
   test('a counter name the function spells is passed over for the next free one', () => {
@@ -200,7 +205,7 @@ describe('role names', () => {
         body: [{ k: 'exprstmt', value: { k: 'call', fn: 'i', args: [v('v0')] } }, step('v0')],
       },
     ];
-    expect(cBackend.emit(fn(['v0'], body))).toContain('i(j);');
+    expect(roles(fn(['v0'], body))).toContain('i(j);');
   });
 
   test('the one local every return returns is the result, where it plays no other role', () => {
@@ -210,28 +215,28 @@ describe('role names', () => {
       work(),
       { k: 'return', value: v('v0') },
     ];
-    expect(cBackend.emit(fn(['v0'], body, s32))).toContain('return result;');
+    expect(roles(fn(['v0'], body, s32))).toContain('return result;');
     // a return of anything else
     const other: Stmt[] = [
       { k: 'if', cond: v('a0'), then: [{ k: 'return', value: c(1) }], else: [] },
       set('v0', c(0)),
       { k: 'return', value: v('v0') },
     ];
-    expect(cBackend.emit(fn(['v0'], other, s32))).toContain('return v0;');
+    expect(roles(fn(['v0'], other, s32))).toContain('return v0;');
     // a counter returned stays the counter
     const counted: Stmt[] = [
       set('v0', c(0)),
       { k: 'while', cond: lt('v0', 3), body: [work(v('v0')), step('v0')] },
       { k: 'return', value: v('v0') },
     ];
-    expect(cBackend.emit(fn(['v0'], counted, s32))).toContain('return i;');
+    expect(roles(fn(['v0'], counted, s32))).toContain('return i;');
   });
 
   // snowboardkids2's func_800154A8_160A8 (kmc): `if (n != 0) { do { … } while (…); v1 = …; } return v1;`
   test('the result is assigned on every path into each return', () => {
     const ret: Stmt = { k: 'return', value: v('v0') };
     const loop = (body: Stmt[]): Stmt => ({ k: 'dowhile', cond: v('a0'), body });
-    const named = (body: Stmt[]) => cBackend.emit(fn(['v0'], body, s32));
+    const named = (body: Stmt[]) => roles(fn(['v0'], body, s32));
     // set inside an if with no else: unset on the other path
     expect(named([{ k: 'if', cond: v('a0'), then: [work(), set('v0', c(1))], else: [] }, ret])).toContain('return v0;');
     // set in a while body, which may run no times
@@ -252,7 +257,7 @@ describe('role names', () => {
   // pokeemerald's GetImprisonedMovesCount: `v0 = 0; if (v0 < gBattlersCount) { v3 = v0; …; v0 = v3; }`
   test('the result is not read ahead of its last write, save by its own update', () => {
     const ret: Stmt = { k: 'return', value: v('v0') };
-    const named = (locals: string[], body: Stmt[]) => cBackend.emit(fn(locals, body, s32));
+    const named = (locals: string[], body: Stmt[]) => roles(fn(locals, body, s32));
     // the carrier's constant tested and copied before the count is written back
     const carried: Stmt[] = [
       set('v0', c(0)),
@@ -298,17 +303,18 @@ describe('role names', () => {
   // kleod's EepromTimerIntr, declared `void EepromTimerIntr(void);` and lifted returning r0
   test('no local is the result of a function its own declaration says returns void', () => {
     const body: Stmt[] = [set('v0', c(0)), work(), { k: 'return', value: v('v0') }];
-    expect(cBackend.emit({ ...fn(['v0'], body, s32), declaredVoid: true })).toContain('return v0;');
+    expect(roles({ ...fn(['v0'], body, s32), declaredVoid: true })).toContain('return v0;');
     // end to end: the context's own entry says void, the lift still returns r0's leftover
     const asm =
       'f:\n\tpush\t{r4, lr}\n\tbl\tg\n\tadd\tr4, r0, #0\n\tbl\th\n\tadd\tr0, r4, #0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    const printer = polished(cBackend, polishFactsOf(ARMV4T_AGBCC));
     const lift = (ownContextProto?: FnProto) =>
-      decompile('f', asm, ARMV4T_AGBCC, { roleNames: true, ...(ownContextProto ? { ownContextProto } : {}) }).source;
+      decompile('f', asm, ARMV4T_AGBCC, { backend: printer, ...(ownContextProto ? { ownContextProto } : {}) }).source;
     expect(lift()).toContain('return result;');
     expect(lift({ params: [], returns: 'void' })).toContain('return v0;');
     // a stated entry that restates the function carries the context's void beside it, and lifts the same
     const stated = (proto: FnProto) =>
-      decompile('f', asm, ARMV4T_AGBCC, { roleNames: true, prototypes: { f: proto } }).source;
+      decompile('f', asm, ARMV4T_AGBCC, { backend: printer, prototypes: { f: proto } }).source;
     expect(stated({})).toContain('return result;');
     expect(stated({ declaredVoid: true })).toContain('return v0;');
     expect(stated({ declaredVoid: true }).replace(/\bv0\b/g, 'result')).toBe(stated({}));
@@ -316,9 +322,8 @@ describe('role names', () => {
 
   test('only where the caller asks for them', () => {
     const body: Stmt[] = [set('v0', c(0)), work(), { k: 'return', value: v('v0') }];
-    const { roleNames: _asked, ...plain } = fn(['v0'], body, s32);
-    expect(cBackend.emit(plain)).toContain('return v0;');
-    expect(cBackend.emit(fn(['v0'], body, s32))).toContain('return result;');
+    expect(cBackend.emit(fn(['v0'], body, s32))).toContain('return v0;');
+    expect(roles(fn(['v0'], body, s32))).toContain('return result;');
   });
 
   test('a countdown spelled `v + -1` is a counter, as mwcc, kmc and IDO lifts print it', () => {
@@ -330,7 +335,7 @@ describe('role names', () => {
         body: [work(v('v0')), set('v0', { k: 'bin', op: '+', l: v('v0'), r: c(-1) })],
       },
     ];
-    expect(cBackend.emit(fn(['v0'], down))).toContain('i = i + -1;');
+    expect(roles(fn(['v0'], down))).toContain('i = i + -1;');
   });
 
   // pokeemerald's StringCopy: `while (*v0 != 255) { *v1 = *v0; v1 = v1 + 1; v0 = v0 + 1; } return v1;`
@@ -358,13 +363,13 @@ describe('role names', () => {
   });
 
   test('a pointer stepped by one is a cursor, not a counter', () => {
-    const out = cBackend.emit(copy());
+    const out = roles(copy());
     expect(out).not.toMatch(/\bi\b/);
     expect(out).toContain('v0 = v0 + 1;');
   });
 
   test('a returned cursor, or an index its loop tests, is no result; a tally its loop does not test is', () => {
-    expect(cBackend.emit(copy())).toContain('return v1;');
+    expect(roles(copy())).toContain('return v1;');
     // an integer the loop tests but no counter (initialized twice): an index, not the result
     const index: Stmt[] = [
       set('v0', c(0)),
@@ -372,14 +377,14 @@ describe('role names', () => {
       { k: 'while', cond: lt('v0', 3), body: [work(v('v0')), step('v0')] },
       { k: 'return', value: v('v0') },
     ];
-    expect(cBackend.emit(fn(['v0'], index, s32))).toContain('return v0;');
+    expect(roles(fn(['v0'], index, s32))).toContain('return v0;');
     // a tally: stepped in a loop that tests something else
     const tally: Stmt[] = [
       set('v0', c(0)),
       { k: 'while', cond: v('a0'), body: [work(), step('v0')] },
       { k: 'return', value: v('v0') },
     ];
-    expect(cBackend.emit(fn(['v0'], tally, s32))).toContain('return result;');
+    expect(roles(fn(['v0'], tally, s32))).toContain('return result;');
   });
 
   // pokeemerald AllocOamMatrix / CountTrailingZeroBits: `for (i = 0; i < 32; i++) … return i;`,
@@ -397,21 +402,21 @@ describe('role names', () => {
       },
       { k: 'return', value: v('v0') },
     ];
-    expect(cBackend.emit(fn(['v0'], exitTested, s32))).toContain('return v0;');
+    expect(roles(fn(['v0'], exitTested, s32))).toContain('return v0;');
     // an if in the body that does not leave the loop tests nothing: a tally still
     const readOnly: Stmt[] = [
       set('v0', c(0)),
       { k: 'while', cond: v('a0'), body: [step('v0'), { k: 'if', cond: lt('v0', 32), then: [work()], else: [] }] },
       { k: 'return', value: v('v0') },
     ];
-    expect(cBackend.emit(fn(['v0'], readOnly, s32))).toContain('return result;');
+    expect(roles(fn(['v0'], readOnly, s32))).toContain('return result;');
     const byTwo = (cond: Expr): Stmt[] => [
       set('v0', c(0)),
       { k: 'while', cond, body: [set('v0', { k: 'bin', op: '+', l: v('v0'), r: c(2) })] },
       { k: 'return', value: v('v0') },
     ];
-    expect(cBackend.emit(fn(['v0'], byTwo(lt('v0', 8)), s32))).toContain('return v0;');
-    expect(cBackend.emit(fn(['v0'], byTwo(v('a0')), s32))).toContain('return result;');
+    expect(roles(fn(['v0'], byTwo(lt('v0', 8)), s32))).toContain('return v0;');
+    expect(roles(fn(['v0'], byTwo(v('a0')), s32))).toContain('return result;');
   });
 
   // synthetic preupdate_cond_effect: `do { v0 = cb(a0); } while (v1++ <= a0 && v0 != 0); return v1;`
@@ -431,7 +436,7 @@ describe('role names', () => {
       },
       { k: 'return', value: v('v1') },
     ];
-    const out = cBackend.emit(fn(['v0', 'v1'], body, s32));
+    const out = roles(fn(['v0', 'v1'], body, s32));
     expect(out).toContain('} while (i++ <= a0 && v0 != 0);');
     expect(out).toContain('return i;');
     expect(out).not.toMatch(/\bresult\b/);
@@ -453,7 +458,7 @@ describe('role names', () => {
     const int = { base: 'int', ptr: 0 };
     const cpp = cppBackend({ method: 'K', retType: int, params: [{ name: 'n', type: int }] }, undefined);
     // the declaration's names are the spec's to give: one that disagrees is not asked for
-    const out = cpp.emit({ ...fn(['v0', 'v1'], body, s32), paramNames: ['m'] });
+    const out = polished(cpp, OPT).draft!({ ...fn(['v0', 'v1'], body, s32), paramNames: ['m'] });
     expect(out).toContain('for (i = 0; i < n; i = i + 1)');
     expect(out).toContain('return result;');
     expect(out).not.toMatch(/\bv[0-9]\b|\bm\b/);
@@ -461,7 +466,7 @@ describe('role names', () => {
 
   test('a local whose address is taken, or that is a frame object, keeps its name', () => {
     const body: Stmt[] = [set('v0', c(0)), work({ k: 'addr', name: 'v0' }), { k: 'return', value: v('v0') }];
-    expect(cBackend.emit(fn(['v0'], body, s32))).toContain('return v0;');
+    expect(roles(fn(['v0'], body, s32))).toContain('return v0;');
   });
 });
 
