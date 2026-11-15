@@ -17,6 +17,9 @@ const NO_HABITS = {
   unusedLocals: 0,
   placeholderParams: 0,
   genericCounters: 0,
+  joinedReturn: 0,
+  shiftTruth: 0,
+  doWhileForable: 0,
 };
 
 describe('assessQuality (pinned)', () => {
@@ -169,6 +172,29 @@ describe('assessQuality habit counters (counted, never score-penalized)', () => 
     const h = habits(src);
     expect(h.localGaps).toBe(3); // v1, v3, v4
     expect(h.unusedLocals).toBe(1); // v5
+  });
+
+  test('a merged local returned after a two-armed if', () => {
+    const src =
+      's32 f(s32 a0) {\n    s32 v0;\n    if (a0 != 0) {\n        g();\n        v0 = a0 + 1;\n    } else {\n        v0 = 0;\n    }\n    return v0;\n}\n';
+    expect(habits(src).joinedReturn).toBe(1);
+    // the arms set another local, or the else arm ends elsewhere
+    expect(habits(src.replace('v0 = 0;', 'v1 = 0;')).joinedReturn).toBe(0);
+    expect(habits(src.replace('        v0 = 0;\n', '        g();\n')).joinedReturn).toBe(0);
+  });
+
+  test('a truth test of a shifted-out byte and an extension spelled as two shifts', () => {
+    const src =
+      's32 f(s32 a0) {\n    if (g(a0) << 24 != 0) {\n        return (a0 << 16) >> 16;\n    }\n    return (a0 << 24) >> 16;\n}\n';
+    expect(habits(src).shiftTruth).toBe(2); // not the mixed `<< 24) >> 16`
+  });
+
+  test('a do/while whose literal init already passes its literal test', () => {
+    const loop = (init: string, test: string): string =>
+      `void f(void) {\n    u32 i;\n    i = ${init};\n    do {\n        g(i);\n        i = i + 1;\n    } while (i ${test});\n}\n`;
+    expect(habits(loop('0', '<= 6')).doWhileForable).toBe(1);
+    expect(habits(loop('7', '<= 6')).doWhileForable).toBe(0);
+    expect(habits(loop('0', '!= a0')).doWhileForable).toBe(0);
   });
 
   test('placeholder parameters and loop tests reading a generic local', () => {
