@@ -1799,6 +1799,16 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['branch'],
     toolchains: ALL,
   },
+  // A void function's final switch whose every arm, the default included, leaves by `break;`. IDO
+  // 7.1 builds the default's `break;` apart from a `return;` (l3/switchbreak.ts).
+  {
+    sym: 'sw_brkall',
+    src: 'void sw_brkall(u32 x, s32 *p){ switch (x) { case 0: *p = 1; break; case 1: *p = 2; break; default: *p = 0; break; } }',
+    features: ['store'],
+    toolchains: ALL,
+    ctx: 'void sw_brkall(u32,s32*);',
+    proto: { sw_brkall: { returnsVoid: true } },
+  },
   // Dense 8-case switch → a jump table on every toolchain (agbcc `mov pc` inline table; IDO/KMC
   // `jr` + `.rodata`; mwcc `bctr` + `.data`); MIPS/PPC recovery needs the AsmData side-table.
   {

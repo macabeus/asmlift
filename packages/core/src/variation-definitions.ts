@@ -1261,6 +1261,26 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     implementedIn: l3('retsplit'),
     seeAlso: ['flip-join', 'ret-join'],
   },
+  'switch-break': {
+    title: 'Break out of a final switch',
+    summary: "a void function's final switch leaves its arms by `break;` instead of `return;`",
+    detail:
+      'When a switch is the last thing a void function does, leaving an arm and returning are one program, ' +
+      'and so are an empty `default:` and none. Each `return;` inside an arm becomes `break;`, and an empty ' +
+      '`default:` is dropped.',
+    compilerBehavior: 'IDO 7.1 and mwcc 2.4.2 lay out an arm that returns and an arm that breaks differently.',
+    offeredWhen: {
+      when: 'A void function whose last statement is a switch, or a switch then `return;`, with an arm that returns.',
+      decidedBy: { symbol: 'breakFinalSwitchReturns', file: l3('switchbreak') },
+    },
+    example: {
+      compiler: 'ido',
+      unit: 'void example(u32 x, s32 *p) { @ }',
+      before: 'switch (x) { case 0: *p = 1; return; case 1: *p = 2; return; default: *p = 0; return; }',
+      after: 'switch (x) { case 0: *p = 1; break; case 1: *p = 2; break; default: *p = 0; break; }',
+    },
+    implementedIn: l3('switchbreak'),
+  },
   volatile: {
     title: 'Volatile pointer local',
     summary: 'a pointer local holding a numeric address points at volatile data',

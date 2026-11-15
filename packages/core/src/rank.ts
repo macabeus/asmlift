@@ -58,6 +58,7 @@ import { reindexWalks } from './l3/reindex';
 import { splitReturnedMerges } from './l3/retsplit';
 import { hoistScopedBases } from './l3/scopebase';
 import { sinkInitsToFirstUse } from './l3/sinkinit';
+import { breakFinalSwitchReturns } from './l3/switchbreak';
 import type { SymbolRef } from './l3/symbol-refs';
 import { signedOverUnsignedCompare } from './l3/typing';
 import { type UnreduceResult, unreduceAccumulators } from './l3/unreduce';
@@ -1417,6 +1418,8 @@ export function enumerateCandidates(
     // rides beside that tree and the differ referees. Its polarity is the structured tree's, so
     // `/flip-join` gives the other one.
     respell(['ret-split'], () => splitReturnedMerges(sfn));
+    // `/switch-break` — a void function's final switch left by `break;` (l3/switchbreak.ts).
+    respell(['switch-break'], () => breakFinalSwitchReturns(sfn));
     // `/volatile` — declare a pointer local holding a NUMERIC address as pointing to volatile
     // data (l3/volatileptr.ts). A raw constant has no declaration anywhere, so the original
     // qualifier is not derivable — and it is codegen-visible (a volatile MEM is barred from

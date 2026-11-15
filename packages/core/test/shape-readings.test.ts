@@ -8,6 +8,7 @@ import { cBackend } from '../src/backend/c';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { splitReturnedMerges } from '../src/l3/retsplit';
+import { breakFinalSwitchReturns } from '../src/l3/switchbreak';
 
 const v = (name: string): Expr => ({ k: 'var', name });
 const c = (value: number): Expr => ({ k: 'const', value });
@@ -64,5 +65,38 @@ describe('/ret-split: return from each arm', () => {
       ret(v('v0')),
     ]);
     expect(print(splitReturnedMerges(fn))).toMatch(/s32 v0;[\s\S]*g\(v0\)/);
+  });
+});
+
+describe('/switch-break: leave a final switch by break', () => {
+  const sw = (dflt: Stmt[] | undefined): Stmt => ({
+    k: 'switch',
+    scrutinee: v('a0'),
+    cases: [
+      {
+        values: [0],
+        body: [{ k: 'if', cond: v('a1'), then: [ret()], else: [] }, call('g'), ret()],
+        fallsThrough: false,
+      },
+      { values: [1], body: [{ k: 'while', cond: v('a1'), body: [ret()] }, ret()], fallsThrough: false },
+    ],
+    ...(dflt === undefined ? {} : { default: dflt }),
+  });
+
+  test('every return in an arm breaks, except inside a loop; an empty default goes', () => {
+    const out = print(breakFinalSwitchReturns(fnOf([sw([ret()])], { retType: T.void(), locals: [] })))!;
+    expect(out).not.toContain('default');
+    expect(out.match(/break;/g)).toHaveLength(3);
+    expect(out).toMatch(/while \(a1\) \{\n {16}return;/);
+  });
+
+  test('a default with a body stays; a trailing return after the switch is allowed', () => {
+    const out = print(breakFinalSwitchReturns(fnOf([sw([call('h')]), ret()], { retType: T.void(), locals: [] })))!;
+    expect(out).toContain('default:');
+  });
+
+  test('declines: a switch that is not last, a non-void function', () => {
+    expect(breakFinalSwitchReturns(fnOf([sw(undefined), call('k')], { retType: T.void(), locals: [] }))).toBeNull();
+    expect(breakFinalSwitchReturns(fnOf([sw(undefined), ret(c(0))]))).toBeNull();
   });
 });

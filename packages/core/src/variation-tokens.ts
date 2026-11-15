@@ -104,6 +104,7 @@ const TOKENS = [
   { name: 'argbase', variationKind: 'respell' },
   { name: 'zerosub', variationKind: 'respell' },
   { name: 'ret-split', variationKind: 'respell' },
+  { name: 'switch-break', variationKind: 'respell' },
   { name: 'volatile', variationKind: 'respell', subject: LOCALS },
   { name: 'vol-slot', variationKind: 'respell' },
   { name: 'vol-store', variationKind: 'respell' },
