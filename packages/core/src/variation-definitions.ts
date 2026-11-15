@@ -1950,13 +1950,15 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     summary: 'a local read only through one narrowing cast is declared at that width instead of at 32 bits',
     detail:
       'A value stored whole and narrowed wherever it is read can be spelled two ways: a 32-bit local cast at every ' +
-      'read, or a local declared at the narrow width and read bare. Every read is the same value either way; ' +
-      "which one the source declared is not in the assembly. Applied on top of every other candidate's source.",
+      'read, or a local declared at the narrow width and read bare. Every read is the same value either way. ' +
+      'A counter mwcc, KMC gcc and gcc 2.7.2 truncate at its reads is one too: its step `v = v + 1` reads it bare, ' +
+      'and stores the same low bits either way. ' +
+      "Which one the source declared is not in the assembly. Applied on top of every other candidate's source.",
     compilerBehavior:
       'A narrow local is extended as it is stored, where the cast extends at each read, after whatever ran in ' +
       'between: agbcc moves the extension of a call result held across a second call.',
     offeredWhen: {
-      when: 'A 32-bit local in no memory, written by integers or calls but not in a `for` header, and narrowed by one cast at every read.',
+      when: 'A 32-bit local in no memory, written by integers or calls, narrowed by one cast at every read but its own step.',
       decidedBy: { symbol: 'narrowReadDeclarations', file: l3('narrowdecl') },
     },
     example: {

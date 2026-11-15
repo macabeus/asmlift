@@ -178,7 +178,7 @@ describe('narrowDeclarations', () => {
     expect(narrowDeclarations(bumped)).toBeNull();
   });
 
-  it('does not narrow a local whose one write is a `for` loop init', () => {
+  it('narrows a local whose one write is a `for` loop init, which every member walks', () => {
     const sfn = structured(NAMED);
     const write = sfn.body.find((st) => st.k === 'assign' && st.name === 'v0')!;
     const looped = {
@@ -194,7 +194,9 @@ describe('narrowDeclarations', () => {
         ...sfn.body.filter((st) => st !== write),
       ],
     };
-    expect(narrowDeclarations(looped)).toBeNull();
+    const out = narrowDeclarations(looped)!;
+    expect(local(out, 'v0')?.type).toEqual({ kind: 'int', width: 8, signed: false });
+    expect(cBackend.emit(out)).toContain('for (v0 = ((u8 *)&gA)[12] - 1;');
   });
 
   it('does not narrow a local whose one write is not a narrowing cast', () => {
@@ -400,7 +402,7 @@ describe('narrowReadDeclarations', () => {
     },
   );
 
-  it.each(SIDES)('does not narrow a local whose write %s the call is a `for` loop step', (_, at) => {
+  it.each(SIDES)('takes a local whose write %s the call is a `for` loop step', (_, at) => {
     const looped = at(structured(READ), {
       k: 'for',
       init: { k: 'break' },
@@ -408,7 +410,7 @@ describe('narrowReadDeclarations', () => {
       inc: { k: 'assign', name: 'v0', value: { k: 'const', value: 0 } },
       body: [],
     });
-    expect(narrowReadDeclarations(looped)).toBeNull();
+    expect(local(narrowReadDeclarations(looped)!, 'v0')?.type).toEqual({ kind: 'int', width: 8, signed: false });
   });
 
   it('does not narrow a local whose reads are cast to two widths', () => {
@@ -490,6 +492,99 @@ const PASSED = `fn passed {
   ret
 }
 `;
+
+describe('narrowReadDeclarations over a stepped counter', () => {
+  // synthetic:narrowcnt as KMC gcc lifts it: a counter truncated at its reads and stepped bare
+  const i = { k: 'var' as const, name: 'i' };
+  const r = { k: 'var' as const, name: 'r' };
+  const one = { k: 'const' as const, value: 1 };
+  const counted = (step: Expr, extra: SFn['body'] = []): SFn => ({
+    name: 'narrowcnt',
+    params: [{ name: 'a0', type: T.s(32) }],
+    locals: [
+      { name: 'i', type: T.s(32) },
+      { name: 'r', type: T.s(32) },
+    ],
+    retType: T.s(32),
+    body: [
+      { k: 'assign', name: 'r', value: { k: 'const', value: 0 } },
+      { k: 'assign', name: 'i', value: { k: 'const', value: 0 } },
+      {
+        k: 'dowhile',
+        cond: { k: 'bin', op: '<', l: cast(16, true, i), r: { k: 'const', value: 10 } },
+        body: [
+          { k: 'assign', name: 'r', value: { k: 'bin', op: '+', l: r, r: cast(16, true, i) } },
+          ...extra,
+          { k: 'assign', name: 'i', value: step },
+        ],
+      },
+      { k: 'return', value: r },
+    ],
+  });
+  const plus = (l: Expr, rr: Expr): Expr => ({ k: 'bin', op: '+', l, r: rr });
+
+  it('declares a counter read through one cast and stepped bare at that width', () => {
+    const src = cBackend.emit(narrowReadDeclarations(counted(plus(i, one)))!);
+    expect(src).toContain('s16 i;');
+    expect(src).toContain('r = r + i;');
+    expect(src).toContain('i = i + 1;');
+    expect(src).toContain('} while (i < 10);');
+  });
+
+  it('takes a step through the other low-bit operators', () => {
+    const steps: Expr[] = [
+      { k: 'bin', op: '-', l: { k: 'bin', op: '*', l: i, r: { k: 'const', value: 3 } }, r: a0 },
+      { k: 'bin', op: '^', l: { k: 'un', op: '~', e: i }, r: { k: 'bin', op: '<<', l: i, r: one } },
+    ];
+    for (const step of steps) {
+      expect(local(narrowReadDeclarations(counted(step))!, 'i')?.type).toEqual(T.s(16));
+    }
+  });
+
+  it('does not take a bare read whose high bits reach the write', () => {
+    // a shift right brings high bits down, a shift amount reads the whole value, and a compare or
+    // a second write's operand reads it as a value
+    const reads: Expr[] = [
+      { k: 'bin', op: '>>', l: i, r: one },
+      { k: 'bin', op: '<<', l: one, r: i },
+      plus(i, { k: 'bin', op: '>>', l: i, r: one }),
+      { k: 'bin', op: '<', l: i, r: a0 },
+    ];
+    for (const step of reads) {
+      expect(narrowReadDeclarations(counted(step))).toBeNull();
+    }
+  });
+
+  it('does not take a bare read outside a write back into the counter', () => {
+    const elsewhere: SFn['body'] = [{ k: 'assign', name: 'r', value: plus(r, i) }];
+    expect(narrowReadDeclarations(counted(plus(i, one), elsewhere))).toBeNull();
+  });
+
+  it('does not take a step through a float', () => {
+    const f: Expr = { k: 'fconst', bits: '3ff8000000000000' };
+    expect(narrowReadDeclarations(counted({ k: 'cast', to: T.s(32), e: plus(i, f) }))).toBeNull();
+  });
+
+  it('takes the counter a `for` steps', () => {
+    const sfn = counted(plus(i, one));
+    const loop = sfn.body[2] as Extract<SFn['body'][number], { k: 'dowhile' }>;
+    const looped: SFn = {
+      ...sfn,
+      body: [
+        sfn.body[0]!,
+        {
+          k: 'for',
+          init: sfn.body[1]!,
+          cond: loop.cond,
+          inc: loop.body[1]!,
+          body: [loop.body[0]!],
+        },
+        sfn.body[3]!,
+      ],
+    };
+    expect(cBackend.emit(narrowReadDeclarations(looped)!)).toContain('for (i = 0; i < 10; i = i + 1) {');
+  });
+});
 
 describe('narrowRangeDeclarations', () => {
   const counter = (sfn: SFn) => local(sfn, 'v0')?.type;

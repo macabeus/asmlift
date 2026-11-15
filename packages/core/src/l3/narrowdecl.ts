@@ -70,15 +70,18 @@
 //     so narrowing it would turn its compares, divisions and shifts into signed ones;
 //   • /narrow-decl, /narrow-load: a local written more than once, or by `v++`, where a later write
 //     could store a value the narrow declaration would truncate and a bare read would not;
-//   • /narrow-decl: a local whose one write is a `for` loop's init, or that is not an integer
-//     narrowed to a narrower integer. A call's operand is not known to be an integer (its callee
+//   • /narrow-decl: a local whose one write is not an integer narrowed to a narrower integer. A call's operand is not known to be an integer (its callee
 //     may return a pointer), so `(u8)f()` is refused too;
-//   • /narrow-load: a local whose one write is a `for` loop's init, or is no `p[i]` or member read
-//     of a narrower integer type. A narrow variable (`v = a1` of a `u8 a1`) is refused: no row has
+//   • /narrow-load: a local whose one write is no `p[i]` or member read of a narrower integer type. A narrow variable (`v = a1` of a `u8 a1`) is refused: no row has
 //     needed it;
-//   • /narrow-read: a read that is not a narrowing cast (a bare `v`, an index base, a `v++`), reads
-//     cast to two widths or two signednesses, a write in a `for` loop's init or step, and a write
-//     whose value is a pointer, a float or of no known type. A call is admitted: its value already
+//   • /narrow-read: a read that is not a narrowing cast (a bare `v`, an index base, a `v++`) and
+//     that no write to the local steps, reads cast to two widths or two signednesses, and a write
+//     whose value is a pointer, a float or of no known type. A STEPPED read is a bare `v` reached
+//     from the value written back into `v` through `+`, `-`, `*`, `&`, `|`, `^`, `~`, a negation or
+//     the left side of a `<<` (`v = v + 1`, the step of a counter mwcc, KMC gcc and gcc 2.7.2 lift as
+//     `s32 i; … (s16)i … i = i + 1;`). The low bits of such a write are a function of the low bits
+//     of the read, so the narrow declaration, which keeps the low bits of every write, stores the
+//     value the 32-bit one's narrowed reads observe; nothing else reads the stepped value. A call is admitted: its value already
 //     converts implicitly to the 32-bit local, and narrowing changes only the width of that
 //     conversion, never whether C performs one. A `u32` local and one written more than once are
 //     admitted, because every read already narrows each value stored to the one width.
@@ -96,7 +99,6 @@ import {
   mapStmtLists,
   stmtChildren,
   stmtExprs,
-  stmtLists,
   walkExprs,
 } from './ast';
 import { type Mentions, localMentions, readsOf } from './mentions';
@@ -148,20 +150,49 @@ function readNarrowing(body: Stmt[], name: string, reads: number): Narrowing['to
   return narrowed === reads ? to : undefined;
 }
 
-/** The value of every assignment statement to `name`, found the way the write-side rewrite finds
- *  them: through statement lists, so a `for` init or step is not one. */
-function writtenValues(body: Stmt[], name: string): Expr[] {
-  const values: Expr[] = [];
-  const walk = (list: Stmt[]): void => {
-    for (const s of list) {
-      if (s.k === 'assign' && s.name === name) {
-        values.push(s.value);
-      }
-      stmtLists(s).forEach(walk);
-    }
+/** Every assignment statement to `name`, a `for` loop's init and step included. THE ONE WRITE WALK
+ *  of this file: every member enumerates a local's writes through it and rewrites them through
+ *  {@link rewriteWrites}, which visits the same statements, so no member reaches a write another
+ *  cannot see. A `v++` is no assignment statement, which a member compares against `assigns`. */
+const writesTo = (body: Stmt[], name: string): Expr[] =>
+  assignsIn(body)
+    .filter((a) => a.name === name)
+    .map((a) => a.value);
+
+/** `body` with each write to `name` storing `rewrite`'s value, `for` heads included: the statements
+ *  {@link writesTo} enumerates. */
+function rewriteWrites(body: Stmt[], name: string, rewrite: (value: Expr) => Expr): Stmt[] {
+  const stmt = (s: Stmt): Stmt => {
+    const own = s.k === 'assign' && s.name === name ? { ...s, value: rewrite(s.value) } : s;
+    const nested = mapStmtLists(own, (list) => list.map(stmt));
+    return nested.k === 'for' ? { ...nested, init: stmt(nested.init), inc: stmt(nested.inc) } : nested;
   };
-  walk(body);
-  return values;
+  return body.map(stmt);
+}
+
+/** Binary operators whose 32-bit result bits do not depend on their operands' signedness, and whose
+ *  result's low bits are a function of their operands' low bits (of the left one alone for `<<`). */
+const BIT_OPS: ReadonlySet<BinOp> = new Set<BinOp>(['+', '-', '*', '&', '|', '^', '<<']);
+
+/** The bare reads of `name` that a write of `value` to it STEPS: each one reached from the written
+ *  value through integer operators whose result's low bits are a function of their operands' low
+ *  bits alone (`+`, `-`, `*`, `&`, `|`, `^`, `~`, a negation, and the left operand of a `<<`).
+ *  Such a read feeds nothing but the write back into `name`, so what the write stores modulo 2^w
+ *  is a function of the read's value modulo 2^w, for every width w. */
+function steppedReads(value: Expr, name: string, env: ReturnType<typeof declaredTypes>): number {
+  if (value.k === 'var') {
+    return value.name === name ? 1 : 0;
+  }
+  if (exprCType(value, env)?.kind !== 'int') {
+    return 0;
+  }
+  if (value.k === 'bin' && BIT_OPS.has(value.op)) {
+    return steppedReads(value.l, name, env) + (value.op === '<<' ? 0 : steppedReads(value.r, name, env));
+  }
+  if (value.k === 'un' && (value.op === '~' || value.op === '-')) {
+    return steppedReads(value.e, name, env);
+  }
+  return 0;
 }
 
 /** `body` with every `(T)name` read spelled `name`, of one T when `only` names it. */
@@ -228,16 +259,14 @@ function narrowAtWrite(sfn: SFn, take: WriteNarrowing): SFn | null {
       continue;
     }
     let to: IrType | undefined;
-    const rewrite = (list: Stmt[]): Stmt[] =>
-      list.map((s) => {
-        const taken = s.k === 'assign' && s.name === l.name ? take(s.value, env) : undefined;
-        if (taken !== undefined) {
-          to = taken.to;
-          return { ...s, value: taken.value };
-        }
-        return mapStmtLists(s, rewrite);
-      });
-    const next = rewrite(body);
+    const next = rewriteWrites(body, l.name, (value) => {
+      const taken = take(value, env);
+      if (taken === undefined) {
+        return value;
+      }
+      to = taken.to;
+      return taken.value;
+    });
     if (to !== undefined) {
       body = next;
       narrowed.set(l.name, to);
@@ -264,11 +293,14 @@ export function narrowReadDeclarations(sfn: SFn): SFn | null {
     if (!admissible(l, m)) {
       continue;
     }
-    const written = writtenValues(body, l.name);
+    const written = writesTo(body, l.name);
     if (written.length !== m.assigns || written.some((w) => w.k !== 'call' && exprCType(w, env)?.kind !== 'int')) {
       continue;
     }
-    const read = readNarrowing(body, l.name, readsOf(m));
+    // a read a write steps (`v = v + 1`) is left bare: the narrow declaration stores the same low
+    // bits of the same low bits, and only a narrowed read ever observes them
+    const stepped = written.reduce((n, w) => n + steppedReads(w, l.name, env), 0);
+    const read = readNarrowing(body, l.name, readsOf(m) - stepped);
     if (read !== undefined && written.every((w) => storesQuietly(w, read))) {
       body = dropReadCasts(body, l.name);
       narrowed.set(l.name, read);
@@ -316,11 +348,13 @@ export function narrowReadDeclarations(sfn: SFn): SFn | null {
 // variation beside the other widths.
 //
 // REACH. The counters this takes are the ones whose step the lift spells as a narrowing cast at the
-// write: agbcc's and IDO's cast-stepped counters (55 and 7 bench rows fire it). An IDO step spelled
-// as a mask (`v = v + 1 & 255`) is not an in-range write it admits, and mwcc, kmc and gcc 2.7.2
-// truncate at the read (`(s16)v`, `v << 16 >> 16`), which `/narrow-read` and not this variation
-// would take. Neither is built: declared at the source's width, IDO's `brmerge` and `thrbreak`
-// score no closer (31 -> 31, 29 -> 30 normalized lines), so no row shows the gain.
+// write: agbcc's and IDO's cast-stepped counters (55 and 7 bench rows fire it). The counters mwcc,
+// KMC gcc and gcc 2.7.2 truncate at the read (`s32 i; … (s16)i … i = i + 1;`) are `/narrow-read`'s,
+// which admits the step's bare read (above): `synthetic:narrowcnt` on KMC gcc compiles identically
+// to its source declared `s16 i` and stepped `i = i + 1`. Not built: an IDO step spelled as a mask
+// (`v = v + 1 & 255`), which is no in-range write and has no read cast, and a read spelled as a
+// shift pair (`v << 16 >> 16`). Declared at the source's width, IDO's `brmerge` and `thrbreak` score
+// no closer (31 -> 31, 29 -> 30 normalized lines), so no row shows that gain.
 //
 // REFUSED, beyond `admissible` (no memory, no address, 32-bit integer, initialized):
 //   • a local `/narrow-decl` or `/narrow-load` takes (a signed one with one write they narrow),
@@ -366,18 +400,6 @@ function inRange(value: Expr, env: ReturnType<typeof declaredTypes>): InRange | 
   return undefined;
 }
 
-/** `body` with each write to `name` storing `rewrite`'s value, `for` heads included. */
-function rewriteWrites(body: Stmt[], name: string, rewrite: (value: Expr) => Expr): Stmt[] {
-  const stmt = (s: Stmt): Stmt => {
-    const own = s.k === 'assign' && s.name === name ? { ...s, value: rewrite(s.value) } : s;
-    const nested = mapStmtLists(own, (list) => list.map(stmt));
-    return nested.k === 'for' ? { ...nested, init: stmt(nested.init), inc: stmt(nested.inc) } : nested;
-  };
-  return body.map(stmt);
-}
-
-/** Binary operators whose 32-bit result bits do not depend on their operands' signedness. */
-const BIT_OPS: ReadonlySet<BinOp> = new Set<BinOp>(['+', '-', '*', '&', '|', '^', '<<']);
 /** Operators that read their operands' bits only: the integer compares and connectives (an ordered
  *  one is judged after the rewrite, `signedOverUnsignedCompare`), and those whose printer pins the
  *  signedness the op carries (`/`, `%`, `>>` and their unsigned twins), so an operand of changed
@@ -489,16 +511,16 @@ export function narrowRangeDeclarations(sfn: SFn): SFn | null {
     const env = declaredTypes(cur);
     if (
       writtenOnce(l, m) &&
-      writtenValues(cur.body, l.name).some((w) => castWrite(w, env) !== undefined || loadWrite(w, env) !== undefined)
+      writesTo(cur.body, l.name).some((w) => castWrite(w, env) !== undefined || loadWrite(w, env) !== undefined)
     ) {
       continue;
     }
-    const writes = assignsIn(cur.body).filter((a) => a.name === l.name);
+    const writes = writesTo(cur.body, l.name);
     // a `v++` is counted by `assigns` and is no assignment statement
     if (writes.length !== m.assigns) {
       continue;
     }
-    const ranges = writes.map((w) => inRange(w.value, env));
+    const ranges = writes.map((w) => inRange(w, env));
     if (ranges.some((r) => r === undefined)) {
       continue;
     }
@@ -507,7 +529,7 @@ export function narrowRangeDeclarations(sfn: SFn): SFn | null {
     if (to === undefined || !ranges.every((r) => r!.fits(to)) || (!l.type.signed && to.signed)) {
       continue;
     }
-    const narrowedWrites = new Map(writes.map((w, i) => [w.value, ranges[i]!.value]));
+    const narrowedWrites = new Map(writes.map((w, i) => [w, ranges[i]!.value]));
     const written = rewriteWrites(cur.body, l.name, (v) => narrowedWrites.get(v) ?? v);
     const body = dropReadCasts(written, l.name, to);
     const next: SFn = { ...cur, body, locals: cur.locals.map((x) => (x.name === l.name ? { ...x, type: to } : x)) };
