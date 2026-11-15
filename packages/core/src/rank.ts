@@ -52,6 +52,7 @@ import { mulFirstSums } from './l3/mulfirst';
 import { nearBaseClusters } from './l3/nearbase';
 import { spellOperandMembers } from './l3/offmember';
 import { parkParamsFirst } from './l3/parkfirst';
+import { compoundExpressionAssignments } from './l3/polish/compound';
 import { pointerFields } from './l3/ptrfield';
 import { type RegcopyTail, registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
@@ -1420,6 +1421,8 @@ export function enumerateCandidates(
     respell(['ret-split'], () => splitReturnedMerges(sfn));
     // `/switch-break` — a void function's final switch left by `break;` (l3/switchbreak.ts).
     respell(['switch-break'], () => breakFinalSwitchReturns(sfn));
+    // `/compound-expr` — `x += e` for a non-literal `e` (l3/polish/compound.ts).
+    respell(['compound-expr'], () => compoundExpressionAssignments(sfn));
     // `/volatile` — declare a pointer local holding a NUMERIC address as pointing to volatile
     // data (l3/volatileptr.ts). A raw constant has no declaration anywhere, so the original
     // qualifier is not derivable — and it is codegen-visible (a volatile MEM is barred from

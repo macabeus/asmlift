@@ -1281,6 +1281,26 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     },
     implementedIn: l3('switchbreak'),
   },
+  'compound-expr': {
+    title: 'Compound assignment of an expression',
+    summary: '`x = x + e` is written `x += e` for an `e` that is not a literal',
+    detail:
+      '`x += e` is `x = x + e` with `x` evaluated once, so for a plain local it is the same program. The ' +
+      'printer already writes it for a literal `e`; for any other `e` it is a candidate, because the ' +
+      'compiler can build the two differently.',
+    compilerBehavior: "IDO 7.1 orders the add's operands the other way round for the compound.",
+    offeredWhen: {
+      when: 'A word or pointer local or parameter, not volatile, assigned itself plus or minus a non-literal.',
+      decidedBy: { symbol: 'compoundExpressionAssignments', file: 'packages/core/src/l3/polish/compound.ts' },
+    },
+    example: {
+      compiler: 'ido',
+      unit: 'int example(int *a, int *b, int n) { int s, i; s = 0; for (i = 0; i < n; i++) { @ } return s; }',
+      before: 's = s + a[i] * b[i];',
+      after: 's += a[i] * b[i];',
+    },
+    implementedIn: 'packages/core/src/l3/polish/compound.ts',
+  },
   volatile: {
     title: 'Volatile pointer local',
     summary: 'a pointer local holding a numeric address points at volatile data',

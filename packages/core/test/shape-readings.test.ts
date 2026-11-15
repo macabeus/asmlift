@@ -7,6 +7,7 @@ import { describe, expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
+import { compoundExpressionAssignments } from '../src/l3/polish/compound';
 import { splitReturnedMerges } from '../src/l3/retsplit';
 import { breakFinalSwitchReturns } from '../src/l3/switchbreak';
 
@@ -98,5 +99,25 @@ describe('/switch-break: leave a final switch by break', () => {
   test('declines: a switch that is not last, a non-void function', () => {
     expect(breakFinalSwitchReturns(fnOf([sw(undefined), call('k')], { retType: T.void(), locals: [] }))).toBeNull();
     expect(breakFinalSwitchReturns(fnOf([sw(undefined), ret(c(0))]))).toBeNull();
+  });
+});
+
+describe('/compound-expr: x += e for a non-literal e', () => {
+  test('marks a word local stepped by an expression, not one stepped by a literal', () => {
+    const fn = fnOf([
+      set('v0', bin('+', v('v0'), bin('*', v('a0'), v('a1')))),
+      set('a0', bin('+', v('a0'), c(4))),
+      ret(v('v0')),
+    ]);
+    const out = print(compoundExpressionAssignments(fn))!;
+    expect(out).toContain('v0 += a0 * a1;');
+    expect(out).toContain('a0 = a0 + 4;');
+  });
+
+  test('declines on a narrow local and where nothing qualifies', () => {
+    const fn = fnOf([set('v0', bin('+', v('v0'), v('a0'))), ret(v('v0'))], {
+      locals: [{ name: 'v0', type: T.int(8, false) }],
+    });
+    expect(compoundExpressionAssignments(fn)).toBeNull();
   });
 });

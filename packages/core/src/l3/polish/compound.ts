@@ -42,10 +42,8 @@ export function compoundSum(target: Expr, value: Expr): { op: '+' | '-'; rhs: Ex
 
 const wordOrPointer = (t: IrType): boolean => (t.kind === 'int' && t.width === 32) || t.kind === 'ptr';
 
-export function compoundAssignments(fn: SFn, facts: PolishFacts): SFn {
-  if (facts.literal) {
-    return fn;
-  }
+/** `fn` with every statement `valueOk` admits marked compound, over the targets the header admits. */
+function markCompound(fn: SFn, valueOk: (rhs: Expr) => boolean): { fn: SFn; marked: number } {
   const names = new Set([
     ...fn.params.filter((p) => wordOrPointer(p.type)).map((p) => p.name),
     ...fn.locals.filter((l) => !l.volatile && wordOrPointer(l.type)).map((l) => l.name),
@@ -55,16 +53,35 @@ export function compoundAssignments(fn: SFn, facts: PolishFacts): SFn {
       names.delete(l.name);
     }
   }
-  const valueOk = (rhs: Expr): boolean => rhs.k === 'const' && Number.isInteger(rhs.value);
+  let marked = 0;
   const one = (s: Stmt): Stmt => {
-    if (s.k === 'assign' && names.has(s.name)) {
+    if (s.k === 'assign' && names.has(s.name) && s.compound !== true) {
       const sum = compoundSum({ k: 'var', name: s.name }, s.value);
-      return sum && valueOk(sum.rhs) ? { ...s, compound: true } : s;
+      if (sum && valueOk(sum.rhs)) {
+        marked++;
+        return { ...s, compound: true };
+      }
+      return s;
     }
     if (s.k === 'for') {
       return { ...s, init: one(s.init), inc: one(s.inc), body: s.body.map(one) };
     }
     return mapStmtLists(s, (list) => list.map(one));
   };
-  return { ...fn, body: fn.body.map(one) };
+  return { fn: { ...fn, body: fn.body.map(one) }, marked };
+}
+
+const literal = (rhs: Expr): boolean => rhs.k === 'const' && Number.isInteger(rhs.value);
+
+export function compoundAssignments(fn: SFn, facts: PolishFacts): SFn {
+  return facts.literal ? fn : markCompound(fn, literal).fn;
+}
+
+/** The `/compound-expr` respell variation: the same targets, with an added value that is NOT a
+ *  literal (`s += a[i] * b[i]`) — the case the polish leaves alone because IDO 7.1 spells the add's
+ *  operands in the other order for it. One program either way, so it is a ranked candidate beside
+ *  the plain spelling, at every level. Declines where no statement qualifies. */
+export function compoundExpressionAssignments(fn: SFn): SFn | null {
+  const { fn: out, marked } = markCompound(fn, (rhs) => !literal(rhs));
+  return marked > 0 ? out : null;
 }
