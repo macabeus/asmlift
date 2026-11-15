@@ -489,10 +489,9 @@ const STACKED_WIDTHS: { name: VariationName; apply: (sfn: SFn) => SFn | null }[]
 
 /** The width subsets a candidate applies: every subset of `/narrow-decl`, `/narrow-load` and
  *  `/narrow-read`, then `/narrow-range` alone and beside `/narrow-read`. Not crossed with every
- *  subset, which would double the fan of every tree it fires on (the dearest kleod rows'
- *  among them): of the 50 bench winners holding it, none holds `/narrow-decl` or `/narrow-load`
- *  and 2 hold `/narrow-read`. A row needing it beside a write-side member is what would earn the
- *  rest. */
+ *  subset, which would double the fan of every tree it fires on, the dearest kleod rows among them:
+ *  no bench winner holding it holds `/narrow-decl` or `/narrow-load`. A row needing it beside a
+ *  write-side member is what would earn the rest. */
 const WIDTH_CHOICES: (typeof STACKED_WIDTHS)[number][][] = (() => {
   const byName = (n: VariationName) => STACKED_WIDTHS.find((x) => x.name === n)!;
   const [range, read] = [byName('narrow-range'), byName('narrow-read')];
@@ -505,8 +504,8 @@ const WIDTH_CHOICES: (typeof STACKED_WIDTHS)[number][][] = (() => {
  *  a statement-order/shape or declaration-width respell variation orthogonal to every respell
  *  variation outside this table, derived onto every source. Two members need not commute
  *  (`/narrow-decl` and `/narrow-read` compete for one cast, `/narrow-load` and `/narrow-read` for
- *  one local, and so do `/narrow-read` and `/narrow-range`), and table order then decides which one takes it in a candidate holding both. Which
- *  of them a candidate applies is STACKED_SUBSETS. */
+ *  one local, and so do `/narrow-read` and `/narrow-range`), and table order then decides which one
+ *  takes it in a candidate holding both. Which of them a candidate applies is STACKED_SUBSETS. */
 export const STACKED_VARIATIONS = [...STACKED_SHAPES, ...STACKED_WIDTHS];
 
 /** The PRE-RESPELL variations (sanctioned in the POLICY note at rank.ts's respell site): a tree

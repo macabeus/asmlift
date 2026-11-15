@@ -1977,8 +1977,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     detail:
       'A local every write of which stores a value narrowed to one type or a literal that type holds, a counter most ' +
       'often, can be spelled two ways: a 32-bit local with each write cast, or a local declared at the narrow type ' +
-      'with the casts dropped, a read cast to that type spelled bare too. It holds the same value at every read either way; which one the source declared is not in the ' +
-      "assembly. Applied on top of every other candidate's source.",
+      'with the casts dropped, a read cast to that type spelled bare too. It holds the same value at every read ' +
+      "either way; which one the source declared is not in the assembly. Applied on top of every other candidate's source.",
     compilerBehavior:
       'agbcc keeps the counter an index under either spelling but allocates the rest differently: in a byte copy ' +
       'against a `u8` bound that is used again after the loop, a `u16` counter has the bound held in one more ' +

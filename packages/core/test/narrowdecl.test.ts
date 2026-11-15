@@ -1,9 +1,11 @@
-// The `/narrow-decl`, `/narrow-load` and `/narrow-read` variations (l3/narrowdecl.ts): `s32 v; v =
-// (u8)(x - 1);` is spelled `u8 v; v = x - 1;`, the spelling `kleod:sub_0803E8CC` was compiled from,
-// `s32 v; v = p[4];` is spelled `u8 v; v = p[4];`, the one `pokeemerald:LoadMonInfo` was, and `s32 v;
-// v = f(); … (u8)v …` is spelled `u8 v; v = f(); … v …`, the one `pokeemerald:RtcGetDayCount` was.
-// Each refusal edits one fact of an accepted tree: a structured fixture below, or a hand-built one
-// where the fact (a pointer operand, a `for` init) is not a lift's to produce.
+// The `/narrow-decl`, `/narrow-load`, `/narrow-read` and `/narrow-range` variations
+// (l3/narrowdecl.ts): `s32 v; v = (u8)(x - 1);` is spelled `u8 v; v = x - 1;`, the spelling
+// `kleod:sub_0803E8CC` was compiled from, `s32 v; v = p[4];` is spelled `u8 v; v = p[4];`, the one
+// `pokeemerald:LoadMonInfo` was, `s32 v; v = f(); … (u8)v …` is spelled `u8 v; v = f(); … v …`, the
+// one `pokeemerald:RtcGetDayCount` was, and `u32 v; … v = (u16)(v + 1);` is spelled `u16 v; … v =
+// v + 1;`, the one `pokeemerald:StringCopyN` was. Each refusal edits one fact of an accepted tree: a
+// structured fixture below, or a hand-built one where the fact (a pointer operand, a `for` head) is
+// not a lift's to produce or the tree is another toolchain's lift (KMC gcc's read-truncated counter).
 import { describe, expect, it } from 'vitest';
 
 import { cBackend } from '../src/backend/c';

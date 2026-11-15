@@ -39,16 +39,16 @@
 // as it is stored, right after the `bl`, where `(u8)v` extends at the read, after whatever ran in
 // between (`pokeemerald:RtcGetDayCount`, three results passed on as `u8`s).
 //
-// STACKED variations (rank-variations.ts), derived onto every other candidate's tree: the
+// Four STACKED variations (rank-variations.ts), derived onto every other candidate's tree: the
 // width of a declaration is orthogonal to what every respell variation outside that table changes,
-// and the row that needs it needs it on top of `/offmember`. Three, not one, because a function
+// and the row that needs it needs it on top of `/offmember`. More than one, because a function
 // holding a local narrowed at its cast write, a local written by a narrow load and a local narrowed
 // at its reads may need any combination of the kinds narrowed. Each rewrites every local it admits.
 // They do not commute: a cast that is one local's write and another's read is taken by whichever
 // runs first, and so is a load-written local whose reads are all narrowed. So every subset of the
-// three is its own candidate, and in one holding `/narrow-decl` or `/narrow-load` and `/narrow-read`
-// the write side runs first and takes the local. `/narrow-range` (below) runs after all three, so a
-// local it shares with `/narrow-read` is `/narrow-read`'s in a candidate holding both.
+// first three is its own candidate, and in one holding `/narrow-decl` or `/narrow-load` and
+// `/narrow-read` the write side runs first and takes the local. `/narrow-range` (below) runs after
+// all three, so a local it shares with `/narrow-read` is `/narrow-read`'s in a candidate holding both.
 //
 // KNOWN GAP, and it is the price of deciding at L3 rather than where the value is named: which
 // spelling a call's result had shows only in where its extension lands, right after its `bl` or
@@ -70,21 +70,23 @@
 //     so narrowing it would turn its compares, divisions and shifts into signed ones;
 //   • /narrow-decl, /narrow-load: a local written more than once, or by `v++`, where a later write
 //     could store a value the narrow declaration would truncate and a bare read would not;
-//   • /narrow-decl: a local whose one write is not an integer narrowed to a narrower integer. A call's operand is not known to be an integer (its callee
-//     may return a pointer), so `(u8)f()` is refused too;
-//   • /narrow-load: a local whose one write is no `p[i]` or member read of a narrower integer type. A narrow variable (`v = a1` of a `u8 a1`) is refused: no row has
-//     needed it;
+//   • /narrow-decl: a local whose one write is not an integer narrowed to a narrower integer. A
+//     call's operand is not known to be an integer (its callee may return a pointer), so `(u8)f()`
+//     is refused too;
+//   • /narrow-load: a local whose one write is no `p[i]` or member read of a narrower integer type.
+//     A narrow variable (`v = a1` of a `u8 a1`) is refused: no row has needed it;
 //   • /narrow-read: a read that is not a narrowing cast (a bare `v`, an index base, a `v++`) and
 //     that no write to the local steps, reads cast to two widths or two signednesses, and a write
 //     whose value is a pointer, a float or of no known type. A STEPPED read is a bare `v` reached
 //     from the value written back into `v` through `+`, `-`, `*`, `&`, `|`, `^`, `~`, a negation or
-//     the left side of a `<<` (`v = v + 1`, the step of a counter mwcc, KMC gcc and gcc 2.7.2 lift as
-//     `s32 i; … (s16)i … i = i + 1;`). The low bits of such a write are a function of the low bits
-//     of the read, so the narrow declaration, which keeps the low bits of every write, stores the
-//     value the 32-bit one's narrowed reads observe; nothing else reads the stepped value. A call is admitted: its value already
-//     converts implicitly to the 32-bit local, and narrowing changes only the width of that
-//     conversion, never whether C performs one. A `u32` local and one written more than once are
-//     admitted, because every read already narrows each value stored to the one width.
+//     the left side of a `<<` (`v = v + 1`, the step of a counter mwcc, KMC gcc and gcc 2.7.2 lift
+//     as `s32 i; … (s16)i … i = i + 1;`). The low bits of such a write are a function of the low
+//     bits of the read, so the narrow declaration, which keeps the low bits of every write, stores
+//     the value the 32-bit one's narrowed reads observe; nothing else reads the stepped value. A
+//     call is admitted: its value already converts implicitly to the 32-bit local, and narrowing
+//     changes only the width of that conversion, never whether C performs one. A `u32` local and
+//     one written more than once are admitted, because every read already narrows each value
+//     stored to the one width.
 import type { IrType } from '../ir/types';
 import { declaredWidth } from '../proto';
 import {
@@ -150,9 +152,9 @@ function readNarrowing(body: Stmt[], name: string, reads: number): Narrowing['to
   return narrowed === reads ? to : undefined;
 }
 
-/** Every assignment statement to `name`, a `for` loop's init and step included. THE ONE WRITE WALK
- *  of this file: every member enumerates a local's writes through it and rewrites them through
- *  {@link rewriteWrites}, which visits the same statements, so no member reaches a write another
+/** Every assignment statement to `name`, a `for` loop's init and step included. With
+ *  {@link rewriteWrites}, which visits the same statements, THE ONE WRITE WALK of this file: every
+ *  member finds and rewrites a local's writes through the pair, so no member reaches a write another
  *  cannot see. A `v++` is no assignment statement, which a member compares against `assigns`. */
 const writesTo = (body: Stmt[], name: string): Expr[] =>
   assignsIn(body)
@@ -343,18 +345,17 @@ export function narrowReadDeclarations(sfn: SFn): SFn | null {
 // (`add`, `ldrb`, `strb`); under `u16 v` the bound is held in one more callee-saved register and
 // copied twice more (`add r0, r5, #0`) where `u32 v` compares it in place, so the lifted body
 // compiles 16 normalized lines away from its source and the same body with ONLY the counter
-// declared `u16` identically. Which width the source
-// declared is not in the asm where the two compile alike, so the differ referees: a STACKED
-// variation beside the other widths.
+// declared `u16` identically. Which width the source declared is not in the asm where the two
+// compile alike, so the differ referees: a STACKED variation beside the other widths.
 //
 // REACH. The counters this takes are the ones whose step the lift spells as a narrowing cast at the
-// write: agbcc's and IDO's cast-stepped counters (55 and 7 bench rows fire it). The counters mwcc,
+// write: agbcc's and IDO's cast-stepped counters. The counters mwcc,
 // KMC gcc and gcc 2.7.2 truncate at the read (`s32 i; … (s16)i … i = i + 1;`) are `/narrow-read`'s,
 // which admits the step's bare read (above): `synthetic:narrowcnt` on KMC gcc compiles identically
 // to its source declared `s16 i` and stepped `i = i + 1`. Not built: an IDO step spelled as a mask
 // (`v = v + 1 & 255`), which is no in-range write and has no read cast, and a read spelled as a
-// shift pair (`v << 16 >> 16`). Declared at the source's width, IDO's `brmerge` and `thrbreak` score
-// no closer (31 -> 31, 29 -> 30 normalized lines), so no row shows that gain.
+// shift pair (`v << 16 >> 16`): declared at the source's width, IDO's `brmerge` and `thrbreak`
+// score no closer, so no row shows that gain.
 //
 // REFUSED, beyond `admissible` (no memory, no address, 32-bit integer, initialized):
 //   • a local `/narrow-decl` or `/narrow-load` takes (a signed one with one write they narrow),
@@ -362,9 +363,9 @@ export function narrowReadDeclarations(sfn: SFn): SFn | null {
 //     variation only alone and beside `/narrow-read` (rank-variations.ts), the consequence is that
 //     no candidate narrows such a local AND a counter only this variation takes: a function
 //     holding both (`s32 v1 = (u8)(a0 - 1)` beside a `(u8)`-stepped `u32 v0`) is offered
-//     `u8 v1; u32 v0` and `s32 v1; u8 v0`, never `u8 v1; u8 v0`. No bench winner needs it (0 of
-//     the 50 holding `/narrow-range` hold `/narrow-decl` or `/narrow-load`); a row that does is
-//     what would earn taking that local here when this variation also takes one of its own;
+//     `u8 v1; u32 v0` and `s32 v1; u8 v0`, never `u8 v1; u8 v0`. No bench winner holding
+//     `/narrow-range` holds `/narrow-decl` or `/narrow-load`; a row that needs both is what would
+//     earn taking that local here when this variation also takes one of its own;
 //   • a `v++` or `v--`, which steps the local past T's range in the 32-bit spelling;
 //   • a write that is not one of the three in-range forms above, or two writes of different narrow
 //     types (a `(u8)` beside a `(u16)` would need the wider type, which no write states);
@@ -372,9 +373,8 @@ export function narrowReadDeclarations(sfn: SFn): SFn | null {
 //     expression whose type changes into a consumer listed above;
 //   • a rewrite after which some unsigned compare reads signed.
 
-/** The narrow type a write stores a value of, and the value it stores declared at that type, or
- *  undefined when the write is not known to store a value of one narrow type. A cast's own value is
- *  in range, a literal is when T holds it, and so is an integer whose own type is no wider. */
+/** A write known to store a value of a narrow type: the type it states (a cast's), the value it
+ *  stores once the local is declared narrow, and which narrow types hold that value. */
 type InRange = { to: Narrowing['to'] | undefined; value: Expr; fits: (t: Narrowing['to']) => boolean };
 
 const holds = (t: Narrowing['to'], c: number): boolean =>
@@ -384,6 +384,9 @@ const holds = (t: Narrowing['to'], c: number): boolean =>
 const within = (from: Narrowing['to'], to: Narrowing['to']): boolean =>
   from.signed === to.signed ? from.width <= to.width : !from.signed && to.signed && from.width < to.width;
 
+/** `value` as an in-range write, or undefined when it is not known to store a value of one narrow
+ *  type. A cast's own value is in range, a literal is when T holds it, and so is an integer whose own
+ *  type is no wider. */
 function inRange(value: Expr, env: ReturnType<typeof declaredTypes>): InRange | undefined {
   const cast = castWrite(value, env);
   if (cast !== undefined) {
