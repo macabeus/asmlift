@@ -1973,22 +1973,23 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     summary:
       'a local every write of which stores a value of one narrow type, a counter stepped through a cast, is declared at that type',
     detail:
-      'A local written several times, each time with a value narrowed to one type or a literal that type holds, can be ' +
-      'spelled two ways: a 32-bit local with each write cast, or a local declared at the narrow type with the casts ' +
-      'dropped. It holds the same value at every read either way; which one the source declared is not in the ' +
+      'A local every write of which stores a value narrowed to one type or a literal that type holds, a counter most ' +
+      'often, can be spelled two ways: a 32-bit local with each write cast, or a local declared at the narrow type ' +
+      'with the casts dropped, a read cast to that type spelled bare too. It holds the same value at every read either way; which one the source declared is not in the ' +
       "assembly. Applied on top of every other candidate's source.",
     compilerBehavior:
-      'gcc 2.9 keeps a narrow counter as an index and strength-reduces a word one into a pointer walk, so agbcc ' +
-      'compiles a byte copy indexed by a `u16` counter differently from one indexed by a `u32` counter cast at its step.',
+      'agbcc keeps the counter an index under either spelling but allocates the rest differently: in a byte copy ' +
+      'against a `u8` bound that is used again after the loop, a `u16` counter has the bound held in one more ' +
+      'callee-saved register and copied before each compare, where a `u32` counter cast at its step compares it in place.',
     offeredWhen: {
-      when: 'A 32-bit local in no memory, written twice or more and never by `v++`, every write a value of one narrow type.',
+      when: "A 32-bit local in no memory, not `v++`-written, every write one narrow type, and not a write-side member's.",
       decidedBy: { symbol: 'narrowRangeDeclarations', file: l3('narrowdecl') },
     },
     example: {
       compiler: 'agbcc',
-      unit: 'void example(u8 *d, u8 *s, u8 n) { @ }',
-      before: 'u32 v; v = 0; while (v < n) { d[v] = s[v]; v = (u16)(v + 1); }',
-      after: 'u16 v; v = 0; while (v < n) { d[v] = s[v]; v = v + 1; }',
+      unit: 'u8 *example(u8 *d, u8 *s, u8 n) { @ }',
+      before: 'u32 v; v = 0; while (v < n) { d[v] = s[v]; v = (u16)(v + 1); } return d + n;',
+      after: 'u16 v; v = 0; while (v < n) { d[v] = s[v]; v = v + 1; } return d + n;',
     },
     implementedIn: l3('narrowdecl'),
     seeAlso: ['narrow-decl', 'narrow-load', 'narrow-read'],

@@ -39,15 +39,16 @@
 // as it is stored, right after the `bl`, where `(u8)v` extends at the read, after whatever ran in
 // between (`pokeemerald:RtcGetDayCount`, three results passed on as `u8`s).
 //
-// Three STACKED variations (rank-variations.ts), derived onto every other candidate's tree: the
+// STACKED variations (rank-variations.ts), derived onto every other candidate's tree: the
 // width of a declaration is orthogonal to what every respell variation outside that table changes,
 // and the row that needs it needs it on top of `/offmember`. Three, not one, because a function
 // holding a local narrowed at its cast write, a local written by a narrow load and a local narrowed
 // at its reads may need any combination of the kinds narrowed. Each rewrites every local it admits.
 // They do not commute: a cast that is one local's write and another's read is taken by whichever
 // runs first, and so is a load-written local whose reads are all narrowed. So every subset of the
-// three is its own candidate, and in one holding a write-side member and `/narrow-read` the
-// write side runs first and takes the local.
+// three is its own candidate, and in one holding `/narrow-decl` or `/narrow-load` and `/narrow-read`
+// the write side runs first and takes the local. `/narrow-range` (below) runs after all three, so a
+// local it shares with `/narrow-read` is `/narrow-read`'s in a candidate holding both.
 //
 // KNOWN GAP, and it is the price of deciding at L3 rather than where the value is named: which
 // spelling a call's result had shows only in where its extension lands, right after its `bl` or
@@ -83,9 +84,11 @@
 //     admitted, because every read already narrows each value stored to the one width.
 import type { IrType } from '../ir/types';
 import {
+  type BinOp,
   type Expr,
   type SFn,
   type Stmt,
+  assignsIn,
   exprChildren,
   mapExprChildren,
   mapStmtExprs,
@@ -96,7 +99,13 @@ import {
   walkExprs,
 } from './ast';
 import { type Mentions, localMentions, readsOf } from './mentions';
-import { declaredTypes, exprCType, renderedIntSignedness, signedOverUnsignedCompare } from './typing';
+import {
+  INT_RESULT_BINOPS,
+  declaredTypes,
+  exprCType,
+  renderedIntSignedness,
+  signedOverUnsignedCompare,
+} from './typing';
 
 type Narrowing = Extract<Expr, { k: 'cast' }> & { to: Extract<IrType, { kind: 'int' }> };
 
@@ -154,9 +163,11 @@ function writtenValues(body: Stmt[], name: string): Expr[] {
   return values;
 }
 
-/** `body` with every `(T)name` read spelled `name`. */
-const dropReadCasts = (body: Stmt[], name: string): Stmt[] => {
-  const expr = (e: Expr): Expr => (isReadNarrowing(e, name) ? e.e : mapExprChildren(e, expr));
+/** `body` with every `(T)name` read spelled `name`, of one T when `only` names it. */
+const dropReadCasts = (body: Stmt[], name: string, only?: Narrowing['to']): Stmt[] => {
+  const drops = (e: Expr): e is Narrowing =>
+    isReadNarrowing(e, name) && (only === undefined || (e.to.width === only.width && e.to.signed === only.signed));
+  const expr = (e: Expr): Expr => (drops(e) ? e.e : mapExprChildren(e, expr));
   return body.map((s) => mapStmtExprs(s, expr));
 };
 
@@ -199,6 +210,10 @@ const loadWrite: WriteNarrowing = (value, env) => {
   return to === undefined ? undefined : { to, value };
 };
 
+/** A local the write-side members consider: admitted, signed, and written once. */
+const writtenOnce = (l: SFn['locals'][number], m: Mentions | undefined): m is Mentions =>
+  admissible(l, m) && m.assigns === 1 && l.type.kind === 'int' && l.type.signed;
+
 /** The tree with every admitted local whose one write `take` takes narrowed at that write, or null
  *  when none is. */
 function narrowAtWrite(sfn: SFn, take: WriteNarrowing): SFn | null {
@@ -208,7 +223,7 @@ function narrowAtWrite(sfn: SFn, take: WriteNarrowing): SFn | null {
   const narrowed = new Map<string, IrType>();
   for (const l of sfn.locals) {
     const m = mentions.get(l.name);
-    if (!admissible(l, m) || m.assigns !== 1 || l.type.kind !== 'int' || !l.type.signed) {
+    if (!writtenOnce(l, m)) {
       continue;
     }
     let to: IrType | undefined;
@@ -263,8 +278,8 @@ export function narrowReadDeclarations(sfn: SFn): SFn | null {
 
 // ---------------------------------------------------------------------------------------------
 // `/narrow-range`: a local EVERY write of which already stores a value of one narrow type, declared
-// at that type. The shape is a narrow loop counter, which the lift spells as a 32-bit local stepped
-// through a cast:
+// at that type, however many writes it has. The shape is a narrow loop counter, which the lift
+// spells as a 32-bit local stepped through a cast:
 //
 //   u32 v; v = 0; do { … v … v = (u16)(v + 1); } while (v < n);
 //   becomes   u16 v; v = 0; do { … v … v = v + 1; } while (v < n);
@@ -287,15 +302,21 @@ export function narrowReadDeclarations(sfn: SFn): SFn | null {
 //     type as an integer or a pointer, a cast to a wider or a float type, a store to a lvalue whose
 //     type is unknown, a member base.
 //
-// THE CODEGEN FACT. gcc 2.9 keeps a narrow counter as an index and strength-reduces a word one into
-// a pointer walk (raise/narrowlocal.ts' header has the mechanism): agbcc compiles the lifted
-// `pokeemerald:StringCopyN` 16 normalized lines away from its source, and the same body with ONLY
-// the counter declared `u16` identically. Which width the source declared is not in the asm where
-// the two compile alike, so the differ referees: a STACKED variation beside the other widths.
+// A read the 32-bit spelling cast to T (`(u8)v`) is the bare read once `v` is declared T, and is
+// spelled bare: `(T)v` and `v` are the same `int` of the same T value.
+//
+// THE CODEGEN FACT. agbcc allocates the two spellings differently. In `pokeemerald:StringCopyN`
+// (a byte copy indexed by a counter, against a `u8` bound) both keep the counter an index
+// (`add`, `ldrb`, `strb`); under `u16 v` the bound is held in one more callee-saved register and
+// copied twice more (`add r0, r5, #0`) where `u32 v` compares it in place, so the lifted body
+// compiles 16 normalized lines away from its source and the same body with ONLY the counter
+// declared `u16` identically. Which width the source
+// declared is not in the asm where the two compile alike, so the differ referees: a STACKED
+// variation beside the other widths.
 //
 // REFUSED, beyond `admissible` (no memory, no address, 32-bit integer, initialized):
-//   • fewer than two writes: one write is `/narrow-decl`'s or `/narrow-load`'s, and offering it here
-//     too would derive the same tree twice;
+//   • a local `/narrow-decl` or `/narrow-load` takes (a signed one with one write they narrow),
+//     which offering here too would derive the same tree twice;
 //   • a `v++` or `v--`, which steps the local past T's range in the 32-bit spelling;
 //   • a write that is not one of the three in-range forms above, or two writes of different narrow
 //     types (a `(u8)` beside a `(u16)` would need the wider type, which no write states);
@@ -316,8 +337,9 @@ const within = (from: Narrowing['to'], to: Narrowing['to']): boolean =>
   from.signed === to.signed ? from.width <= to.width : !from.signed && to.signed && from.width < to.width;
 
 function inRange(value: Expr, env: ReturnType<typeof declaredTypes>): InRange | undefined {
-  if (isNarrowing(value, env)) {
-    return { to: value.to, value: value.e, fits: (t) => t.width === value.to.width && t.signed === value.to.signed };
+  const cast = castWrite(value, env);
+  if (cast !== undefined) {
+    return { to: cast.to, value: cast.value, fits: (t) => t.width === cast.to.width && t.signed === cast.to.signed };
   }
   if (value.k === 'const') {
     return { to: undefined, value, fits: (t) => holds(t, value.value) };
@@ -328,19 +350,6 @@ function inRange(value: Expr, env: ReturnType<typeof declaredTypes>): InRange | 
     return { to: undefined, value, fits: (to) => within(from, to) };
   }
   return undefined;
-}
-
-/** Every assignment statement to `name`, `for` heads included. */
-function allWrites(body: Stmt[], name: string): Extract<Stmt, { k: 'assign' }>[] {
-  const out: Extract<Stmt, { k: 'assign' }>[] = [];
-  const walk = (s: Stmt): void => {
-    if (s.k === 'assign' && s.name === name) {
-      out.push(s);
-    }
-    stmtChildren(s).forEach(walk);
-  };
-  body.forEach(walk);
-  return out;
 }
 
 /** `body` with each write to `name` storing `rewrite`'s value, `for` heads included. */
@@ -354,24 +363,19 @@ function rewriteWrites(body: Stmt[], name: string, rewrite: (value: Expr) => Exp
 }
 
 /** Binary operators whose 32-bit result bits do not depend on their operands' signedness. */
-const BIT_OPS: ReadonlySet<string> = new Set(['+', '-', '*', '&', '|', '^', '<<']);
-/** Operators that read their operands' bits only, or whose printer pins the signedness the op
- *  carries (`/`, `%`, `>>` and their unsigned twins), so an operand of changed type means the same. */
-const BIT_READERS: ReadonlySet<string> = new Set([
-  '==',
-  '!=',
-  '&&',
-  '||',
+const BIT_OPS: ReadonlySet<BinOp> = new Set<BinOp>(['+', '-', '*', '&', '|', '^', '<<']);
+/** Operators that read their operands' bits only: the integer compares and connectives (an ordered
+ *  one is judged after the rewrite, `signedOverUnsignedCompare`), and those whose printer pins the
+ *  signedness the op carries (`/`, `%`, `>>` and their unsigned twins), so an operand of changed
+ *  type means the same. A float compare converts its operands by value and is not one. */
+const BIT_READERS: ReadonlySet<BinOp> = new Set<BinOp>([
+  ...[...INT_RESULT_BINOPS].filter((op) => !op.startsWith('f')),
   '/',
   '/u',
   '%',
   '%u',
   '>>',
   '>>>',
-  '<',
-  '<=',
-  '>',
-  '>=',
 ]);
 
 /** Whether an integer or pointer type a value converts into keeps its 32 bits. */
@@ -462,11 +466,17 @@ export function narrowRangeDeclarations(sfn: SFn): SFn | null {
   let any = false;
   for (const l of sfn.locals) {
     const m = mentions.get(l.name);
-    if (!admissible(l, m) || l.type.kind !== 'int' || m.assigns < 2) {
+    if (!admissible(l, m) || l.type.kind !== 'int') {
       continue;
     }
     const env = declaredTypes(cur);
-    const writes = allWrites(cur.body, l.name);
+    if (
+      writtenOnce(l, m) &&
+      writtenValues(cur.body, l.name).some((w) => castWrite(w, env) !== undefined || loadWrite(w, env) !== undefined)
+    ) {
+      continue;
+    }
+    const writes = assignsIn(cur.body).filter((a) => a.name === l.name);
     // a `v++` is counted by `assigns` and is no assignment statement
     if (writes.length !== m.assigns) {
       continue;
@@ -481,7 +491,8 @@ export function narrowRangeDeclarations(sfn: SFn): SFn | null {
       continue;
     }
     const narrowedWrites = new Map(writes.map((w, i) => [w.value, ranges[i]!.value]));
-    const body = rewriteWrites(cur.body, l.name, (v) => narrowedWrites.get(v) ?? v);
+    const written = rewriteWrites(cur.body, l.name, (v) => narrowedWrites.get(v) ?? v);
+    const body = dropReadCasts(written, l.name, to);
     const next: SFn = { ...cur, body, locals: cur.locals.map((x) => (x.name === l.name ? { ...x, type: to } : x)) };
     if (!l.type.signed) {
       const before = env;

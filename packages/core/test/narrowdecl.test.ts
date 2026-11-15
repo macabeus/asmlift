@@ -101,6 +101,7 @@ const structured = (ir: string): SFn => {
 const local = (sfn: SFn, name: string) => sfn.locals.find((l) => l.name === name);
 
 const v0 = { k: 'var' as const, name: 'v0' };
+const a0 = { k: 'var' as const, name: 'a0' };
 const cast = (width: number, signed: boolean, e: Expr): Expr => ({
   k: 'cast',
   to: { kind: 'int', width, signed },
@@ -588,6 +589,73 @@ describe('narrowRangeDeclarations', () => {
   it('leaves a local written once to /narrow-decl', () => {
     expect(narrowRangeDeclarations(structured(NAMED))).toBeNull();
   });
+
+  // a u32 local written once through a cast, which /narrow-decl and /narrow-load refuse as unsigned
+  const once = (signed: boolean): SFn => ({
+    name: 'f',
+    params: [
+      { name: 'a0', type: T.u(32) },
+      { name: 'a2', type: T.u(32) },
+    ],
+    locals: [{ name: 'v0', type: { kind: 'int', width: 32, signed } }],
+    retType: T.s(32),
+    body: [
+      { k: 'assign', name: 'v0', value: cast(16, false, { k: 'bin', op: '+', l: a0, r: { k: 'const', value: 1 } }) },
+      call(v0),
+      call(v0),
+      { k: 'return', value: { k: 'bin', op: '<', l: v0, r: { k: 'var', name: 'a2' }, unsignedCmp: true } },
+    ],
+  });
+
+  it('declares a u32 local written once at its cast width, which no write-side member takes', () => {
+    expect(narrowDeclarations(once(false))).toBeNull();
+    expect(narrowLoadDeclarations(once(false))).toBeNull();
+    const src = cBackend.emit(narrowRangeDeclarations(once(false))!);
+    expect(src).toContain('u16 v0;');
+    expect(src).toContain('v0 = a0 + 1;');
+  });
+
+  it('leaves a signed local written once through a cast to /narrow-decl', () => {
+    expect(narrowDeclarations(once(true))).not.toBeNull();
+    expect(narrowRangeDeclarations(once(true))).toBeNull();
+  });
+
+  // written on two arms and read through the cast both writes store
+  const arms = (): SFn => ({
+    name: 'f',
+    params: [
+      { name: 'a0', type: T.s(32) },
+      { name: 'a1', type: T.s(32) },
+      { name: 'a2', type: T.s(32) },
+    ],
+    locals: [{ name: 'v0', type: T.s(32) }],
+    retType: T.s(32),
+    body: [
+      {
+        k: 'if',
+        cond: { k: 'var', name: 'a2' },
+        then: [{ k: 'assign', name: 'v0', value: cast(8, false, a0) }],
+        else: [{ k: 'assign', name: 'v0', value: cast(8, false, { k: 'var', name: 'a1' }) }],
+      },
+      call(cast(8, false, v0)),
+      call(cast(8, false, v0)),
+    ],
+  });
+
+  it('spells a read cast to the declared type bare', () => {
+    const src = cBackend.emit(narrowRangeDeclarations(arms())!);
+    expect(src).toContain('u8 v0;');
+    expect(src).toContain('use(v0);');
+    expect(src).not.toContain('(u8)');
+  });
+
+  it('leaves a local /narrow-read also takes to /narrow-read in a candidate holding both', () => {
+    const both = applyStacked(
+      STACKED_VARIATIONS.filter((x) => x.name === 'narrow-read' || x.name === 'narrow-range'),
+      arms(),
+    )!;
+    expect(both.variations).toEqual(['narrow-read']);
+  });
 });
 
 describe('/narrow-decl and /narrow-load stacked', () => {
@@ -656,7 +724,7 @@ describe('the stacked subsets', () => {
     ['narrow-load', 'narrow-read'],
     ['narrow-decl', 'narrow-load', 'narrow-read'],
   ];
-  const widths = [...THREE, ...THREE.map((w) => [...w, 'narrow-range'])];
+  const widths = [...THREE, ['narrow-range'], ['narrow-read', 'narrow-range']];
 
   it('offers every shape choice with every width subset, each once, the shapes first', () => {
     const product = shapes.flatMap((s) => widths.map((w) => [...s, ...w].join('/'))).filter((n) => n !== '');

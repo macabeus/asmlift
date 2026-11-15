@@ -476,10 +476,10 @@ const STACKED_SHAPES: { name: VariationName; apply: (sfn: SFn) => SFn | null }[]
 /** The declaration-width members: one dimension, the width each kind of local is declared at
  *  (l3/narrowdecl.ts). A function holding a cast-written local,
  *  load-written locals and call-result locals may need any combination of the three kinds narrow
- *  while all three fire (the matching suite compiles all eight), so every subset is offered. The
- *  fourth, `/narrow-range`, takes a local written more than once (a counter) and none of the three
- *  take one, so it is orthogonal to them and crossed with them the same way; a subset holding it
- *  costs a candidate only where it fires (applyStacked's skip-on-decline and `firstFired`). */
+ *  while all three fire (the matching suite compiles all eight), so every subset of the first three
+ *  is offered (WIDTH_CHOICES). The fourth, `/narrow-range`, takes a local's every write, and runs
+ *  last: a local `/narrow-read` also admits (one written several times, every read narrowed) is
+ *  narrowed by `/narrow-read` in a subset holding both. */
 const STACKED_WIDTHS: { name: VariationName; apply: (sfn: SFn) => SFn | null }[] = [
   { name: 'narrow-decl', apply: narrowDeclarations },
   { name: 'narrow-load', apply: narrowLoadDeclarations },
@@ -487,11 +487,25 @@ const STACKED_WIDTHS: { name: VariationName; apply: (sfn: SFn) => SFn | null }[]
   { name: 'narrow-range', apply: narrowRangeDeclarations },
 ];
 
+/** The width subsets a candidate applies: every subset of `/narrow-decl`, `/narrow-load` and
+ *  `/narrow-read`, then `/narrow-range` alone and beside `/narrow-read`. Not crossed with every
+ *  subset, which would double the fan of every tree it fires on (the dearest kleod rows'
+ *  among them): of the 50 bench winners holding it, none holds `/narrow-decl` or `/narrow-load`
+ *  and 2 hold `/narrow-read`. A row needing it beside a write-side member is what would earn the
+ *  rest. */
+const WIDTH_CHOICES: (typeof STACKED_WIDTHS)[number][][] = (() => {
+  const byName = (n: VariationName) => STACKED_WIDTHS.find((x) => x.name === n)!;
+  const [range, read] = [byName('narrow-range'), byName('narrow-read')];
+  const subsets = <X>(xs: readonly X[]): X[][] =>
+    xs.reduce<X[][]>((acc, x) => [...acc, ...acc.map((s) => [...s, x])], [[]]);
+  return [...subsets(STACKED_WIDTHS.filter((x) => x !== range)), [range], [read, range]];
+})();
+
 /** The STACKED variations (sanctioned in the POLICY note at rank.ts's respell site): each entry is
  *  a statement-order/shape or declaration-width respell variation orthogonal to every respell
  *  variation outside this table, derived onto every source. Two members need not commute
  *  (`/narrow-decl` and `/narrow-read` compete for one cast, `/narrow-load` and `/narrow-read` for
- *  one local), and table order then decides which one takes it in a candidate holding both. Which
+ *  one local, and so do `/narrow-read` and `/narrow-range`), and table order then decides which one takes it in a candidate holding both. Which
  *  of them a candidate applies is STACKED_SUBSETS. */
 export const STACKED_VARIATIONS = [...STACKED_SHAPES, ...STACKED_WIDTHS];
 
@@ -572,25 +586,20 @@ export const PRE_RESPELL_VARIATIONS: typeof STACKED_VARIATIONS = [
   { name: 'case-end-goto', apply: jumpToCaseEnds },
 ];
 
-/** Every subset of `xs`, the empty one first, each in `xs`' order. */
-const subsets = <X>(xs: readonly X[]): X[][] =>
-  xs.reduce<X[][]>((acc, x) => [...acc, ...acc.map((s) => [...s, x])], [[]]);
-
 /** The stacked members a candidate applies: the table's two dimensions crossed, a shape choice
- *  (none, each shape alone, or every shape) by a width choice (any subset of the widths, none
+ *  (none, each shape alone, or every shape) by a width choice (one of WIDTH_CHOICES, none
  *  included), the shapes first. A product, because a function may need a shape AND a strict subset
  *  of the widths that fire: `initfirst` beside a narrow cast-written local and wide load-written
  *  ones (the matching suite compiles that pair both ways). The shapes are not a lattice of their own:
  *  applyStacked's skip-on-decline makes "every shape" each pair of them wherever the third declines,
  *  and a row demanding a strict subset of the shapes while all fire is what would earn one. Fewest
  *  members first, so where everything else ties the smaller set is enumerated first and wins. */
-export const STACKED_SUBSETS: (typeof STACKED_VARIATIONS)[number][][] = subsets(STACKED_WIDTHS)
-  .flatMap((widths) =>
-    [[], ...STACKED_SHAPES.map((x) => [x]), ...(STACKED_SHAPES.length > 1 ? [STACKED_SHAPES] : [])].map((shapes) => [
-      ...shapes,
-      ...widths,
-    ]),
-  )
+export const STACKED_SUBSETS: (typeof STACKED_VARIATIONS)[number][][] = WIDTH_CHOICES.flatMap((widths) =>
+  [[], ...STACKED_SHAPES.map((x) => [x]), ...(STACKED_SHAPES.length > 1 ? [STACKED_SHAPES] : [])].map((shapes) => [
+    ...shapes,
+    ...widths,
+  ]),
+)
   .filter((subset) => subset.length > 0)
   .sort((a, b) => a.length - b.length);
 
