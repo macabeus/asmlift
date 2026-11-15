@@ -142,6 +142,7 @@ const TOKENS = [
   { name: 'narrow-decl', variationKind: 'respell' },
   { name: 'narrow-load', variationKind: 'respell' },
   { name: 'narrow-read', variationKind: 'respell' },
+  { name: 'narrow-range', variationKind: 'respell' },
   {
     name: 'int-cell',
     variationKind: 'respell',

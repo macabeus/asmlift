@@ -28,7 +28,12 @@ import { jumpToCaseEnds } from './l3/caseendgoto';
 import type { Gate } from './l3/gates';
 import type { HoistPlacement } from './l3/hoist';
 import { initFirstGuards } from './l3/initfirst';
-import { narrowDeclarations, narrowLoadDeclarations, narrowReadDeclarations } from './l3/narrowdecl';
+import {
+  narrowDeclarations,
+  narrowLoadDeclarations,
+  narrowRangeDeclarations,
+  narrowReadDeclarations,
+} from './l3/narrowdecl';
 import { pollGuards, pollReads } from './l3/pollguard';
 import { unmergeJoins } from './l3/unmerge';
 // TYPE-ONLY, and deliberately: the structure-variation table types its `options` as
@@ -471,11 +476,15 @@ const STACKED_SHAPES: { name: VariationName; apply: (sfn: SFn) => SFn | null }[]
 /** The declaration-width members: one dimension, the width each kind of local is declared at
  *  (l3/narrowdecl.ts). A function holding a cast-written local,
  *  load-written locals and call-result locals may need any combination of the three kinds narrow
- *  while all three fire (the matching suite compiles all eight), so every subset is offered. */
+ *  while all three fire (the matching suite compiles all eight), so every subset is offered. The
+ *  fourth, `/narrow-range`, takes a local written more than once (a counter) and none of the three
+ *  take one, so it is orthogonal to them and crossed with them the same way; a subset holding it
+ *  costs a candidate only where it fires (applyStacked's skip-on-decline and `firstFired`). */
 const STACKED_WIDTHS: { name: VariationName; apply: (sfn: SFn) => SFn | null }[] = [
   { name: 'narrow-decl', apply: narrowDeclarations },
   { name: 'narrow-load', apply: narrowLoadDeclarations },
   { name: 'narrow-read', apply: narrowReadDeclarations },
+  { name: 'narrow-range', apply: narrowRangeDeclarations },
 ];
 
 /** The STACKED variations (sanctioned in the POLICY note at rank.ts's respell site): each entry is

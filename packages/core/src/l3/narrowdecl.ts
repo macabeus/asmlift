@@ -86,14 +86,17 @@ import {
   type Expr,
   type SFn,
   type Stmt,
+  exprChildren,
   mapExprChildren,
   mapStmtExprs,
   mapStmtLists,
+  stmtChildren,
+  stmtExprs,
   stmtLists,
   walkExprs,
 } from './ast';
 import { type Mentions, localMentions, readsOf } from './mentions';
-import { declaredTypes, exprCType } from './typing';
+import { declaredTypes, exprCType, renderedIntSignedness, signedOverUnsignedCompare } from './typing';
 
 type Narrowing = Extract<Expr, { k: 'cast' }> & { to: Extract<IrType, { kind: 'int' }> };
 
@@ -256,4 +259,246 @@ export function narrowReadDeclarations(sfn: SFn): SFn | null {
     }
   }
   return declared(sfn, body, narrowed);
+}
+
+// ---------------------------------------------------------------------------------------------
+// `/narrow-range`: a local EVERY write of which already stores a value of one narrow type, declared
+// at that type. The shape is a narrow loop counter, which the lift spells as a 32-bit local stepped
+// through a cast:
+//
+//   u32 v; v = 0; do { … v … v = (u16)(v + 1); } while (v < n);
+//   becomes   u16 v; v = 0; do { … v … v = v + 1; } while (v < n);
+//
+// THE SAME VALUE AT EVERY READ. Each write is a narrowing cast to T, or a literal in T's range, or
+// an integer that already has a type no wider than T and of a sign T holds, so the local holds a
+// value of T at every point the 32-bit spelling reads it (it is never read uninitialized: an
+// `uninit` local is refused). Declared T, each write converts to T exactly where the cast did, and
+// a read is that value promoted to `int`.
+//   • Over an `s32` local that is the whole argument: a read was an `int` and still is.
+//   • Over a `u32` local a read was `unsigned` and becomes `int` of the same value. T must then be
+//     unsigned (a signed T stored in a `u32` holds 2^32 + v for a negative v, which no narrow T
+//     reads back). The read itself converts to the same value anywhere, but an expression built on
+//     it may change type: `v - 1` was `unsigned` and is now `int`, the same 32 bits. Bits are all
+//     `+`, `-`, `*`, `&`, `|`, `^`, `~`, `<<`, a cast to an integer of at most 32 bits, an index, an
+//     equality and a truth test read, and the C-family printer pins `/`, `%` and `>>` to the
+//     signedness their op carries (backend/cfamily.ts). An ordered compare is judged on the whole
+//     tree after the rewrite (typing.ts `signedOverUnsignedCompare`). Every other consumer of an
+//     expression whose type changed refuses the local: a call argument the declared callee does not
+//     type as an integer or a pointer, a cast to a wider or a float type, a store to a lvalue whose
+//     type is unknown, a member base.
+//
+// THE CODEGEN FACT. gcc 2.9 keeps a narrow counter as an index and strength-reduces a word one into
+// a pointer walk (raise/narrowlocal.ts' header has the mechanism): agbcc compiles the lifted
+// `pokeemerald:StringCopyN` 16 normalized lines away from its source, and the same body with ONLY
+// the counter declared `u16` identically. Which width the source declared is not in the asm where
+// the two compile alike, so the differ referees: a STACKED variation beside the other widths.
+//
+// REFUSED, beyond `admissible` (no memory, no address, 32-bit integer, initialized):
+//   • fewer than two writes: one write is `/narrow-decl`'s or `/narrow-load`'s, and offering it here
+//     too would derive the same tree twice;
+//   • a `v++` or `v--`, which steps the local past T's range in the 32-bit spelling;
+//   • a write that is not one of the three in-range forms above, or two writes of different narrow
+//     types (a `(u8)` beside a `(u16)` would need the wider type, which no write states);
+//   • a `u32` local narrowed to a signed type, and a `u32` local one of whose reads feeds an
+//     expression whose type changes into a consumer listed above;
+//   • a rewrite after which some unsigned compare reads signed.
+
+/** The narrow type a write stores a value of, and the value it stores declared at that type, or
+ *  undefined when the write is not known to store a value of one narrow type. A cast's own value is
+ *  in range, a literal is when T holds it, and so is an integer whose own type is no wider. */
+type InRange = { to: Narrowing['to'] | undefined; value: Expr; fits: (t: Narrowing['to']) => boolean };
+
+const holds = (t: Narrowing['to'], c: number): boolean =>
+  t.signed ? c >= -(2 ** (t.width - 1)) && c < 2 ** (t.width - 1) : c >= 0 && c < 2 ** t.width;
+
+/** Whether every value of integer type `from` is a value of `to`. */
+const within = (from: Narrowing['to'], to: Narrowing['to']): boolean =>
+  from.signed === to.signed ? from.width <= to.width : !from.signed && to.signed && from.width < to.width;
+
+function inRange(value: Expr, env: ReturnType<typeof declaredTypes>): InRange | undefined {
+  if (isNarrowing(value, env)) {
+    return { to: value.to, value: value.e, fits: (t) => t.width === value.to.width && t.signed === value.to.signed };
+  }
+  if (value.k === 'const') {
+    return { to: undefined, value, fits: (t) => holds(t, value.value) };
+  }
+  const t = value.k === 'call' ? undefined : exprCType(value, env);
+  if (t?.kind === 'int' && t.width < 32) {
+    const from = t as Narrowing['to'];
+    return { to: undefined, value, fits: (to) => within(from, to) };
+  }
+  return undefined;
+}
+
+/** Every assignment statement to `name`, `for` heads included. */
+function allWrites(body: Stmt[], name: string): Extract<Stmt, { k: 'assign' }>[] {
+  const out: Extract<Stmt, { k: 'assign' }>[] = [];
+  const walk = (s: Stmt): void => {
+    if (s.k === 'assign' && s.name === name) {
+      out.push(s);
+    }
+    stmtChildren(s).forEach(walk);
+  };
+  body.forEach(walk);
+  return out;
+}
+
+/** `body` with each write to `name` storing `rewrite`'s value, `for` heads included. */
+function rewriteWrites(body: Stmt[], name: string, rewrite: (value: Expr) => Expr): Stmt[] {
+  const stmt = (s: Stmt): Stmt => {
+    const own = s.k === 'assign' && s.name === name ? { ...s, value: rewrite(s.value) } : s;
+    const nested = mapStmtLists(own, (list) => list.map(stmt));
+    return nested.k === 'for' ? { ...nested, init: stmt(nested.init), inc: stmt(nested.inc) } : nested;
+  };
+  return body.map(stmt);
+}
+
+/** Binary operators whose 32-bit result bits do not depend on their operands' signedness. */
+const BIT_OPS: ReadonlySet<string> = new Set(['+', '-', '*', '&', '|', '^', '<<']);
+/** Operators that read their operands' bits only, or whose printer pins the signedness the op
+ *  carries (`/`, `%`, `>>` and their unsigned twins), so an operand of changed type means the same. */
+const BIT_READERS: ReadonlySet<string> = new Set([
+  '==',
+  '!=',
+  '&&',
+  '||',
+  '/',
+  '/u',
+  '%',
+  '%u',
+  '>>',
+  '>>>',
+  '<',
+  '<=',
+  '>',
+  '>=',
+]);
+
+/** Whether an integer or pointer type a value converts into keeps its 32 bits. */
+const bitSink = (t: IrType | undefined): boolean =>
+  t !== undefined && (t.kind === 'ptr' || (t.kind === 'int' && t.width <= 32));
+
+/** A declared parameter spelling that is an integer or a pointer of at most 32 bits. */
+const bitParam = (spelled: string | undefined): boolean =>
+  spelled !== undefined && !/\b(float|double|f32|f64|long\s+long|[su]64)\b/.test(spelled);
+
+/** Whether every expression whose C type `changed` reports is read only where its bits are all that
+ *  matter. `changed` is asked of every node; an unchanged node bounds what its children did. */
+function changedTypesStayBits(sfn: SFn, changed: (e: Expr) => boolean, env: ReturnType<typeof declaredTypes>): boolean {
+  let ok = true;
+  /** `e` in a position whose consumer `sink` is: 'bits' reads its bits, 'value' its typed value. */
+  const visit = (e: Expr, sink: 'bits' | 'value'): void => {
+    if (!ok) {
+      return;
+    }
+    if (sink === 'value' && changed(e)) {
+      ok = false;
+      return;
+    }
+    switch (e.k) {
+      case 'bin':
+        // a bit operator's result was refused above if its consumer reads a changed type, and is
+        // otherwise the same bits of the same type, so its operands' bits are all it reads
+        if (BIT_OPS.has(e.op) || BIT_READERS.has(e.op)) {
+          visit(e.l, 'bits');
+          visit(e.r, 'bits');
+          return;
+        }
+        visit(e.l, 'value');
+        visit(e.r, 'value');
+        return;
+      case 'un':
+        visit(e.e, e.op === 'f-' ? 'value' : 'bits');
+        return;
+      case 'cast':
+        visit(e.e, bitSink(e.to) ? 'bits' : 'value');
+        return;
+      case 'index':
+        visit(e.base, 'bits');
+        (e.lead ?? []).forEach((l) => visit(l, 'bits'));
+        visit(e.idx, 'bits');
+        return;
+      case 'call': {
+        if (typeof e.fn !== 'string') {
+          visit(e.fn, 'bits');
+        }
+        const declared = typeof e.fn === 'string' ? sfn.declaredArgs?.[e.fn] : undefined;
+        e.args.forEach((a, i) => visit(a, !e.wide64 && bitParam(declared?.[i]) ? 'bits' : 'value'));
+        return;
+      }
+      default:
+        exprChildren(e).forEach((c) => visit(c, 'value'));
+    }
+  };
+  const stmt = (s: Stmt): void => {
+    switch (s.k) {
+      case 'assign':
+        visit(s.value, bitSink(env(s.name)) ? 'bits' : 'value');
+        break;
+      case 'store':
+        visit(s.lval, 'bits');
+        visit(s.value, bitSink(exprCType(s.lval, env)) ? 'bits' : 'value');
+        break;
+      case 'return':
+        if (s.value) {
+          visit(s.value, bitSink(sfn.retType) ? 'bits' : 'value');
+        }
+        break;
+      default:
+        stmtExprs(s).forEach((e) => visit(e, 'bits'));
+    }
+    stmtChildren(s).forEach(stmt);
+  };
+  sfn.body.forEach(stmt);
+  return ok;
+}
+
+/** `/narrow-range`: the tree with every admitted local whose every write stores a value of one
+ *  narrow integer type declared at that type, the narrowing casts of its writes dropped, or null
+ *  when none is. */
+export function narrowRangeDeclarations(sfn: SFn): SFn | null {
+  const mentions = localMentions(sfn);
+  let cur = sfn;
+  let any = false;
+  for (const l of sfn.locals) {
+    const m = mentions.get(l.name);
+    if (!admissible(l, m) || l.type.kind !== 'int' || m.assigns < 2) {
+      continue;
+    }
+    const env = declaredTypes(cur);
+    const writes = allWrites(cur.body, l.name);
+    // a `v++` is counted by `assigns` and is no assignment statement
+    if (writes.length !== m.assigns) {
+      continue;
+    }
+    const ranges = writes.map((w) => inRange(w.value, env));
+    if (ranges.some((r) => r === undefined)) {
+      continue;
+    }
+    const stated = ranges.map((r) => r!.to).filter((t): t is Narrowing['to'] => t !== undefined);
+    const to = stated[0];
+    if (to === undefined || !ranges.every((r) => r!.fits(to)) || (!l.type.signed && to.signed)) {
+      continue;
+    }
+    const narrowedWrites = new Map(writes.map((w, i) => [w.value, ranges[i]!.value]));
+    const body = rewriteWrites(cur.body, l.name, (v) => narrowedWrites.get(v) ?? v);
+    const next: SFn = { ...cur, body, locals: cur.locals.map((x) => (x.name === l.name ? { ...x, type: to } : x)) };
+    if (!l.type.signed) {
+      const before = env;
+      const after = declaredTypes(next);
+      // the read itself is the same non-negative value wherever it converts to; what can differ is
+      // an expression built on it, whose type it changed
+      const changed = (e: Expr): boolean =>
+        e.k !== 'var' && renderedIntSignedness(e, before) === false && renderedIntSignedness(e, after) !== false;
+      if (!changedTypesStayBits(next, changed, after)) {
+        continue;
+      }
+    }
+    if (signedOverUnsignedCompare(next) && !signedOverUnsignedCompare(cur)) {
+      continue;
+    }
+    cur = next;
+    any = true;
+  }
+  return any ? cur : null;
 }

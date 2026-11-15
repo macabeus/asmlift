@@ -1968,6 +1968,31 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     implementedIn: l3('narrowdecl'),
     seeAlso: ['narrow-decl', 'narrow-load'],
   },
+  'narrow-range': {
+    title: 'Counter declared at the width every write already has',
+    summary:
+      'a local every write of which stores a value of one narrow type, a counter stepped through a cast, is declared at that type',
+    detail:
+      'A local written several times, each time with a value narrowed to one type or a literal that type holds, can be ' +
+      'spelled two ways: a 32-bit local with each write cast, or a local declared at the narrow type with the casts ' +
+      'dropped. It holds the same value at every read either way; which one the source declared is not in the ' +
+      "assembly. Applied on top of every other candidate's source.",
+    compilerBehavior:
+      'gcc 2.9 keeps a narrow counter as an index and strength-reduces a word one into a pointer walk, so agbcc ' +
+      'compiles a byte copy indexed by a `u16` counter differently from one indexed by a `u32` counter cast at its step.',
+    offeredWhen: {
+      when: 'A 32-bit local in no memory, written twice or more and never by `v++`, every write a value of one narrow type.',
+      decidedBy: { symbol: 'narrowRangeDeclarations', file: l3('narrowdecl') },
+    },
+    example: {
+      compiler: 'agbcc',
+      unit: 'void example(u8 *d, u8 *s, u8 n) { @ }',
+      before: 'u32 v; v = 0; while (v < n) { d[v] = s[v]; v = (u16)(v + 1); }',
+      after: 'u16 v; v = 0; while (v < n) { d[v] = s[v]; v = v + 1; }',
+    },
+    implementedIn: l3('narrowdecl'),
+    seeAlso: ['narrow-decl', 'narrow-load', 'narrow-read'],
+  },
   'int-cell': {
     title: 'Global stored a pointer, spelled as an integer',
     summary: 'a global the function stores a pointer into is written as an integer: `g = g + K`, no conversions',
