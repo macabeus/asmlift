@@ -196,6 +196,16 @@ function assessHabits(parts: FnParts): QualityHabits {
   const localGaps = vs.length === 0 ? 0 : vs[vs.length - 1] + 1 - vs.length;
   const unusedLocals = parts.decls.filter((d) => !new RegExp(`\\b${escapeRe(d.name)}\\b`).test(body)).length;
 
+  const params = /\((.*)\)\s*\{\s*$/.exec(parts.signature)?.[1] ?? '';
+  const placeholderParams = params.split(',').filter((p) => /\ba\d+\s*$/.test(p.trim())).length;
+  // a loop's test: a `while (…)` (a `do`'s closing one included) or a `for`'s middle clause
+  let genericCounters = 0;
+  for (const m of body.matchAll(/\b(?:while \((.*)\)(?: \{|;)$|for \([^;]*;([^;]*);)/gm)) {
+    if (/\bv\d+\b/.test(m[1] ?? m[2])) {
+      genericCounters++;
+    }
+  }
+
   return {
     ptrDeref0,
     decimalMasks,
@@ -206,6 +216,8 @@ function assessHabits(parts: FnParts): QualityHabits {
     callNeZero,
     localGaps,
     unusedLocals,
+    placeholderParams,
+    genericCounters,
   };
 }
 

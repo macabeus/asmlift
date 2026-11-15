@@ -69,6 +69,11 @@ export interface QualityHabits {
   localGaps: number;
   /** declared locals the body never mentions */
   unusedLocals: number;
+  /** parameters spelled `aN`, the structurer's placeholder, where a declaration would name them */
+  placeholderParams: number;
+  /** loop tests (`while (…)`, a `for`'s condition) that read a `vN` local, where a counter reads as
+   *  `i` */
+  genericCounters: number;
 }
 
 /** objdiff difference-kind tally (structurally mirrors @match-kit/scoring's DiffBreakdown — spelled

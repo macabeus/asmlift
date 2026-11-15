@@ -15,6 +15,8 @@ const NO_HABITS = {
   callNeZero: 0,
   localGaps: 0,
   unusedLocals: 0,
+  placeholderParams: 0,
+  genericCounters: 0,
 };
 
 describe('assessQuality (pinned)', () => {
@@ -167,5 +169,14 @@ describe('assessQuality habit counters (counted, never score-penalized)', () => 
     const h = habits(src);
     expect(h.localGaps).toBe(3); // v1, v3, v4
     expect(h.unusedLocals).toBe(1); // v5
+  });
+
+  test('placeholder parameters and loop tests reading a generic local', () => {
+    const src =
+      's32 f(s32 a0, u8 *a1, s32 n) {\n    s32 v0;\n    s32 i;\n    for (i = 0; i < n; i++) {\n    }\n    while (v0 < a0) {\n        v0++;\n    }\n    do {\n    } while (v0 != 0);\n    return v0;\n}\n';
+    const h = habits(src);
+    expect(h.placeholderParams).toBe(2); // a0, a1; not n
+    expect(h.genericCounters).toBe(2); // the `while` and the `do`'s test; not the `for` over i
+    expect(habits('void f(void) {\n}\n').placeholderParams).toBe(0);
   });
 });
