@@ -25,6 +25,8 @@ import {
   UNFOLDED_GATES,
 } from './l3/basecse';
 import { jumpToCaseEnds } from './l3/caseendgoto';
+import { compoundExpressionAssignments } from './l3/compoundexpr';
+import { readDoWhileAsFor } from './l3/forread';
 import type { Gate } from './l3/gates';
 import type { HoistPlacement } from './l3/hoist';
 import { initFirstGuards } from './l3/initfirst';
@@ -35,6 +37,8 @@ import {
   narrowReadDeclarations,
 } from './l3/narrowdecl';
 import { pollGuards, pollReads } from './l3/pollguard';
+import { splitReturnedMerges } from './l3/retsplit';
+import { breakFinalSwitchReturns } from './l3/switchbreak';
 import { unmergeJoins } from './l3/unmerge';
 // TYPE-ONLY, and deliberately: the structure-variation table types its `options` as
 // `Parameters<typeof structureChecked>[1]`, which needs the binding in a `typeof` position and
@@ -507,6 +511,31 @@ const WIDTH_CHOICES: (typeof STACKED_WIDTHS)[number][][] = (() => {
  *  one local, and so do `/narrow-read` and `/narrow-range`), and table order then decides which one
  *  takes it in a candidate holding both. Which of them a candidate applies is STACKED_SUBSETS. */
 export const STACKED_VARIATIONS = [...STACKED_SHAPES, ...STACKED_WIDTHS];
+
+/** The SHAPE READINGS (sanctioned in the POLICY note at rank.ts's respell site): a spelling a reader
+ *  would write for one statement shape — a merged local only returned, a void function's final
+ *  switch, a non-literal `x = x + e`, a `do`/`while` whose first test passes — that is one program
+ *  with the tree as recovered and a different tree to some compiler (each module carries its
+ *  compiled pairs). Each is offered on the un-respelled tree, and COMPOSED onto every respell
+ *  variation's source, alone: the respell variations that build the counter loops and returns these
+ *  shapes are in (`/unreduce`, `/indexed`, `/offmember`, `/sinkinit`, …) change WHICH tree the
+ *  shape sits in, and the reading changes only how that shape is spelled, so the two are orthogonal
+ *  the way the STACKED ones are. Not crossed with the stacked subsets or with one another: a
+ *  reading composed onto a respell costs one candidate per respell source it fires on, where a
+ *  stacked member would cost one per subset of every source. `pnpm bench fan synthetic:mixwalk:agbcc`
+ *  is the row that demanded it: its winner `/unreduce` keeps a `do`/`while` whose `for` spelling
+ *  compiles alike, and before this no candidate held both. */
+export const SHAPE_READINGS: { name: VariationName; apply: (sfn: SFn) => SFn | null }[] = [
+  { name: 'ret-split', apply: splitReturnedMerges },
+  { name: 'switch-break', apply: breakFinalSwitchReturns },
+  { name: 'compound-expr', apply: compoundExpressionAssignments },
+  { name: 'for-read', apply: readDoWhileAsFor },
+];
+
+const SHAPE_READING_NAMES: ReadonlySet<string> = new Set(SHAPE_READINGS.map((r) => r.name));
+
+/** Is `v` one of the SHAPE READINGS? */
+export const isShapeReading = (v: string): boolean => SHAPE_READING_NAMES.has(v);
 
 /** The PRE-RESPELL variations (sanctioned in the POLICY note at rank.ts's respell site): a tree
  *  rewrite applied BEFORE the respell set, so the whole set derives from its output instead of

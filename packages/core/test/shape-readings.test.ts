@@ -11,7 +11,9 @@ import { compoundExpressionAssignments } from '../src/l3/compoundexpr';
 import { readDoWhileAsFor } from '../src/l3/forread';
 import { splitReturnedMerges } from '../src/l3/retsplit';
 import { breakFinalSwitchReturns } from '../src/l3/switchbreak';
+import { enumerateCandidates } from '../src/rank';
 import { shapeHabitCount } from '../src/shape-habits';
+import { ARMV4T_AGBCC } from '../src/target';
 
 const v = (name: string): Expr => ({ k: 'var', name });
 const c = (value: number): Expr => ({ k: 'const', value });
@@ -169,5 +171,38 @@ describe("the tie-break's habit count (shape-habits.ts)", () => {
     expect(shapeHabitCount(merged)).toBe(1);
     expect(shapeHabitCount(elseAfter)).toBe(1);
     expect(shapeHabitCount('s32 f(s32 a0) {\n    if (a0 != 0) return 1;\n    return 0;\n}\n')).toBe(0);
+  });
+});
+
+// `synthetic:mixwalk`, agbcc -O2: `for (i = 0; i < 4; i++) TakeMove(m, s->moves[i], i);` beside
+// constant-offset reads of the same base. agbcc strength-reduces the subscript, so only the
+// `/unreduce` respell gives back the index, as a do/while; its `for` spelling compiles alike.
+const MIXWALK =
+  'mixwalk:\n\tpush\t{r4, r5, r6, r7, lr}\n\tmov\tr7, r8\n\tpush\t{r7}\n\tadd\tsp, sp, #-0x24\n' +
+  '\tadd\tr6, r0, #0\n\tadd\tr4, r1, #0\n\tldrh\tr1, [r4]\n\tldrb\tr2, [r4, #0xc]\n' +
+  '\tldr\tr3, [r4, #0x10]\n\tbl\tTakeBase\n\tmov\tr5, #0x0\n\tadd\tr7, sp, #0x20\n\tmov\tr0, #0x21\n' +
+  '\tadd\tr0, r0, sp\n\tmov\tr8, r0\n\tadd\tr4, r4, #0x4\n.L6:\n\tldrh\tr1, [r4]\n' +
+  '\tlsl\tr2, r5, #0x18\n\tlsr\tr2, r2, #0x18\n\tadd\tr0, r6, #0\n\tbl\tTakeMove\n\tadd\tr4, r4, #0x2\n' +
+  '\tadd\tr5, r5, #0x1\n\tcmp\tr5, #0x3\n\tble\t.L6\t@cond_branch\n\tadd\tr0, r6, #0\n\tmov\tr1, #0x1\n' +
+  '\tadd\tr2, r7, #0\n\tbl\tTakeData\n\tadd\tr0, r6, #0\n\tmov\tr1, #0x2\n\tmov\tr2, r8\n' +
+  '\tbl\tTakeData\n\tadd\tr0, r6, #0\n\tmov\tr1, #0x3\n\tadd\tr2, r7, #0\n\tbl\tTakeData\n' +
+  '\tadd\tr0, r6, #0\n\tmov\tr1, #0x4\n\tmov\tr2, r8\n\tbl\tTakeData\n\tadd\tsp, sp, #0x24\n' +
+  '\tpop\t{r3}\n\tmov\tr8, r3\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r0}\n\tbx\tr0\n';
+
+describe('the shape readings compose onto every respell variation', () => {
+  test('a respell that builds the do/while gets its for reading as a candidate of its own', () => {
+    const cands = enumerateCandidates('mixwalk', MIXWALK, ARMV4T_AGBCC, {
+      prototypes: {
+        mixwalk: { params: ['u32', 'u8 *'], returnsVoid: true },
+        TakeBase: { params: ['u32', 'u16', 'u8', 's32'], returnsVoid: true },
+        TakeMove: { params: ['u32', 'u16', 'u8'], returnsVoid: true },
+        TakeData: { params: ['u32', 's32', 'void *'], returnsVoid: true },
+      } as never,
+    });
+    const unreduced = cands.find((c) => c.variations.join('/') === 'unsigned/unreduce');
+    const read = cands.find((c) => c.variations.join('/') === 'unsigned/unreduce/for-read');
+    expect(unreduced?.source).toMatch(/do \{/);
+    expect(read?.source).toMatch(/for \(v1 = 0; v1 <= 3; v1 = v1 \+ 1\)/);
+    expect(read?.source).not.toMatch(/do \{/);
   });
 });

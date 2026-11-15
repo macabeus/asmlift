@@ -43,8 +43,6 @@ import { argCopyCandidates } from './l3/argcopy';
 import { type LanguageBackend, type SFn, emitDraft } from './l3/ast';
 import { type BaseKey, admittedBases, hoistBaseLocals } from './l3/basecse';
 import { armDisjointCandidates, coalesceCandidates } from './l3/coalesce';
-import { compoundExpressionAssignments } from './l3/compoundexpr';
-import { readDoWhileAsFor } from './l3/forread';
 import type { Gate } from './l3/gates';
 import type { HoistPlacement } from './l3/hoist';
 import { homeSplitTag, homeSplitWithholds, splitHomeBases } from './l3/homesplit';
@@ -57,10 +55,8 @@ import { parkParamsFirst } from './l3/parkfirst';
 import { pointerFields } from './l3/ptrfield';
 import { type RegcopyTail, registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
-import { splitReturnedMerges } from './l3/retsplit';
 import { hoistScopedBases } from './l3/scopebase';
 import { sinkInitsToFirstUse } from './l3/sinkinit';
-import { breakFinalSwitchReturns } from './l3/switchbreak';
 import type { SymbolRef } from './l3/symbol-refs';
 import { signedOverUnsignedCompare } from './l3/typing';
 import { type UnreduceResult, unreduceAccumulators } from './l3/unreduce';
@@ -99,6 +95,7 @@ import {
   NO_PIN_KINDS,
   ORDERBASE_HOISTS,
   PRE_RESPELL_VARIATIONS,
+  SHAPE_READINGS,
   SIGNEDNESS,
   STACKED_SUBSETS,
   STRUCTURE_VARIATIONS,
@@ -108,6 +105,7 @@ import {
   applyStacked,
   createdLocals,
   firstFired,
+  isShapeReading,
   sameBases,
 } from './rank-variations';
 import { shapeHabitCount } from './shape-habits';
@@ -1237,7 +1235,9 @@ export function enumerateCandidates(
     // kind of independent dimension as signedness —
     // so they are crossed with every source rather than paired (two members of the table may
     // compete for one node, and its order decides; rank-variations.ts); a third blanket composition needs
-    // the same argument, not just a row. And a specific PAIRING is admitted on one of two
+    // the same argument, not just a row. The SHAPE READINGS are that third one, on that argument and
+    // narrower: each composed ALONE onto each respell variation's source, crossed with nothing
+    // (rank-variations.ts SHAPE_READINGS). And a specific PAIRING is admitted on one of two
     // grounds, never on "it might help". FIRST, a row demands the joint spelling AND that
     // spelling is reachable from neither variation alone: /livebase × /indexed, × /sinkinit,
     // × /nearbase and × /coalesce, /scopebase × /coalesce, plus /vol-store × /unreduce and that
@@ -1321,6 +1321,38 @@ export function enumerateCandidates(
         // orthogonal to the respell variations outside the table; subsets compose in the fixed
         // table order, which decides between two members that compete for one node. A stacked variation that
         // never fires declines and costs nothing.
+        // The SHAPE READINGS composed onto this respell variation's source, each alone
+        // (rank-variations.ts SHAPE_READINGS carries the admission argument). Not onto a reading's
+        // own source, nor a stacked one: the readings are offered on the un-respelled tree, and on
+        // the stacked sources derived from it, by their own `respell` below.
+        if (!alreadyShaped && !variations.some(isShapeReading)) {
+          for (const reading of SHAPE_READINGS.filter((r) => offeredOn(target, [r.name]))) {
+            try {
+              const read = reading.apply(alt);
+              if (read === null) {
+                continue;
+              }
+              assertResolved(read);
+              assertDerefsTyped(read);
+              assertLocalsWritten(read);
+              assertPostIncrUnshared(read);
+              assertNoOrphanedLocals(alt, read);
+              assertLocalStorageStaysInteger(alt, read);
+              assertFrameUnionsViewed(read);
+              assertCaseGotosNarrow(read);
+              sources.push({
+                variations: [...variations, reading.name],
+                ...emitted(backend, read),
+                ...refsOf(read),
+                ...volOf(read),
+                ...proof,
+                ...cmpProof(read),
+              });
+            } catch (e) {
+              reportThrow([...preRespellVariations, ...variations, reading.name], e);
+            }
+          }
+        }
         if (!alreadyShaped) {
           // A shape may REORDER statements, and it is derived after a variation has placed its defs —
           // so the placement is re-checked on the shaped tree (contracts.ts). Differential: judged
@@ -1415,18 +1447,18 @@ export function enumerateCandidates(
     // referees; its gate keeps it off every shape where the fold rule does not apply, which is
     // every operand but a shared subtraction.
     respell(['zerosub'], () => zeroSubNegates(sfn));
-    // `/ret-split` — return from each arm of an if whose merged local is only returned
-    // (l3/retsplit.ts). The first of the SHAPE READINGS: each is one program with the tree as
-    // recovered and a different tree to some compiler (each module states its measurements), so it
-    // rides beside that tree and the differ referees. Its polarity is the structured tree's, so
-    // `/flip-join` gives the other one.
-    respell(['ret-split'], () => splitReturnedMerges(sfn));
-    // `/switch-break` — a void function's final switch left by `break;` (l3/switchbreak.ts).
-    respell(['switch-break'], () => breakFinalSwitchReturns(sfn));
-    // `/compound-expr` — `x += e` for a non-literal `e` (l3/compoundexpr.ts).
-    respell(['compound-expr'], () => compoundExpressionAssignments(sfn));
-    // `/for-read` — a do/while whose first test is known to pass, as a `for` (l3/forread.ts).
-    respell(['for-read'], () => readDoWhileAsFor(sfn));
+    // The SHAPE READINGS (rank-variations.ts SHAPE_READINGS): `/ret-split` (return from each arm
+    // of an if whose merged local is only returned, l3/retsplit.ts), `/switch-break` (a void
+    // function's final switch left by `break;`, l3/switchbreak.ts), `/compound-expr` (`x += e` for
+    // a non-literal `e`, l3/compoundexpr.ts) and `/for-read` (a do/while whose first test is known
+    // to pass, as a `for`, l3/forread.ts). Each is one program with the tree as recovered and a
+    // different tree to some compiler (each module states its measurements), so it rides beside
+    // that tree and the differ referees. Offered here on the un-respelled tree; `respell` composes
+    // each onto every other respell variation's source. `/ret-split`'s polarity is the structured
+    // tree's, so `/flip-join` gives the other one.
+    for (const reading of SHAPE_READINGS) {
+      respell([reading.name], () => reading.apply(sfn));
+    }
     // `/volatile` — declare a pointer local holding a NUMERIC address as pointing to volatile
     // data (l3/volatileptr.ts). A raw constant has no declaration anywhere, so the original
     // qualifier is not derivable — and it is codegen-visible (a volatile MEM is barred from
