@@ -54,7 +54,7 @@ describe('polish: x++ and x += e for a statement that reads back what it writes'
       ]),
     );
     expect(out).toContain('    v0 += 3;');
-    // `p[i]++` and `(*p)++` are other code on mwcc (2.3.3 at -O4,p) and on gcc 2.7.2 at -O2
+    // a store through memory keeps the plain spelling: `p[i]++` is other code on mwcc 2.3.3 at -O4,p
     expect(out).toContain('    a0[a1] = a0[a1] - 5;');
     expect(out).toContain('    *a0 = *a0 + 1;');
   });

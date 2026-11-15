@@ -12,7 +12,7 @@
 //     and both gcc 2.7.2 builds at -O0;
 //   • NOT a store through memory. `*p = *p + 1` against `(*p)++` and `p[i] = p[i] + 1` against
 //     `p[i]++` are other code on agbcc, gcc 2.7.2 and KMC gcc at -O0 and on every mwcc build at
-//     -O0,p, and the second also on mwcc 2.3.3 at -O4,p, a level the benchmark ranks 134 rows at;
+//     -O0,p, and the second also on mwcc 2.3.3 at -O4,p;
 //     and three narrow member stores `p->a++; p->b -= 2; p->c++;` schedule their loads in another
 //     order on gcc 2.7.2 and KMC gcc at -O2;
 //   • the added value is an integer LITERAL. `x = x + e` and `x += e` are one program for any `e`,

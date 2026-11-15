@@ -2693,9 +2693,9 @@ export function enumerateCandidates(
             for (const sp of sources) {
               const source = sp.source;
               // Duplicates by the DRAFT, not the published text: the polish prints two different
-              // trees as one text where they differ only in what it re-spells (a local's number, an
-              // unused declaration), and collapsing those would keep the first route's variations
-              // where the tie-break below used to pick the other's.
+              // trees as one text where they differ only in what it re-spells (a local's number, a
+              // literal's base), and collapsing those would keep the first route's variations where
+              // the tie-break below picks the other's.
               const draft = sp.draft;
               // Collapse a candidate whose source is identical (a function with no divergent `if`
               // structures the same either way): no point scoring a duplicate. Deduping the

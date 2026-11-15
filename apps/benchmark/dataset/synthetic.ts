@@ -1767,8 +1767,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // early. On agbcc -O2, gcc 2.7.2 -O1 and KMC gcc -O2 — this row's own flags — the same body without
   // the last `return;` compiles to other code (gcc lays its blocks out by the returns it is given),
   // so a print that drops the trailing `return;` there publishes a function the target was not
-  // compiled from (l3/polish/voidtail.ts). The ranked lift matched through its `/flip-branch`
-  // sibling alone when the polish dropped it.
+  // compiled from (l3/polish/voidtail.ts).
   {
     sym: 'vtailret',
     src: 'void j(void);\nvoid m(s32 a);\ns32 k(s32 a);\nvoid vtailret(s32 a){ if (a > 3) { j(); } else if (a) { m(a); return; } else { k(a); } m(1); return; }',

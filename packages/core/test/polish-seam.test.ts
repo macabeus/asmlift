@@ -1,6 +1,7 @@
 // The readability polish (l3/polish/) is a print policy the caller picks by handing in a backend
-// `polished` made: its `emit` prints the published, compiled text, and its `draft` the inner
-// printer's, which the return-tail bound and rank's duplicate collapse read. These tests pin the seam.
+// `polished` made: its `emit` prints the published, compiled text, and its `draft` the same names with
+// no other re-spelling, which the return-tail bound and rank's duplicate collapse read. These tests
+// pin the seam.
 import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -20,7 +21,7 @@ const fn: SFn = {
 };
 
 describe('the polish seam', () => {
-  test("a polished backend's draft is the inner backend's emit", () => {
+  test("a polished backend's draft is the inner backend's emit where no role name applies", () => {
     const pc = polished(cBackend, { literal: false });
     expect(pc.emit(fn)).toContain('a0 & 0x40');
     expect(pc.draft!(fn)).toBe(cBackend.emit(fn));

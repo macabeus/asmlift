@@ -26,8 +26,8 @@
 // NOT ALSO `return;` → `break;` in a switch that ends the function, which reads as the same program
 // and is not the same tree to two compilers: mwcc 2.4.2 build 81 (`synthetic:cwret_g17`,
 // `synthetic:cwret_g125`) and IDO 7.1 (`synthetic:sw_void`) lost their matches with the arms left by
-// `break`, and `synthetic:sw_defmid:ido7.1` moved the other way (full bench, 2026-11-12). With the
-// conversion gone, a `default:` that only leaves never arises, so there is none to drop.
+// `break`, and `synthetic:sw_defmid:ido7.1` moved the other way (full bench, 2026-11-12). Without
+// that conversion a `default:` that only leaves does not arise, so there is none to drop.
 import type { PolishFacts } from '.';
 import { T, typeEquals } from '../../ir/types';
 import { type SFn, type Stmt, stmtChildren } from '../ast';

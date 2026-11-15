@@ -3,15 +3,14 @@
 //
 // WHAT MAY LIVE HERE. A rewrite whose C is the SAME PROGRAM in every dialect the printer serves and
 // compiles to the same bytes on every compiler the bench covers, at every level the pass fires at —
-// `*p` as `p[0]`, `x = x + 1` as
-// `x++`. Not a rewrite the compiler can see: an early return's polarity, a narrower declared type or
-// a `do`/`while` turned `for` move code on agbcc, so they are ranked candidates (a variation), never
-// a polish. Nor is dropping the `else` after a branch that returns, which reads as the same program
-// and is NOT the same tree to agbcc: in `sa3:VramMalloc`'s inner loop,
-// `if (c) { return x; } else { if (d) break; v2 = …; }` and its flattened twin allocate registers
-// differently (agbcc -O2 -mthumb-interwork, compiled), and the flattened candidate scored 9 rows
-// where its draft scored 35 or more. Each rewrite is its own module, states the
-// condition under which it does not fire, and is pinned by its own test.
+// `*p` as `p[0]`, `x = x + 1` as `x++`. Not a rewrite the compiler can see: an early return's
+// polarity, a narrower declared type or a `do`/`while` turned `for` move code on agbcc, so they are
+// ranked candidates (a variation), never a polish. Nor is dropping the `else` after a branch that
+// returns, which reads as the same program and is NOT the same tree to agbcc: in `sa3:VramMalloc`'s
+// inner loop, `if (c) { return x; } else { if (d) break; v2 = …; }` and its flattened twin allocate
+// registers differently (agbcc -O2 -mthumb-interwork, compiled; 9 against 35 or more). Each rewrite
+// is its own module, states the condition under which it does not fire, and is pinned by its own
+// test.
 //
 // WHERE IT RUNS, and why that is the whole design. The polish runs inside `emitCFamily`, last, on the
 // tree the printer is about to print (after the pointer-write legalization, so it sees every cast the
@@ -25,8 +24,9 @@
 // A polished backend's `draft` is its text with the role names and none of the re-spellings here
 // (nor the dense local numbers), and the return-tail reading's size bound reads that (pipeline.ts
 // `structureReturnTailReading`), as does rank's duplicate collapse: a polish that drops a line must
-// not move a reading, and two trees the polish prints as one text are still two candidates. Rank's goto/cast/line tie-break reads the PUBLISHED text, the one the report's
-// quality metric counts (rank.ts `compareScored`).
+// not move a reading, and two trees the polish prints as one text are still two candidates. Rank's
+// goto/cast/line tie-break reads the PUBLISHED text, the one the report's quality metric counts
+// (rank.ts `compareScored`).
 //
 // WHAT THE COMPILER SEES DEPENDS ON THE LEVEL. At a level that compiles each statement as it is
 // written (`PolishFacts.literal`), two of these re-spellings are other code: `x++` and `x += k` on
