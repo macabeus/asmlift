@@ -178,5 +178,11 @@ describe('assessQuality habit counters (counted, never score-penalized)', () => 
     expect(h.placeholderParams).toBe(2); // a0, a1; not n
     expect(h.genericCounters).toBe(2); // the `while` and the `do`'s test; not the `for` over i
     expect(habits('void f(void) {\n}\n').placeholderParams).toBe(0);
+    // a function pointer's own list is not split, and its name and an array's are both read
+    expect(habits('s32 f(s32 a0, void (*a1)(s32, s32)) {\n    a1(a0, 1);\n    return a0;\n}\n').placeholderParams).toBe(
+      2,
+    );
+    expect(habits('s32 f(u8 a0[4], s32 a1) {\n    return a0[a1];\n}\n').placeholderParams).toBe(2);
+    expect(habits('s32 f(s32 (*cb)(s32 a0), s32 a1) {\n    return cb(a1);\n}\n').placeholderParams).toBe(1);
   });
 });

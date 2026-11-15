@@ -84,15 +84,44 @@ function fnParts(src: string): FnParts {
   return { signature: lines[at], decls, stmts: lines.slice(j) };
 }
 
+/** The parameter names a signature line declares, in order. The list is split at its top-level
+ *  commas only, so a function-pointer parameter's own list stays whole, and each name is read
+ *  past an array suffix (`u8 a0[4]`) or out of a function pointer's declarator
+ *  (`void (*a1)(s32)`). An unnamed parameter and `(void)` give no name. */
+function paramNames(signature: string): string[] {
+  const params = /\((.*)\)\s*\{\s*$/.exec(signature)?.[1] ?? '';
+  const pieces: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < params.length; i++) {
+    const c = params[i];
+    if (c === '(' || c === '[') {
+      depth++;
+    } else if (c === ')' || c === ']') {
+      depth--;
+    } else if (c === ',' && depth === 0) {
+      pieces.push(params.slice(start, i));
+      start = i + 1;
+    }
+  }
+  pieces.push(params.slice(start));
+  const out: string[] = [];
+  for (const p of pieces) {
+    const m =
+      /\(\s*\*+\s*([A-Za-z_]\w*)\s*(?:\[[^\]]*\])*\s*\)\s*\(/.exec(p) ??
+      /([A-Za-z_]\w*)\s*(?:\[[^\]]*\])*\s*$/.exec(p.trim());
+    if (m && m[1] !== 'void') {
+      out.push(m[1]);
+    }
+  }
+  return out;
+}
+
 /** Parameter and local names the source declares (`fnParts`). */
 function declaredNames(parts: FnParts): Set<string> {
   const out = new Set(parts.decls.map((d) => d.name));
-  const params = /\((.*)\)\s*\{\s*$/.exec(parts.signature)?.[1] ?? '';
-  for (const p of params.split(',')) {
-    const m = /([A-Za-z_]\w*)\s*(?:\[[^\]]*\])*\s*$/.exec(p.trim());
-    if (m && m[1] !== 'void') {
-      out.add(m[1]);
-    }
+  for (const name of paramNames(parts.signature)) {
+    out.add(name);
   }
   return out;
 }
@@ -196,8 +225,7 @@ function assessHabits(parts: FnParts): QualityHabits {
   const localGaps = vs.length === 0 ? 0 : vs[vs.length - 1] + 1 - vs.length;
   const unusedLocals = parts.decls.filter((d) => !new RegExp(`\\b${escapeRe(d.name)}\\b`).test(body)).length;
 
-  const params = /\((.*)\)\s*\{\s*$/.exec(parts.signature)?.[1] ?? '';
-  const placeholderParams = params.split(',').filter((p) => /\ba\d+\s*$/.test(p.trim())).length;
+  const placeholderParams = paramNames(parts.signature).filter((n) => /^a\d+$/.test(n)).length;
   // a loop's test: a `while (…)` (a `do`'s closing one included) or a `for`'s middle clause
   let genericCounters = 0;
   for (const m of body.matchAll(/\b(?:while \((.*)\)(?: \{|;)$|for \([^;]*;([^;]*);)/gm)) {
