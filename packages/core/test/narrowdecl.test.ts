@@ -551,7 +551,10 @@ describe('narrowRangeDeclarations', () => {
   it('takes a call argument the callee declares an integer', () => {
     const sfn = { ...inLoop(structured(COPY), call(minus1)), declaredArgs: { use: ['u32'] } };
     expect(narrowRangeDeclarations(sfn)).not.toBeNull();
-    expect(narrowRangeDeclarations({ ...sfn, declaredArgs: { use: ['f64'] } })).toBeNull();
+    // a 64-bit parameter reads the value; a float one never arrives (target.ts keeps it `undefined`)
+    expect(narrowRangeDeclarations({ ...sfn, declaredArgs: { use: ['s64'] } })).toBeNull();
+    expect(narrowRangeDeclarations({ ...sfn, declaredArgs: { use: ['long long'] } })).toBeNull();
+    expect(narrowRangeDeclarations({ ...sfn, declaredArgs: { use: [undefined] } })).toBeNull();
   });
 
   it('does not narrow a u32 local when an unsigned compare would read it signed', () => {

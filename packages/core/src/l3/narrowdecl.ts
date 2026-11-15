@@ -83,6 +83,7 @@
 //     conversion, never whether C performs one. A `u32` local and one written more than once are
 //     admitted, because every read already narrows each value stored to the one width.
 import type { IrType } from '../ir/types';
+import { declaredWidth } from '../proto';
 import {
   type BinOp,
   type Expr,
@@ -314,9 +315,22 @@ export function narrowReadDeclarations(sfn: SFn): SFn | null {
 // declared is not in the asm where the two compile alike, so the differ referees: a STACKED
 // variation beside the other widths.
 //
+// REACH. The counters this takes are the ones whose step the lift spells as a narrowing cast at the
+// write: agbcc's and IDO's cast-stepped counters (55 and 7 bench rows fire it). An IDO step spelled
+// as a mask (`v = v + 1 & 255`) is not an in-range write it admits, and mwcc, kmc and gcc 2.7.2
+// truncate at the read (`(s16)v`, `v << 16 >> 16`), which `/narrow-read` and not this variation
+// would take. Neither is built: declared at the source's width, IDO's `brmerge` and `thrbreak`
+// score no closer (31 -> 31, 29 -> 30 normalized lines), so no row shows the gain.
+//
 // REFUSED, beyond `admissible` (no memory, no address, 32-bit integer, initialized):
 //   • a local `/narrow-decl` or `/narrow-load` takes (a signed one with one write they narrow),
-//     which offering here too would derive the same tree twice;
+//     which offering here too would derive the same tree twice. With WIDTH_CHOICES crossing this
+//     variation only alone and beside `/narrow-read` (rank-variations.ts), the consequence is that
+//     no candidate narrows such a local AND a counter only this variation takes: a function
+//     holding both (`s32 v1 = (u8)(a0 - 1)` beside a `(u8)`-stepped `u32 v0`) is offered
+//     `u8 v1; u32 v0` and `s32 v1; u8 v0`, never `u8 v1; u8 v0`. No bench winner needs it (0 of
+//     the 50 holding `/narrow-range` hold `/narrow-decl` or `/narrow-load`); a row that does is
+//     what would earn taking that local here when this variation also takes one of its own;
 //   • a `v++` or `v--`, which steps the local past T's range in the 32-bit spelling;
 //   • a write that is not one of the three in-range forms above, or two writes of different narrow
 //     types (a `(u8)` beside a `(u16)` would need the wider type, which no write states);
@@ -382,9 +396,12 @@ const BIT_READERS: ReadonlySet<BinOp> = new Set<BinOp>([
 const bitSink = (t: IrType | undefined): boolean =>
   t !== undefined && (t.kind === 'ptr' || (t.kind === 'int' && t.width <= 32));
 
-/** A declared parameter spelling that is an integer or a pointer of at most 32 bits. */
-const bitParam = (spelled: string | undefined): boolean =>
-  spelled !== undefined && !/\b(float|double|f32|f64|long\s+long|[su]64)\b/.test(spelled);
+/** A declared parameter spelling that is an integer or a pointer of at most 32 bits. A float
+ *  spelling never arrives: target.ts `declaredArgTypes` keeps only what `declaredWidth` sizes. */
+const bitParam = (spelled: string | undefined): boolean => {
+  const w = spelled === undefined ? undefined : declaredWidth(spelled);
+  return w !== undefined && w <= 32;
+};
 
 /** Whether every expression whose C type `changed` reports is read only where its bits are all that
  *  matter. `changed` is asked of every node; an unchanged node bounds what its children did. */
