@@ -6,6 +6,7 @@
 // this backend owns only the C SIGNATURE line. The Pascal backend implements the same
 // LanguageBackend interface over the same L3 with its OWN spelling.
 import { LanguageBackend, SFn } from '../l3/ast';
+import type { PrintPolish } from '../l3/polish';
 import { cComment, cDeclare, cType, emitCFamily } from './cfamily';
 
 export { cComment }; // re-export: the shared spelling lives in cfamily.ts
@@ -15,15 +16,22 @@ export const cBackend: LanguageBackend = {
   spellsSwitchFallthrough: true,
   spellsSwitchBreak: true,
   spellsEarlyReturn: true,
-  emit(fn: SFn): string {
-    // The SAME declarator placement the local list and the struct-field printer use, so one
-    // function cannot spell the `*` on the type in its signature and on the declarator in its
-    // body. Spelled over the function as named (cfamily.ts `emitCFamily`, l3/names.ts).
-    return emitCFamily(
-      (named) =>
-        `${cType(named.retType)} ${named.name}(${named.params.map((p) => cDeclare(p.type, p.name)).join(', ') || 'void'})`,
-      fn,
-    );
-  },
+  emit: (fn: SFn): string => emitC(fn),
+  polishedEmit: (fn: SFn, polish: PrintPolish): string => emitC(fn, polish),
   comment: cComment,
 };
+
+/** `polish`: print through the C-family readability polish. */
+function emitC(fn: SFn, polish?: PrintPolish): string {
+  // The SAME declarator placement the local list and the struct-field printer use, so one
+  // function cannot spell the `*` on the type in its signature and on the declarator in its
+  // body. Spelled over the function as named (cfamily.ts `emitCFamily`, l3/names.ts).
+  return emitCFamily(
+    (named) =>
+      `${cType(named.retType)} ${named.name}(${named.params.map((p) => cDeclare(p.type, p.name)).join(', ') || 'void'})`,
+    fn,
+    undefined,
+    true,
+    polish,
+  );
+}

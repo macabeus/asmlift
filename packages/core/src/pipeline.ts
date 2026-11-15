@@ -32,7 +32,7 @@ import { print } from './ir/print';
 import { firstTrivialPhi, pruneDeadParams } from './ir/simplify';
 import { type IrType, T, intWidth } from './ir/types';
 import { VerifyError, verify } from './ir/verify';
-import { LanguageBackend, SFn, gapReasonFor, walkExprs } from './l3/ast';
+import { LanguageBackend, SFn, emitDraft, gapReasonFor, walkExprs } from './l3/ast';
 import { BASECSE_GATES, hoistBaseLocals } from './l3/basecse';
 import { eliminateDeadStores } from './l3/dce';
 import { mergeCommonTails } from './l3/tailmerge';
@@ -87,6 +87,8 @@ export interface Diagnostic {
 }
 
 export interface DecompileOptions {
+  /** The language printer. Default `cBackend`, which prints the tree as structured; the CLI, the
+   *  benchmark and the web app pass it through `polished` (l3/polish/), the readability polish. */
   backend?: LanguageBackend;
   /** idiom patterns applied at L1. DEFAULTS to `DEFAULT_IDIOM_PATTERNS` (every idiom asmlift
    *  owns, each `{compilers}`-gated so it self-selects per target). Pass an explicit list to
@@ -116,11 +118,6 @@ export interface DecompileOptions {
    *  `fromContext` is read as this, and taken out of the table (proto-context.ts
    *  `splitOwnContext`). */
   ownContextProto?: FnProto;
-  /** Print each loop counter and the one returned local under a role name (`i`/`j`/`k`, `result`;
-   *  l3/names.ts). Off by default, so a lift reads the structurer's own `vN`; the CLI, the
-   *  benchmark and the web app turn it on. A name is no codegen fact: it moves no score. Both
-   *  C-family backends print them (C and C++); the Pascal backend does not. */
-  roleNames?: boolean;
   /** OPTIONAL bodies of callees the input does not define, found elsewhere by the driver (the CLI
    *  reads them off `tools.asmlift.elf`): each answers what its callee can read of its arguments
    *  where the input holds no label of that name (frontend/callee-body.ts). Absent ⇒ only the
@@ -315,9 +312,8 @@ function runTower(
       inferredSymbols,
       orderLicensedGlobals: orderLicensed,
       ownContextProto: own.ownContextProto,
-      roleNames: opts.roleNames,
     }),
-    (t) => backend.emit(t),
+    (t) => emitDraft(backend, t),
     {},
     // ONE default-accepts memo for this lift, as rank.ts keeps one per lift: the copies the measured
     // default structures first carry `copyReturnTails`, so every run of their ladder asks
@@ -1240,7 +1236,9 @@ export interface ReturnTailReading {
  *  from their bytes than the copies on 89 and closer on 10 (MATCH 23 → 16).
  *
  *  THE UNIT IS THE WHOLE FUNCTION'S EMITTED SOURCE, in non-blank lines (`sourceLineCount`), and a
- *  tie goes to the join.
+ *  tie goes to the join. Emitted as the backend's DRAFT (`emitDraft`, the text before the
+ *  readability polish, l3/polish/): the polish drops lines a reader does not need, and it must not
+ *  move the reading this bound picks.
  *    - Whole function, not per branch: these are the two whole-function readings the ranked fan
  *      holds (rank.ts's default and its `/ret-copy` or `/ret-join` sibling), so the published tree
  *      is always one of them. A per-branch unit differs only where the join fires at two or more

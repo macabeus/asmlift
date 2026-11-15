@@ -11,7 +11,7 @@
 // diff of asmlift's own.
 import { cBackend } from '@asmlift/core/backend/c';
 import type { AsmLayout, Block, Fn, ParamEvidence, SlotHomes, Value, WriteOrder } from '@asmlift/core/ir/core';
-import type { LanguageBackend } from '@asmlift/core/l3/ast';
+import { type LanguageBackend, emitDraft } from '@asmlift/core/l3/ast';
 import { raiseRecovered, structureReturnTailReading } from '@asmlift/core/pipeline';
 import { type FnProto, type Prototypes, declaresVoidReturn, prototypesFromSymbols } from '@asmlift/core/proto';
 import { type ContextGlobals, splitOwnContext } from '@asmlift/core/proto-context';
@@ -85,7 +85,6 @@ export async function decompileWithReport(
           opts.contextGlobals,
           name,
           own.ownContextProto,
-          opts.roleNames === true,
         )
     : undefined;
 
@@ -173,7 +172,6 @@ function probedSource(
   contextGlobals: ContextGlobals | undefined,
   name: string,
   ownContextProto: FnProto | undefined,
-  roleNames: boolean,
 ): string | undefined {
   try {
     const clone = structuredCloneFn(fn);
@@ -209,9 +207,8 @@ function probedSource(
         contextGlobals,
         inferredSymbols,
         ownContextProto,
-        roleNames,
       }),
-      (t) => backend.emit(t),
+      (t) => emitDraft(backend, t),
     );
     return backend.emit(sfn);
   } catch {

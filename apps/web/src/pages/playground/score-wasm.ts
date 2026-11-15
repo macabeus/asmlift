@@ -5,10 +5,11 @@
 import { cBackend } from '@asmlift/core/backend/c';
 import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { selfDeclaredContextFor } from '@asmlift/core/declare';
+import { polishFactsOf, polished } from '@asmlift/core/l3/polish/index';
 import { type RankedResult, type RefusedDeclarationReason, enumerateCandidates, rankBy } from '@asmlift/core/rank';
 import { type ProbeOutcome, defaultIsReadableRejection, probeIndices, stillbornVerdict } from '@asmlift/core/stillborn';
 import type { SymbolMap } from '@asmlift/core/symbols';
-import type { TargetDescription } from '@asmlift/core/target';
+import { type TargetDescription, targetFor } from '@asmlift/core/target';
 import { joinVariations } from '@asmlift/core/variation-tokens';
 import { EngineFailedError, type MatchScore, type Scorer, type Target, createScorer } from '@match-kit/scoring';
 import { assemble, compileToObject } from 'agbcc';
@@ -150,8 +151,9 @@ export async function rankCandidatesInBrowser(
   emit({ phase: 'enumerating' });
   const refused: RefusedDeclaration[] = [];
   const candidates = enumerateCandidates(name, asm, target, {
-    backend: cBackend,
-    roleNames: true,
+    // the readability polish (core l3/polish/), at the flags every candidate compiles with; this
+    // scorer compiles with agbcc and nothing else
+    backend: polished(cBackend, polishFactsOf(targetFor('agbcc', flags).target)),
     ...(symbols ? { symbols } : {}),
     onRefusedDeclaration: (n, reason) => refused.push({ name: n, reason }),
   });

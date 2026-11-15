@@ -18,6 +18,7 @@ import { detectName } from '@asmlift/core/detect';
 import { type AsmData, parseAsmData } from '@asmlift/core/frontend/asmdata';
 import type { CalleeBodies } from '@asmlift/core/frontend/callee-body';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
+import { polishFactsOf, polished } from '@asmlift/core/l3/polish/index';
 import { type OnGap, calleeBodyNotesOf, decompile, ownArityNotesOf } from '@asmlift/core/pipeline';
 import { type FnProto, type Prototypes, validatePrototypes } from '@asmlift/core/proto';
 import {
@@ -735,6 +736,8 @@ export async function runCli(
   // The target at the unit's own flags: what the flags say about the compile — its dialect — is
   // part of what the emitted C must be.
   const unitTarget = flagsResolution.resolved.target;
+  // The C the CLI prints is the readable one (l3/polish/), for the compiler at these flags.
+  const printer = polished(backend, polishFactsOf(unitTarget));
 
   // --context: the declarations in the headers the candidate compiles against, under --proto and
   // the symbol map's signatures (`withContextPrototypes`).
@@ -908,14 +911,12 @@ export async function runCli(
       // would otherwise print thousands of identical lines. Silent when nothing threw.
       const enumerationErrors = new Map<string, string>();
       const rankOpts = {
-        backend,
+        backend: printer,
         asmData,
         prototypes,
         symbols,
         contextGlobals,
         ...(ownContextProto ? { ownContextProto } : {}),
-        // loop counters and the returned local under role names (core l3/names.ts)
-        roleNames: true,
         ...(calleeBodies ? { calleeBodies } : {}),
         onEnumerationError: (variations: readonly string[], error: string) => {
           const step = threwStep(variations);
@@ -977,14 +978,13 @@ export async function runCli(
   const onGap: OnGap = flags.has('strict') ? 'strict' : 'annotate';
   try {
     const result = decompile(name, asm, unitTarget, {
-      backend,
+      backend: printer,
       onGap,
       asmData,
       prototypes,
       symbols,
       contextGlobals,
       ...(ownContextProto ? { ownContextProto } : {}),
-      roleNames: true,
       ...(calleeBodies ? { calleeBodies } : {}),
     });
     // THE ASSUMPTIONS THE SOURCE RESTS ON, on the path that prints no declarations. Every other

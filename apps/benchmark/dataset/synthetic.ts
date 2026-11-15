@@ -1763,6 +1763,24 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void sw_void(int,int*);',
     proto: { sw_void: { returnsVoid: true } },
   },
+  // A VOID TAIL BESIDE AN EARLY RETURN. The source ends in a `return;` and one else-if arm returns
+  // early. On agbcc -O2, gcc 2.7.2 -O1 and KMC gcc -O2 — this row's own flags — the same body without
+  // the last `return;` compiles to other code (gcc lays its blocks out by the returns it is given),
+  // so a print that drops the trailing `return;` there publishes a function the target was not
+  // compiled from (l3/polish/voidtail.ts).
+  {
+    sym: 'vtailret',
+    src: 'void j(void);\nvoid m(s32 a);\ns32 k(s32 a);\nvoid vtailret(s32 a){ if (a > 3) { j(); } else if (a) { m(a); return; } else { k(a); } m(1); return; }',
+    features: ['branch'],
+    toolchains: ['agbcc', 'gcc2.7.2', 'gcc2.7.2kmc'],
+    ctx: 'void j(void); void m(s32 a); s32 k(s32 a); void vtailret(s32 a);',
+    proto: {
+      j: { params: 0, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      k: { params: 1 },
+      vtailret: { returnsVoid: true },
+    },
+  },
   // Dense 8-case switch → a jump table on every toolchain (agbcc `mov pc` inline table; IDO/KMC
   // `jr` + `.rodata`; mwcc `bctr` + `.data`); MIPS/PPC recovery needs the AsmData side-table.
   {

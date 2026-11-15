@@ -707,6 +707,19 @@ function exprWalkSpelling(
   return { p, base: symbolic.length === 0 ? { ...base } : byteSum, idx: [], elems: restUnits / W };
 }
 
+/** A local that is only a name: no frame object, spill home or initializer holds it, and it is
+ *  not `volatile`, so a body that no longer mentions it has no use for its declaration. */
+function isBareLocal(l: SFn['locals'][number]): boolean {
+  return (
+    !l.volatile &&
+    l.frame === undefined &&
+    l.init === undefined &&
+    l.uninit === undefined &&
+    l.slots === undefined &&
+    (l.type.kind === 'int' || l.type.kind === 'ptr')
+  );
+}
+
 /** v3 on one do-while: `out` is the statement list already walked ahead of it. Returns the
  *  re-spelled loop and the statements that replace `out`'s trailing init run (the counter's init
  *  kept, the walk pointers' deleted), or null. Tries the longest init run first. */
@@ -718,7 +731,7 @@ function tryExprWalk(
   declTypes: VarTypes,
   volatileLocals: ReadonlySet<string>,
   calleeWrites: (n: string) => boolean,
-): { loop: Stmt; run: number; kept: Stmt[] } | null {
+): { loop: Stmt; run: number; kept: Stmt[]; subsumed: string[] } | null {
   let nTail = 0;
   while (nTail < dw.body.length && isUnitIncrement(dw.body[dw.body.length - 1 - nTail]) !== null) {
     nTail++;
@@ -756,7 +769,7 @@ function tryExprWalkRun(
   declTypes: VarTypes,
   volatileLocals: ReadonlySet<string>,
   calleeWrites: (n: string) => boolean,
-): { loop: Stmt; run: number; kept: Stmt[] } | null {
+): { loop: Stmt; run: number; kept: Stmt[]; subsumed: string[] } | null {
   // BOTH kinds of step as the body's contiguous TAIL (any order): every deref then runs with `i`
   // completed steps equal to each `p`'s, which is what `BASE[i + REST]` states. A step anywhere
   // earlier (the `*++p` walk, a deref straddling the step) reads a different address. The tail
@@ -844,7 +857,12 @@ function tryExprWalkRun(
           countMentions([dw2], st.name) !== 0),
     );
     if (failed.length === 0) {
-      return { loop: dw2, run: n, kept: inits.filter((st) => !spellings.has(st.name)) };
+      return {
+        loop: dw2,
+        run: n,
+        kept: inits.filter((st) => !spellings.has(st.name)),
+        subsumed: [...spellings.keys()],
+      };
     }
     failed.forEach((st) => spellings.delete(st.name));
   }
@@ -984,6 +1002,16 @@ export function reindexWalks(
         if (v3) {
           // the walk inits are subsumed by the indexed spelling; the counter's init stays
           out.splice(out.length - v3.run, v3.run, ...v3.kept);
+          // and so is each re-spelled pointer: its init, its step and every deref were all its
+          // mentions (`confinedToWalk`), so its declaration goes with them, as the countdown's
+          // counter's does. A PARAM keeps its declaration, and so does a local the frame or a
+          // declaration initializer still holds.
+          for (const p of v3.subsumed) {
+            const at = locals.findIndex((l) => l.name === p);
+            if (at >= 0 && isBareLocal(locals[at])) {
+              locals.splice(at, 1);
+            }
+          }
           out.push(recurse(v3.loop));
           fired++;
           continue;

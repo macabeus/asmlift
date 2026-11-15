@@ -15,6 +15,8 @@ import { IrType, T, scalarTypeForAccess, typeEquals, typeToString } from '../ir/
 import { BinOp, Expr, InitAddress, SFn, SStatic, Stmt, caseGotoViolation, dotBase } from '../l3/ast';
 import { foldConstantImages } from '../l3/constinit';
 import { nameVariables } from '../l3/names';
+import { type PrintPolish, polishTree } from '../l3/polish';
+import { compoundSum } from '../l3/polish/compound';
 import { legalizePointerCells } from '../l3/ptrcell';
 import { orderSlotLocals } from '../l3/slotorder';
 import {
@@ -329,7 +331,7 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
     case 'var':
       return e.name;
     case 'const':
-      return String(e.value);
+      return e.hex === true ? `0x${e.value.toString(16)}` : String(e.value);
     // a negative literal is a prefix `-`, and parenthesizes where one would (`un` below)
     case 'fconst': {
       const s = doubleLiteral(e.bits);
@@ -485,6 +487,21 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
   }
 }
 
+/** What follows the target of a statement the polish marked `compound` (l3/polish/compound.ts):
+ *  `++`, `--`, ` += e` or ` -= e`. Null — print the plain assignment — unless the value is still
+ *  the target plus or minus something and no `const` static's address in it takes a cast
+ *  (`printConverted`), which the plain spelling would have added around the whole sum. */
+function compoundSpelling(target: Expr, value: Expr, vt: PrintEnv, pe: (e: Expr, p: number) => string): string | null {
+  const sum = compoundSum(target, value);
+  if (sum === null || constEscape(value, vt) !== null) {
+    return null;
+  }
+  if (sum.rhs.k === 'const' && (sum.rhs.value === 1 || sum.rhs.value === -1)) {
+    return (sum.op === '+') === (sum.rhs.value === 1) ? '++' : '--';
+  }
+  return ` ${sum.op}= ${pe(sum.rhs, 99)}`;
+}
+
 /** `dest = fn(args)` for a call whose `args[0]` is the address of the struct it returns: a local
  *  declared with that struct type, named by its address. Any other destination has no spelling
  *  that hands the callee the same pointer — compiled, `*(struct Blob64 *)&gDst = makeblob(gBlob);`
@@ -501,8 +518,11 @@ function structReturnCall(call: Extract<Expr, { k: 'call' }>, vt: PrintEnv, leaf
 function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): string[] {
   const pe = (e: Expr, p: number) => printExpr(e, p, vt, leaf);
   switch (s.k) {
-    case 'assign':
-      return [`${indent}${s.name} = ${printConverted(s.value, vt, leaf)};`];
+    case 'assign': {
+      const lhs = s.name;
+      const op = s.compound ? compoundSpelling({ k: 'var', name: s.name }, s.value, vt, pe) : null;
+      return [`${indent}${op === null ? `${lhs} = ${printConverted(s.value, vt, leaf)}` : `${lhs}${op}`};`];
+    }
     case 'store':
       // The lvalue is a full Expr (`index` or `field`), so the leaf hook spells a member write
       // (`this->x = …`) exactly as it spells a member read.
@@ -779,8 +799,12 @@ function legalizePointerWrites(fn: SFn): SFn {
 /** The body of a C-family function: local declarations + statements, one string per line. The
  *  SIGNATURE (return type + name + params, plus any C++ scope/`this`/mangling) is the caller's —
  *  that is the language-divergent part each backend owns. */
-function cFamilyBody(fn0: SFn, leaf: LeafHook | undefined, designators: boolean): string[] {
-  const fn = legalizePointerWrites(fn0);
+function cFamilyBody(fn0: SFn, leaf: LeafHook | undefined, designators: boolean, polish?: PrintPolish): string[] {
+  // The readability polish (l3/polish/) runs last, over the legalized tree, so it sees every cast
+  // the reader will. A pass that throws throws out of `emit`, as any refusal of the printer does:
+  // the polish only re-spells a tree the printer accepts, so a throw there is a bug to see.
+  const legal = legalizePointerWrites(fn0);
+  const fn = polish && !polish.draft ? polishTree(legal, polish.facts) : legal;
   // The legalization env: every printed var's declared type and pointee volatility, from the SAME
   // params/locals the emitted declarations come from — so the printer judges exactly the C the
   // reader will see.
@@ -928,7 +952,8 @@ function structDecls(fn: SFn, printed: string): string[] {
 /** Assemble a full C-family function from a caller-supplied signature line and the shared body.
  *  `designators`: the LANGUAGE spells an array element by index in an initializer (C, not C++).
  *  Whether the compiler's dialect parses one is the function's own fact (`SFn.designators`); an
- *  initializer is spelled by index only where both say yes.
+ *  initializer is spelled by index only where both say yes. `polish`: print through the readability
+ *  polish (l3/polish/) — given only by a backend's `polishedEmit`.
  *
  *  The names a reader would give the parameters and locals (l3/names.ts) are applied HERE too, for
  *  the reason the slot order is: both C-family backends print them, and the collision check reads
@@ -940,15 +965,23 @@ export function emitCFamily(
   fn0: SFn,
   leaf?: LeafHook,
   designators = true,
+  polish?: PrintPolish,
 ): string {
   const print = (fn: SFn) =>
-    assembleCFamily(typeof signature === 'string' ? signature : signature(fn), fn, leaf, designators);
+    assembleCFamily(typeof signature === 'string' ? signature : signature(fn), fn, leaf, designators, polish);
   let plain: string | undefined;
-  const fn = nameVariables(fn0, () => (plain ??= print(fn0)));
+  const policy = { roles: polish !== undefined, dense: polish !== undefined && !polish.draft };
+  const fn = nameVariables(fn0, () => (plain ??= print(fn0)), policy);
   return fn === fn0 ? (plain ?? print(fn0)) : print(fn);
 }
 
-function assembleCFamily(signature: string, fn0: SFn, leaf: LeafHook | undefined, designators: boolean): string {
+function assembleCFamily(
+  signature: string,
+  fn0: SFn,
+  leaf: LeafHook | undefined,
+  designators: boolean,
+  polish: PrintPolish | undefined,
+): string {
   // The declaration list is put into the target's own frame order, and a pointer cell's integer
   // uses converted (l3/ptrcell.ts), HERE — in the shared C-family assembler, reached only from
   // `cBackend.emit` and `cppBackend(...).emit`, so both C-family backends print them and no `.emit(`
@@ -960,7 +993,11 @@ function assembleCFamily(signature: string, fn0: SFn, leaf: LeafHook | undefined
   if (stray !== null) {
     throw new Error(`c backend: ${stray}`);
   }
-  const printed = [`${signature} {`, ...cFamilyBody(fn, leaf, designators && fn.designators === true), '}'].join('\n');
+  const printed = [
+    `${signature} {`,
+    ...cFamilyBody(fn, leaf, designators && fn.designators === true, polish),
+    '}',
+  ].join('\n');
   const decls = structDecls(fn, printed);
   const preamble = decls.length ? decls.join('\n') + '\n' : '';
   return preamble + printed + '\n';

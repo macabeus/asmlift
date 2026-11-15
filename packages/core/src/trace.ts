@@ -11,7 +11,7 @@ import type { CalleeBodies } from './frontend/callee-body';
 import type { Fn } from './ir/core';
 import { print } from './ir/print';
 import { verify } from './ir/verify';
-import type { LanguageBackend } from './l3/ast';
+import { type LanguageBackend, emitDraft } from './l3/ast';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
 import {
   type OnGap,
@@ -104,7 +104,6 @@ export interface TraceOptions {
   symbols?: SymbolMap; // address→symbol map (symbols.ts), as in decompile(); absent ⇒ inert
   contextGlobals?: ContextGlobals; // the declaration context's globals, as in decompile()
   ownContextProto?: FnProto; // the context's own entry, as in decompile()
-  roleNames?: boolean; // role names for counters and the result, as in decompile()
   calleeBodies?: CalleeBodies; // bodies of callees outside the input, as in decompile()
   onGap?: OnGap; // "strict" (default) | "annotate", as in decompile()
   /** Source probe at pattern boundaries: the source asmlift would emit there, which the cli report
@@ -359,9 +358,8 @@ function traceTower(
       inferredSymbols,
       orderLicensedGlobals: orderLicensed,
       ownContextProto: ownContext.ownContextProto,
-      roleNames: opts.roleNames,
     }),
-    (t) => backend.emit(t),
+    (t) => emitDraft(backend, t),
   );
   trace.push({
     id: 'stage:structure',

@@ -40,7 +40,7 @@ import { verify } from './ir/verify';
 import { advancedBases } from './l3/advance';
 import { materializeArgBases } from './l3/argbase';
 import { argCopyCandidates } from './l3/argcopy';
-import type { LanguageBackend, SFn } from './l3/ast';
+import { type LanguageBackend, type SFn, emitDraft } from './l3/ast';
 import { type BaseKey, admittedBases, hoistBaseLocals } from './l3/basecse';
 import { armDisjointCandidates, coalesceCandidates } from './l3/coalesce';
 import type { Gate } from './l3/gates';
@@ -188,8 +188,6 @@ export interface EnumerateOptions {
   contextGlobals?: ContextGlobals;
   /** same contract as DecompileOptions.ownContextProto */
   ownContextProto?: FnProto;
-  /** same contract as DecompileOptions.roleNames */
-  roleNames?: boolean;
   /** same contract as DecompileOptions.calleeBodies */
   calleeBodies?: CalleeBodies;
   /** Called when a respell variation THROWS or fails a boundary contract, so the failure is visible
@@ -506,12 +504,23 @@ interface TreeSources {
 interface TreeSource {
   variations: readonly Variation[];
   source: string;
+  /** the backend's text before its readability polish (`emitDraft`): what two candidates are
+   *  duplicates by */
+  draft: string;
   symbolRefs?: SymbolRef[];
   deviceVolatile?: number;
   /** see `Candidate.matchOnly` — set by a variation that cannot establish its own semantics */
   matchOnly?: true;
   /** see `Candidate.signedUnsignedCompare` */
   signedUnsignedCompare?: true;
+}
+
+/** A tree's published text and its draft (`LanguageBackend.draft`), one string where the polish
+ *  changed nothing — and printed once on a backend with no polish, whose draft IS its text. */
+function emitted(backend: LanguageBackend, t: SFn): { source: string; draft: string } {
+  const source = backend.emit(t);
+  const draft = backend.draft ? backend.draft(t) : source;
+  return { source, draft: draft === source ? source : draft };
 }
 
 /** Did `bound-plus-one-counter-wraps` CAUSE this structuring's decline? The rule fires from every
@@ -592,7 +601,6 @@ export function enumerateCandidates(
     symbols: opts.symbols ? symbolsByName(opts.symbols) : undefined,
     contextGlobals: opts.contextGlobals,
     ownContextProto: ownContext.ownContextProto,
-    roleNames: opts.roleNames,
   });
   // Branch-sense is a differ-ranked VARIATION, the same class as param signedness: a divergent `if`
   // can be spelled with either sense (`if (c) A else B` vs `if (!c) B else A`), and which one the
@@ -1149,7 +1157,7 @@ export function enumerateCandidates(
     // Pascal backend loud-declines). Refusing EVERY tree is still loud — the empty-enumeration
     // check at the end raises the last refusal.
     try {
-      sources.push({ variations: [], source: backend.emit(sfn), ...refsOf(sfn), ...volOf(sfn), ...cmpProof(sfn) });
+      sources.push({ variations: [], ...emitted(backend, sfn), ...refsOf(sfn), ...volOf(sfn), ...cmpProof(sfn) });
     } catch (e) {
       reportThrow(preRespellVariations, e);
       return { sources, emit: { error: e } };
@@ -1253,7 +1261,7 @@ export function enumerateCandidates(
         assertCaseGotosNarrow(alt);
         sources.push({
           variations,
-          source: backend.emit(alt),
+          ...emitted(backend, alt),
           ...refsOf(alt),
           ...volOf(alt),
           ...proof,
@@ -1307,7 +1315,7 @@ export function enumerateCandidates(
                 assertPlacementSurvives(alt, shaped.out, minted);
                 sources.push({
                   variations: [...variations, ...shaped.variations],
-                  source: backend.emit(shaped.out),
+                  ...emitted(backend, shaped.out),
                   ...refsOf(shaped.out),
                   ...volOf(shaped.out),
                   // a shape derived from a proof-gated spelling inherits the requirement
@@ -2542,7 +2550,7 @@ export function enumerateCandidates(
                 const read = structureReturnTailReading(
                   fn,
                   { ...structOpts, joinPastReturns: copiesBarred },
-                  (t) => backend.emit(t),
+                  (t) => emitDraft(backend, t),
                   hooks,
                   acceptsMemo,
                 );
@@ -2684,6 +2692,11 @@ export function enumerateCandidates(
             }
             for (const sp of sources) {
               const source = sp.source;
+              // Duplicates by the DRAFT, not the published text: the polish prints two different
+              // trees as one text where they differ only in what it re-spells (a local's number, a
+              // literal's base), and collapsing those would keep the first route's variations where
+              // the tie-break below picks the other's.
+              const draft = sp.draft;
               // Collapse a candidate whose source is identical (a function with no divergent `if`
               // structures the same either way): no point scoring a duplicate. Deduping the
               // WHOLE emitted set (not just scored survivors) is equivalent — an identical source
@@ -2717,7 +2730,7 @@ export function enumerateCandidates(
               // would have to say which it means, and the published `winnerVariations` must not
               // change — so build it when a round needs the census, not before. Until then the only
               // sound census is an ablation.
-              const dup = seen.get(source);
+              const dup = seen.get(draft);
               if (dup !== undefined) {
                 // The same TEXT, reached twice. `matchOnly` is a property of the DERIVATION and the
                 // published artifact is the text, so a spelling some sound route also produces is a
@@ -2763,7 +2776,7 @@ export function enumerateCandidates(
                 ...(guessesParamWidth ? { guessesParamWidth: true as const } : {}),
                 ...(liftSetting.keepStores ? { farStoreCast: true as const } : {}),
               };
-              seen.set(source, made);
+              seen.set(draft, made);
               out.push(made);
             }
           }
@@ -2945,6 +2958,10 @@ function stillbornNote(stillborn: Stillborn, fan: number): string {
  *  against the braced `if/else` its sibling emits. Counted the way the report counts it
  *  (apps/benchmark/src/eval/quality.ts `lines`), for the same reason `castCount` is: ranking must
  *  not optimize for something the published metric measures differently.
+ *
+ *  ALL THREE COUNT THE PUBLISHED TEXT, after the readability polish (l3/polish/), for the same
+ *  reason again: the report counts that text. A tie-break runs only among equal scores, so it moves
+ *  no score; what it picks is the text the reader gets.
  *
  *  ENUMERATION ORDER last, which makes this a strict total order (indices are unique) and the
  *  result deterministic. Spelled explicitly rather than leaning on Array#sort's stability, which
