@@ -10,6 +10,7 @@
 // generic-local idiom (neither recovers real names without context) — NOT penalized. Only genuine
 // failure markers count as glue.
 import type { QualityHabits, QualityScore } from '@asmlift/bench-schema';
+import { elseAfterReturnCount, shapeHabits } from '@asmlift/core/shape-habits';
 
 const GLUE_PATTERNS = [
   /M2C_ERROR/g,
@@ -161,75 +162,6 @@ function openingParen(s: string, close: number): number {
 
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-const indentOf = (line: string): number => /^ */.exec(line)![0].length;
-const LITERAL = /^-?(?:0x[0-9a-fA-F]+|\d+)$/;
-
-/** Does `k OP l` hold for two integer literals? */
-function literalTestHolds(k: string, op: string, l: string): boolean {
-  const a = Number(k);
-  const b = Number(l);
-  switch (op) {
-    case '<':
-      return a < b;
-    case '<=':
-      return a <= b;
-    case '>':
-      return a > b;
-    case '>=':
-      return a >= b;
-    case '!=':
-      return a !== b;
-    default:
-      return false;
-  }
-}
-
-/** The shape counters: `joinedReturn`, `shiftTruth` and `doWhileForable`, read line by line off the
- *  printer's layout (four-space indents, every arm braced). */
-function shapeHabits(stmts: readonly string[]): Pick<QualityHabits, 'joinedReturn' | 'shiftTruth' | 'doWhileForable'> {
-  let joinedReturn = 0;
-  let doWhileForable = 0;
-  // `return v;` right after an if/else whose two arms each end by setting `v`
-  for (let i = 2; i < stmts.length; i++) {
-    const ret = /^( *)return ([A-Za-z_]\w*);$/.exec(stmts[i]);
-    if (!ret || stmts[i - 1] !== `${ret[1]}}`) {
-      continue;
-    }
-    const ind = ret[1];
-    const sets = (line: string | undefined): boolean =>
-      line !== undefined && line.startsWith(`${ind}    ${ret[2]} = `) && line.endsWith(';');
-    if (!sets(stmts[i - 2])) {
-      continue;
-    }
-    for (let j = i - 3; j > 0 && indentOf(stmts[j]) >= ind.length; j--) {
-      if (stmts[j] === `${ind}} else {`) {
-        if (sets(stmts[j - 1])) {
-          joinedReturn++;
-        }
-        break;
-      }
-      if (indentOf(stmts[j]) === ind.length) {
-        break;
-      }
-    }
-  }
-  // `v = K;` then `do {` … `} while (v OP L);` at the same indent, with `K OP L` true
-  for (let i = 1; i < stmts.length; i++) {
-    const init = /^( *)([A-Za-z_]\w*) = (-?(?:0x[0-9a-fA-F]+|\d+));$/.exec(stmts[i - 1]);
-    if (!init || stmts[i] !== `${init[1]}do {`) {
-      continue;
-    }
-    const end = stmts.findIndex((l, j) => j > i && indentOf(l) === init[1].length);
-    const test = end < 0 ? null : /^ *\} while \(([A-Za-z_]\w*) (<=?|>=?|!=) (\S+)\);$/.exec(stmts[end]);
-    if (test && test[1] === init[2] && LITERAL.test(test[3]) && literalTestHolds(init[3], test[2], test[3])) {
-      doWhileForable++;
-    }
-  }
-  const body = stmts.join('\n');
-  const shiftTruth = countAll(body, /<< 24\)? [!=]= 0\b/g) + countAll(body, /<< (16|24)\)? >> \1\b/g);
-  return { joinedReturn, shiftTruth, doWhileForable };
-}
-
 /** The habit counters (`QualityHabits`), each a textual reading of the statements. */
 function assessHabits(parts: FnParts): QualityHabits {
   const body = parts.stmts.join('\n');
@@ -277,7 +209,7 @@ function assessHabits(parts: FnParts): QualityHabits {
     voidTail += countAll(body, /^ {4}default:\n\s*(?:return;|break;)\n {4}\}\n\}/gm);
   }
 
-  const elseAfterReturn = countAll(body, /return\b[^;\n]*;\n\s*\} else\b/g);
+  const elseAfterReturn = elseAfterReturnCount(body);
 
   let callNeZero = 0;
   for (const m of body.matchAll(/\) != 0(?=\)| &&| \|\|)/g)) {

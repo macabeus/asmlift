@@ -110,6 +110,7 @@ import {
   firstFired,
   sameBases,
 } from './rank-variations';
+import { shapeHabitCount } from './shape-habits';
 import { type Stillborn, stillbornVerdict } from './stillborn';
 import {
   DefaultAcceptsMemo,
@@ -3019,7 +3020,12 @@ function stillbornNote(stillborn: Stillborn, fan: number): string {
  *  (apps/benchmark/src/eval/quality.ts `lines`), for the same reason `castCount` is: ranking must
  *  not optimize for something the published metric measures differently.
  *
- *  ALL THREE COUNT THE PUBLISHED TEXT, after the readability polish (l3/polish/), for the same
+ *  THE SHAPE HABITS next (shape-habits.ts `shapeHabitCount`): an `else` after a return, a merged
+ *  local that is only returned, a shift idiom, a `do`/`while` a reader writes as `for`. The
+ *  readability report counts each the same way. Last of the text terms, so it decides only
+ *  between two spellings that tie on everything above, the line count included.
+ *
+ *  ALL FOUR COUNT THE PUBLISHED TEXT, after the readability polish (l3/polish/), for the same
  *  reason again: the report counts that text. A tie-break runs only among equal scores, so it moves
  *  no score; what it picks is the text the reader gets.
  *
@@ -3046,6 +3052,7 @@ export function compareScored<S extends { score: number }>(
     gotoCount(a.source) - gotoCount(b.source) ||
     castCount(a.source) - castCount(b.source) ||
     lineCount(a.source) - lineCount(b.source) ||
+    shapeHabitCount(a.source) - shapeHabitCount(b.source) ||
     a.order - b.order
   );
 }

@@ -11,6 +11,7 @@ import { readDoWhileAsFor } from '../src/l3/forread';
 import { compoundExpressionAssignments } from '../src/l3/polish/compound';
 import { splitReturnedMerges } from '../src/l3/retsplit';
 import { breakFinalSwitchReturns } from '../src/l3/switchbreak';
+import { shapeHabitCount } from '../src/shape-habits';
 
 const v = (name: string): Expr => ({ k: 'var', name });
 const c = (value: number): Expr => ({ k: 'const', value });
@@ -147,5 +148,17 @@ describe('/for-read: a do/while whose first test passes, as a for', () => {
   test('declines an init the counter type cannot hold', () => {
     const fn = { ...loop(200, '!=', 7, [step]), locals: [{ name: 'v0', type: T.int(8, true) }] };
     expect(readDoWhileAsFor(fn)).toBeNull();
+  });
+});
+
+describe("the tie-break's habit count (shape-habits.ts)", () => {
+  test('counts the habits the shape readings remove, and none in their own output', () => {
+    const merged =
+      's32 f(s32 a0) {\n    s32 v0;\n    if (a0 != 0) {\n        v0 = 1;\n    } else {\n        v0 = 0;\n    }\n    return v0;\n}\n';
+    const elseAfter =
+      's32 f(s32 a0) {\n    if (a0) {\n        return 1;\n    } else {\n        g();\n    }\n    return 0;\n}\n';
+    expect(shapeHabitCount(merged)).toBe(1);
+    expect(shapeHabitCount(elseAfter)).toBe(1);
+    expect(shapeHabitCount('s32 f(s32 a0) {\n    if (a0 != 0) return 1;\n    return 0;\n}\n')).toBe(0);
   });
 });
