@@ -43,6 +43,7 @@ import { argCopyCandidates } from './l3/argcopy';
 import { type LanguageBackend, type SFn, emitDraft } from './l3/ast';
 import { type BaseKey, admittedBases, hoistBaseLocals } from './l3/basecse';
 import { armDisjointCandidates, coalesceCandidates } from './l3/coalesce';
+import { compoundExpressionAssignments } from './l3/compoundexpr';
 import { readDoWhileAsFor } from './l3/forread';
 import type { Gate } from './l3/gates';
 import type { HoistPlacement } from './l3/hoist';
@@ -53,7 +54,6 @@ import { mulFirstSums } from './l3/mulfirst';
 import { nearBaseClusters } from './l3/nearbase';
 import { spellOperandMembers } from './l3/offmember';
 import { parkParamsFirst } from './l3/parkfirst';
-import { compoundExpressionAssignments } from './l3/polish/compound';
 import { pointerFields } from './l3/ptrfield';
 import { type RegcopyTail, registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
@@ -1423,7 +1423,7 @@ export function enumerateCandidates(
     respell(['ret-split'], () => splitReturnedMerges(sfn));
     // `/switch-break` — a void function's final switch left by `break;` (l3/switchbreak.ts).
     respell(['switch-break'], () => breakFinalSwitchReturns(sfn));
-    // `/compound-expr` — `x += e` for a non-literal `e` (l3/polish/compound.ts).
+    // `/compound-expr` — `x += e` for a non-literal `e` (l3/compoundexpr.ts).
     respell(['compound-expr'], () => compoundExpressionAssignments(sfn));
     // `/for-read` — a do/while whose first test is known to pass, as a `for` (l3/forread.ts).
     respell(['for-read'], () => readDoWhileAsFor(sfn));

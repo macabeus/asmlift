@@ -1291,7 +1291,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior: "IDO 7.1 orders the add's operands the other way round for the compound.",
     offeredWhen: {
       when: 'A word or pointer local or parameter, not volatile, assigned itself plus or minus a non-literal.',
-      decidedBy: { symbol: 'compoundExpressionAssignments', file: 'packages/core/src/l3/polish/compound.ts' },
+      decidedBy: { symbol: 'compoundExpressionAssignments', file: l3('compoundexpr') },
     },
     example: {
       compiler: 'ido',
@@ -1299,7 +1299,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       before: 's = s + a[i] * b[i];',
       after: 's += a[i] * b[i];',
     },
-    implementedIn: 'packages/core/src/l3/polish/compound.ts',
+    implementedIn: l3('compoundexpr'),
   },
   'for-read': {
     title: 'For loop',

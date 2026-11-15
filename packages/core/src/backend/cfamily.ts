@@ -487,7 +487,8 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
   }
 }
 
-/** What follows the target of a statement the polish marked `compound` (l3/polish/compound.ts):
+/** What follows the target of a statement marked `compound` (the polish, l3/polish/compound.ts, or
+ *  the `/compound-expr` variation, l3/compoundexpr.ts):
  *  `++`, `--`, ` += e` or ` -= e`. Null — print the plain assignment — unless the value is still
  *  the target plus or minus something and no `const` static's address in it takes a cast
  *  (`printConverted`), which the plain spelling would have added around the whole sum. */

@@ -42,8 +42,10 @@ export function compoundSum(target: Expr, value: Expr): { op: '+' | '-'; rhs: Ex
 
 const wordOrPointer = (t: IrType): boolean => (t.kind === 'int' && t.width === 32) || t.kind === 'ptr';
 
-/** `fn` with every statement `valueOk` admits marked compound, over the targets the header admits. */
-function markCompound(fn: SFn, valueOk: (rhs: Expr) => boolean): { fn: SFn; marked: number } {
+/** `fn` with every statement `valueOk` admits marked compound, over the targets the header admits.
+ *  Shared with the `/compound-expr` variation (l3/compoundexpr.ts), which marks the non-literal
+ *  values this polish leaves alone. */
+export function markCompound(fn: SFn, valueOk: (rhs: Expr) => boolean): { fn: SFn; marked: number } {
   const names = new Set([
     ...fn.params.filter((p) => wordOrPointer(p.type)).map((p) => p.name),
     ...fn.locals.filter((l) => !l.volatile && wordOrPointer(l.type)).map((l) => l.name),
@@ -71,17 +73,8 @@ function markCompound(fn: SFn, valueOk: (rhs: Expr) => boolean): { fn: SFn; mark
   return { fn: { ...fn, body: fn.body.map(one) }, marked };
 }
 
-const literal = (rhs: Expr): boolean => rhs.k === 'const' && Number.isInteger(rhs.value);
+export const literal = (rhs: Expr): boolean => rhs.k === 'const' && Number.isInteger(rhs.value);
 
 export function compoundAssignments(fn: SFn, facts: PolishFacts): SFn {
   return facts.literal ? fn : markCompound(fn, literal).fn;
-}
-
-/** The `/compound-expr` respell variation: the same targets, with an added value that is NOT a
- *  literal (`s += a[i] * b[i]`) — the case the polish leaves alone because IDO 7.1 spells the add's
- *  operands in the other order for it. One program either way, so it is a ranked candidate beside
- *  the plain spelling, at every level. Declines where no statement qualifies. */
-export function compoundExpressionAssignments(fn: SFn): SFn | null {
-  const { fn: out, marked } = markCompound(fn, (rhs) => !literal(rhs));
-  return marked > 0 ? out : null;
 }
