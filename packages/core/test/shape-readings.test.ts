@@ -7,8 +7,8 @@ import { describe, expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
+import { compoundExpressionAssignments } from '../src/l3/compoundexpr';
 import { readDoWhileAsFor } from '../src/l3/forread';
-import { compoundExpressionAssignments } from '../src/l3/polish/compound';
 import { splitReturnedMerges } from '../src/l3/retsplit';
 import { breakFinalSwitchReturns } from '../src/l3/switchbreak';
 import { shapeHabitCount } from '../src/shape-habits';
@@ -49,6 +49,15 @@ describe('/ret-split: return from each arm', () => {
     expect(out).toContain('return 1;');
     expect(out).toContain('return 2;');
     expect(out).not.toContain('v0');
+  });
+
+  test('a nested two-armed if is split too, so no else follows a return at any depth', () => {
+    const inner: Stmt = { k: 'if', cond: v('a0'), then: [set('v0', c(1))], else: [set('v0', c(2))] };
+    const out = print(splitReturnedMerges(merged([set('v0', c(9))], [call('g'), inner])));
+    expect(out).toBe(
+      's32 f(s32 a0, s32 a1) {\n    if (a1 != 0) return 9;\n    g();\n    if (a0) return 1;\n    return 2;\n}\n',
+    );
+    expect(shapeHabitCount(out ?? '')).toBe(0);
   });
 
   test('declines: an arm that ends otherwise, a local at another type, a void function', () => {

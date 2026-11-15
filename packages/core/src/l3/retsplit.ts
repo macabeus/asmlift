@@ -26,7 +26,9 @@ import { T, typeEquals } from '../ir/types';
 import { type SFn, type Stmt, mapStmtLists, reachesEnd } from './ast';
 import { mentionedLocals } from './mentions';
 
-/** `arm` with its final assignment to `v` returned instead, or null where it does not end that way. */
+/** `arm` with its final assignment to `v` returned instead, or null where it does not end that way.
+ *  A nested `if` is split the way the outer one is (`splitArms`), so no `else` is left after a
+ *  `return` at any depth. */
 function returnFrom(arm: readonly Stmt[], v: string): Stmt[] | null {
   const last = arm[arm.length - 1];
   if (last === undefined) {
@@ -37,11 +39,18 @@ function returnFrom(arm: readonly Stmt[], v: string): Stmt[] | null {
     return [...head, { k: 'return', value: last.value }];
   }
   if (last.k === 'if' && last.else.length > 0) {
-    const t = returnFrom(last.then, v);
-    const e = returnFrom(last.else, v);
-    return t && e ? [...head, { ...last, then: t, else: e }] : null;
+    const split = splitArms(last, v);
+    return split && [...head, ...split];
   }
   return reachesEnd([last]) ? null : [...arm];
+}
+
+/** `s`, an `if` with both arms, as `if (c) { …return a; } …return b;`: its first arm returns inside
+ *  the `if` and its other arm follows it. Null where an arm does not end by setting `v` or leaving. */
+function splitArms(s: Extract<Stmt, { k: 'if' }>, v: string): Stmt[] | null {
+  const t = returnFrom(s.then, v);
+  const e = returnFrom(s.else, v);
+  return t && e && !reachesEnd(t) && !reachesEnd(e) ? [{ ...s, then: t, else: [] }, ...e] : null;
 }
 
 export function splitReturnedMerges(sfn: SFn): SFn | null {
@@ -59,10 +68,9 @@ export function splitReturnedMerges(sfn: SFn): SFn | null {
       const next = stmts[i + 1];
       const v = next?.k === 'return' && next.value?.k === 'var' ? next.value.name : undefined;
       if (s.k === 'if' && s.else.length > 0 && v !== undefined && returnable.has(v)) {
-        const t = returnFrom(s.then, v);
-        const e = returnFrom(s.else, v);
-        if (t && e && !reachesEnd(t) && !reachesEnd(e)) {
-          out.push({ ...s, then: t, else: [] }, ...e);
+        const arms = splitArms(s, v);
+        if (arms) {
+          out.push(...arms);
           split.add(v);
           i++; // the `return v;` no path reaches any more
           continue;
