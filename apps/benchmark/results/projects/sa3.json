@@ -59,7 +59,7 @@
             "candidates": 4
           }
         },
-        "rankSeconds": 1.08,
+        "rankSeconds": 1.31,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "s32 AbsMax(s32 a0, s32 a1) {\n    if (a0 < 0) a0 = -a0;\n    if (a1 < 0) a1 = -a1;\n    if (a1 < a0) a1 = a0;\n    return a1;\n}\n",
@@ -213,7 +213,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 0.83,
+        "rankSeconds": 1.12,
         "withheldCandidates": [
           {
             "variations": [
@@ -400,7 +400,7 @@
             "candidates": 4
           }
         },
-        "rankSeconds": 40.08,
+        "rankSeconds": 5.85,
         "symbolsUsed": [
           {
             "name": "ewram_end",
@@ -542,7 +542,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.56,
+        "rankSeconds": 0.3,
         "symbolsUsed": [
           {
             "name": "gEwramHeap",
@@ -695,7 +695,7 @@
             "candidates": 8
           }
         },
-        "rankSeconds": 10.85,
+        "rankSeconds": 9.7,
         "symbolsUsed": [
           {
             "name": "ewram_end",
@@ -902,7 +902,7 @@
             "candidates": 192
           }
         },
-        "rankSeconds": 5,
+        "rankSeconds": 15.98,
         "symbolsUsed": [
           {
             "name": "gInput",
@@ -1101,7 +1101,7 @@
             "withheld": 4
           }
         },
-        "rankSeconds": 0.82,
+        "rankSeconds": 1.75,
         "withheldCandidates": [
           {
             "variations": [
@@ -1313,7 +1313,7 @@
             "withheld": 8
           }
         },
-        "rankSeconds": 3.7,
+        "rankSeconds": 4.47,
         "withheldCandidates": [
           {
             "variations": [
@@ -1649,7 +1649,7 @@
             "candidates": 16
           }
         },
-        "rankSeconds": 4.22,
+        "rankSeconds": 5.34,
         "symbolsUsed": [
           {
             "name": "gOamFreeIndex",
@@ -1848,7 +1848,7 @@
             "candidates": 16
           }
         },
-        "rankSeconds": 15.43,
+        "rankSeconds": 14.92,
         "symbolsUsed": [],
         "outcome": "nonmatch",
         "source": "struct Elem0 { s32 field_0; u8 _pad0[16]; };\nstruct Elem1 { s32 field_0; u8 _pad0[16]; };\nstruct Struct0 { u8 _pad0[104]; u8 field_104; u8 _pad1[2]; u8 field_107; };\nstruct Struct1 { u8 _pad0[305]; u8 field_305; };\nstruct Struct2 { s32 field_0; u8 _pad0[12]; u8 field_16; u8 field_17; u8 field_18; u8 _pad1[31]; u8 field_50; u16 field_52; u8 _pad2[808]; u16 field_862; u8 _pad3[5]; u8 field_869; u8 field_870; };\nvoid PackSaveSector(s32 *a0, struct Struct2 *a1) {\n    struct Elem1 *v0;\n    s32 v6;\n    s32 v2;\n    s32 v4;\n    s32 v7;\n    s16 i;\n    s16 j;\n    s16 k;\n    s16 v1;\n    s16 v3;\n    s16 v5;\n    s16 v8;\n    u8 *v9;\n    s32 v10;\n    u8 *v11;\n    volatile u16 sp48;\n    a0[0] = 1196707404;\n    a0[1] = a0[1] + 1;\n    a0[2] = a1->field_0;\n    i = 0;\n    do {\n        ((u16 *)(a0 + 3))[i] = ((u16 *)((u8 *)a1 + 4))[i];\n        i = (u16)(i + 1);\n    } while ((s16)i <= 5);\n    ((u8 *)a0)[24] = 0;\n    ((u8 *)a0)[25] = a1->field_16;\n    ((u8 *)a0)[26] = a1->field_17;\n    ((u8 *)a0)[27] = a1->field_18;\n    ((u8 *)a0)[28] = 0;\n    sp48 = a1->field_52;\n    v0 = (struct Elem1 *)((u8 *)a1 + 96 + 1 + 3);\n    j = 0;\n    do {\n        ((u16 *)((u8 *)a0 + 30))[j] = ((u16 *)((u8 *)v0 - 80))[j];\n        j = (u16)(j + 1);\n    } while ((s16)j <= 6);\n    k = 0;\n    do {\n        *(u8 *)(s32 *)((u8 *)(11 + a0) + k) = *((u8 *)a1 + 34 + k);\n        k = (u16)(k + 1);\n    } while ((s16)k <= 6);\n    v1 = 0;\n    do {\n        *(51 + (u8 *)a0 + v1) = *(41 + (u8 *)a1 + v1);\n        v1 = (u16)(v1 + 1);\n    } while ((s16)v1 <= 8);\n    v2 = 0;\n    do {\n        v3 = 0;\n        do {\n            *((u8 *)a0 + 62 + (v3 + (v2 << 16 >> 14))) = *(v3 + (v2 << 16 >> 14) + ((u8 *)a1 + 55));\n            v3 = (u16)(v3 + 1);\n        } while ((s16)v3 <= 3);\n        v2 = (u32)((v2 << 16) + (0x80 << 9)) >> 16;\n    } while ((s16)v2 <= 8);\n    *(u8 *)(a0 + 15) = a1->field_50;\n    *(u16 *)((u8 *)a0 + 98) = sp48;\n    *((u8 *)a0 + 61) = *((u8 *)a1 + 51);\n    *((u8 *)a0 + 98 + 2) = *((u8 *)a1 + 96);\n    *((u8 *)a0 + 61 + 40) = *((u8 *)a1 + 51 + 47);\n    *((u8 *)a0 + 98 + 2 + 2) = *((u8 *)a1 + 96 + 1);\n    *((u8 *)a0 + 103) = 0;\n    v4 = 0;\n    do {\n        ((struct Struct0 *)(s32 *)((u8 *)a0 + (s16)v4 * 20))->field_104 = *((u8 *)(struct Struct2 *)((u8 *)a1 + (s16)v4 * 20) + 116);\n        *((u8 *)(s32 *)((u8 *)a0 + (s16)v4 * 20) + 105) = *((u8 *)(struct Struct2 *)((u8 *)a1 + (s16)v4 * 20) + 117);\n        *((u8 *)(s32 *)((u8 *)a0 + (s16)v4 * 20) + 105 + 1) = *((u8 *)(struct Struct2 *)((u8 *)a1 + (s16)v4 * 20) + 119);\n        ((struct Struct0 *)(s32 *)((u8 *)a0 + (s16)v4 * 20))->field_107 = *((u8 *)(struct Struct2 *)((u8 *)a1 + (s16)v4 * 20) + 118);\n        ((struct Elem0 *)((u8 *)a0 + 61 + 40 + 7))[(s16)v4].field_0 = v0[(s16)v4].field_0;\n        v5 = 0;\n        do {\n            *(u16 *)((u8 *)a0 + 98 + 2 + 2 + 10 + ((v5 << 1) + (s16)v4 * 20)) = *(u16 *)((u8 *)a1 + 104 + ((v5 << 1) + (s16)v4 * 20));\n            v5 = (u16)(v5 + 1);\n        } while ((s16)v5 <= 5);\n        v4 = (u32)((v4 << 16) + (0x80 << 9)) >> 16;\n    } while ((s16)v4 <= 9);\n    v6 = 0;\n    do {\n        v7 = 0;\n        do {\n            v8 = 0;\n            do {\n                *(u8 *)(s32 *)((0x98 << 1) + (u8 *)(s32 *)((u8 *)a0 + ((v8 << 2) + (s16)v7 * 20 + (s16)v6 * 80))) = *(u8 *)(struct Struct2 *)((u8 *)(struct Struct2 *)((u8 *)a1 + ((v8 << 2) + (s16)v7 * 20 + (s16)v6 * 80)) + (0x96 << 1));\n                ((struct Struct1 *)(s32 *)((u8 *)a0 + ((v8 << 2) + (s16)v7 * 20 + (s16)v6 * 80)))->field_305 = *((u8 *)(struct Struct2 *)((u8 *)a1 + ((v8 << 2) + (s16)v7 * 20 + (s16)v6 * 80)) + 301);\n                *(u16 *)(s32 *)((0x97 << 1) + 4 + (u8 *)(s32 *)((u8 *)a0 + ((v8 << 2) + (s16)v7 * 20 + (s16)v6 * 80))) = ((u16 *)(struct Struct2 *)((u8 *)a1 + ((v8 << 2) + (s16)v7 * 20 + (s16)v6 * 80)))[151];\n                v8 = (u16)(v8 + 1);\n            } while ((s16)v8 <= 4);\n            v7 = (u32)((v7 << 16) + (0x80 << 9)) >> 16;\n        } while ((s16)v7 <= 3);\n        v6 = (u32)((v6 << 16) + (0x80 << 9)) >> 16;\n    } while ((s16)v6 <= 6);\n    switch (*(u16 *)(struct Struct2 *)((0xd7 << 2) + (u8 *)a1)) {\n        case 1:\n            *(u8 *)(s32 *)((u8 *)a0 + (0xd8 << 2)) = *(u16 *)(struct Struct2 *)((0xd7 << 2) + (u8 *)a1);\n            break;\n        case 2:\n            v9 = (u8 *)a0 + 865;\n            *v9 = 1;\n            break;\n        case 256:\n            v9 = (u8 *)a0 + 866;\n            *v9 = 1;\n            break;\n    }\n    switch (a1->field_862) {\n        case 1:\n            v10 = 0xd8 << 2;\n            *(u8 *)(s32 *)((u8 *)a0 + v10) = 2;\n            break;\n        case 2:\n            *((u8 *)a0 + 865) = a1->field_862;\n            break;\n        case 256:\n            v10 = 866;\n            *(u8 *)(s32 *)((u8 *)a0 + v10) = 2;\n            break;\n    }\n    switch (*(u16 *)(struct Struct2 *)((u8 *)a1 + (0xd8 << 2))) {\n        case 1:\n            v11 = (u8 *)(s32 *)((u8 *)a0 + (0xd8 << 2));\n            *v11 = 4;\n            break;\n        case 2:\n            v11 = (u8 *)a0 + 865;\n            *v11 = 4;\n            break;\n        case 256:\n            v11 = (u8 *)a0 + 866;\n            *v11 = 4;\n            break;\n    }\n    *(u8 *)(s32 *)((u8 *)a0 + (0xd9 << 2)) = *(u8 *)(struct Struct2 *)((u8 *)a1 + (0xd9 << 2));\n    *((u8 *)a0 + 869) = a1->field_869;\n    *((u8 *)a0 + 870) = a1->field_870;\n    *((u8 *)a0 + 871) = 0;\n    a0[218] = GetSaveSectorChecksum(a0);\n}\n",
@@ -2020,7 +2020,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.22,
+        "rankSeconds": 0.46,
         "symbolsUsed": [],
         "outcome": "nonmatch",
         "source": "struct Struct0 { u8 _pad0[4]; s32 field_4; u8 _pad1[31]; u8 field_39; u8 _pad2[5]; u8 field_45; };\nvoid Player_800D978(struct Struct0 *p) {\n    p->field_4 = p->field_4 & -131073;\n    p->field_39 = 1;\n    Player_StopSong(p, 114);\n    p->field_45 = -16 & p->field_45;\n    Player_8005380(p);\n}\n",
@@ -2228,7 +2228,7 @@
             "candidates": 150
           }
         },
-        "rankSeconds": 20.09,
+        "rankSeconds": 48.58,
         "symbolsUsed": [
           {
             "name": "gFlags",
@@ -2412,7 +2412,7 @@
             "candidates": 4
           }
         },
-        "rankSeconds": 0.32,
+        "rankSeconds": 2.19,
         "symbolsUsed": [
           {
             "name": "gRngPrevValue",
@@ -2602,7 +2602,7 @@
             "candidates": 80
           }
         },
-        "rankSeconds": 9.36,
+        "rankSeconds": 13.94,
         "symbolsUsed": [
           {
             "name": "unkFractions",
@@ -2772,7 +2772,7 @@
             "withheld": 4
           }
         },
-        "rankSeconds": 5.19,
+        "rankSeconds": 5.42,
         "withheldCandidates": [
           {
             "variations": [
@@ -3029,7 +3029,7 @@
             "candidates": 4
           }
         },
-        "rankSeconds": 0.6,
+        "rankSeconds": 1.74,
         "symbolsUsed": [
           {
             "name": "gBgOffsetsHBlankPrimary",
@@ -3216,7 +3216,7 @@
             "withheld": 2
           }
         },
-        "rankSeconds": 2.72,
+        "rankSeconds": 3.62,
         "withheldCandidates": [
           {
             "variations": [
@@ -3443,7 +3443,7 @@
             "candidates": 12
           }
         },
-        "rankSeconds": 2.17,
+        "rankSeconds": 3.5,
         "symbolsUsed": [
           {
             "name": "gSineTable",
@@ -3596,7 +3596,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.29,
+        "rankSeconds": 0.44,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "void sa2__sub_80838CC(s16 *a0, s16 *a1, u16 *a2) {\n    a2[0] = *(a0 + 3) * *(a1 + 0) + *(a0 + 0) * *(a1 + 3) + *(a0 + 1) * *(a1 + 2) - *(a0 + 2) * *(a1 + 1) >> 10;\n    a2[1] = *(a0 + 3) * *(a1 + 1) - *(a0 + 0) * *(a1 + 2) + *(a0 + 1) * *(a1 + 3) + *(a0 + 2) * *(a1 + 0) >> 10;\n    a2[2] = *(a0 + 3) * *(a1 + 2) + *(a0 + 0) * *(a1 + 1) - *(a0 + 1) * *(a1 + 0) + *(a0 + 2) * *(a1 + 3) >> 10;\n    a2[3] = *(a0 + 3) * *(a1 + 3) - *(a0 + 0) * *(a1 + 0) - *(a0 + 1) * *(a1 + 1) - *(a0 + 2) * *(a1 + 2) >> 10;\n}\n",
@@ -3736,7 +3736,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 0.27,
+        "rankSeconds": 0.71,
         "symbolsUsed": [],
         "outcome": "nonmatch",
         "source": "void sa2__sub_808399C(u16 *a0, s16 *a1) {\n    s16 v0;\n    s16 v1;\n    s16 v2;\n    v0 = *(s16 *)(a0 + 0);\n    v1 = *(s16 *)(a0 + 1);\n    v2 = *(s16 *)(a0 + 2);\n    a0[0] = *(s16 *)(a0 + 3) * *(a1 + 0) + *(a1 + 3) * v0 + *(a1 + 2) * v1 - *(a1 + 1) * v2 >> 10;\n    a0[1] = *(s16 *)(a0 + 3) * *(a1 + 1) - *(a1 + 2) * v0 + *(a1 + 3) * v1 + *(a1 + 0) * v2 >> 10;\n    a0[2] = *(s16 *)(a0 + 3) * *(a1 + 2) + *(a1 + 1) * v0 - *(a1 + 0) * v1 + *(a1 + 3) * v2 >> 10;\n    a0[3] = *(s16 *)(a0 + 3) * *(a1 + 3) - *(a1 + 0) * v0 - *(a1 + 1) * v1 - *(a1 + 2) * v2 >> 10;\n}\n",
@@ -3878,7 +3878,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.36,
+        "rankSeconds": 0.46,
         "symbolsUsed": [],
         "outcome": "nonmatch",
         "source": "s32 sa2__sub_808558C(u16 a0, u16 a1, u8 a2) {\n    s32 v0;\n    if ((u16)(a1 - a0 & (1 << a2) - 1) > (u32)(1 << a2) >> 1) {\n        v0 = (u16)(a1 - a0 & (1 << a2) - 1) - (1 << a2) << 16;\n    } else {\n        v0 = (u16)(a1 - a0 & (1 << a2) - 1) << 16;\n    }\n    return v0 >> 16;\n}\n",
@@ -4021,7 +4021,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.12,
+        "rankSeconds": 0.3,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "s32 sa2__sub_80855C0(s32 a0, s32 a1, s32 a2, u8 a3) {\n    return a0 - (s32)((s64)a2 * (s64)(a0 - a1) >> a3);\n}\n",
@@ -4292,7 +4292,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.14,
+        "rankSeconds": 0.28,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "s32 sa2__sub_80856DC(s32 a0, s32 a1, s32 a2) {\n    return (a0 * 7 + a1 * 6 - a2) / 12;\n}\n",
@@ -4425,7 +4425,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 0.13,
+        "rankSeconds": 0.48,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "s32 sa2__sub_80856F8(s32 a0, s32 a1, s32 a2) {\n    return (a1 * 6 - a0 + a2 * 7) / 12;\n}\n",
@@ -4554,7 +4554,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.12,
+        "rankSeconds": 0.27,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "s32 sa2__sub_8085714(s32 a0, s32 a1, s32 a2) {\n    return a0 + (a1 << 3) - a2 >> 3;\n}\n",
@@ -4683,7 +4683,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.11,
+        "rankSeconds": 0.29,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "s32 sa2__sub_8085720(s32 a0, s32 a1, s32 a2) {\n    return (a1 << 3) - a0 + a2 >> 3;\n}\n",
@@ -4810,7 +4810,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.12,
+        "rankSeconds": 0.26,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "s32 sa2__sub_8085758(u32 a0, u32 a1) {\n    return a1 - a0;\n}\n",
@@ -4938,7 +4938,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.13,
+        "rankSeconds": 0.27,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "s32 sa2__sub_8085798(s32 a0, s32 a1, s32 a2) {\n    return a2 - a0 + (a2 - a0 >> 1) - (a1 >> 1);\n}\n",
@@ -5066,7 +5066,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.12,
+        "rankSeconds": 0.27,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "s32 sa2__sub_808595C(s32 a0, s32 a1, s32 a2) {\n    return a1 - a0 + (a2 - a1 - (a1 - a0) >> 1);\n}\n",
@@ -5200,7 +5200,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.12,
+        "rankSeconds": 0.39,
         "symbolsUsed": [
           {
             "name": "gRngPrevValue",
@@ -5373,7 +5373,7 @@
             "candidates": 36
           }
         },
-        "rankSeconds": 2.48,
+        "rankSeconds": 5.84,
         "symbolsUsed": [
           {
             "name": "gSio32MultiLoadArea"
@@ -5582,7 +5582,7 @@
             "candidates": 192
           }
         },
-        "rankSeconds": 35.33,
+        "rankSeconds": 57.98,
         "symbolsUsed": [
           {
             "name": "gSio32MultiLoadArea"
@@ -5776,7 +5776,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 0.33,
+        "rankSeconds": 0.87,
         "symbolsUsed": [
           {
             "name": "gLoadedSaveGame",
@@ -5997,7 +5997,7 @@
             "candidates": 36
           }
         },
-        "rankSeconds": 3.32,
+        "rankSeconds": 7.68,
         "symbolsUsed": [
           {
             "name": "Player_8005380",
@@ -6154,7 +6154,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.27,
+        "rankSeconds": 0.82,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "struct Struct0 { u8 _pad0[4]; s32 field_4; u8 _pad1[12]; s32 field_20; u16 field_24; u16 field_26; u16 field_28; u8 _pad2[8]; u8 field_38; };\nvoid sub_800F0E8(struct Struct0 *a0) {\n    s32 v0;\n    u8 sp0[8];\n    v0 = sub_8012E18(1, a0, sp0, (u32)sp0 + 4);\n    if (v0 <= 0) {\n        a0->field_4 = a0->field_4 & -13;\n        a0->field_20 = a0->field_20 + (v0 << 8);\n        a0->field_38 = *(u8 *)sp0;\n        a0->field_26 = 0;\n        a0->field_28 = a0->field_24;\n    }\n}\n",
@@ -6347,7 +6347,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.36,
+        "rankSeconds": 0.97,
         "symbolsUsed": [
           {
             "name": "Player_8005380",
@@ -6533,7 +6533,7 @@
             "candidates": 84
           }
         },
-        "rankSeconds": 5.98,
+        "rankSeconds": 13.4,
         "symbolsUsed": [
           {
             "name": "gStageData",
@@ -6711,7 +6711,7 @@
             "candidates": 22
           }
         },
-        "rankSeconds": 2.94,
+        "rankSeconds": 4.64,
         "symbolsUsed": [
           {
             "name": "gStageData",
@@ -6892,7 +6892,7 @@
             "candidates": 6
           }
         },
-        "rankSeconds": 0.5,
+        "rankSeconds": 2.47,
         "symbolsUsed": [
           {
             "name": "gUnknown_080CF56C"
@@ -7060,7 +7060,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 0.5,
+        "rankSeconds": 0.86,
         "symbolsUsed": [
           {
             "name": "VramMalloc",
@@ -7288,7 +7288,7 @@
             "withheld": 1920
           }
         },
-        "rankSeconds": 307.65,
+        "rankSeconds": 405.44,
         "withheldCandidates": [
           {
             "variations": [
@@ -62620,7 +62620,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 0.18,
+        "rankSeconds": 0.72,
         "symbolsUsed": [],
         "outcome": "nonmatch",
         "source": "struct Struct0 { u8 _pad0[4]; u16 field_4; u16 field_6; u8 _pad1[8]; s32 field_16; s32 field_20; };\ns32 sub_8060940(struct Struct0 *a0) {\n    u8 sp0[40];\n    s32 *p0;\n    u16 *p1;\n    p0 = (s32 *)sp0;\n    p0[1] = 0;\n    p0[7] = (s32)((u8 *)a0 + 24);\n    p0[4] = a0->field_16;\n    p0[5] = a0->field_20;\n    p1 = (u16 *)sp0;\n    p1[6] = a0->field_4;\n    p1[7] = a0->field_6;\n    p0[0] = 0;\n    ((u8 *)sp0)[8] = 0;\n    return sub_805C280(sp0);\n}\n",
@@ -62795,7 +62795,7 @@
             "candidates": 5
           }
         },
-        "rankSeconds": 2.07,
+        "rankSeconds": 2.28,
         "symbolsUsed": [
           {
             "name": "gCamera",
@@ -62988,7 +62988,7 @@
             "candidates": 16
           }
         },
-        "rankSeconds": 2.81,
+        "rankSeconds": 5.32,
         "symbolsUsed": [
           {
             "name": "gCurTask",
@@ -63139,7 +63139,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.14,
+        "rankSeconds": 0.2,
         "symbolsUsed": [],
         "outcome": "nonmatch",
         "source": "void sub_806FAFC(u16 *a0, u8 a1) {\n    switch (a1) {\n        case 0:\n        case 1:\n        case 2:\n            *(u8 *)(a0 + 49) = a1;\n            *(u8 *)(a0 + 49 + 20) = a1;\n            a0[24] = a1;\n            break;\n    }\n    *((u8 *)a0 + 99) = 255;\n    *((u8 *)a0 + 99 + 40) = -1;\n}\n",
@@ -63320,7 +63320,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 0.28,
+        "rankSeconds": 0.91,
         "symbolsUsed": [
           {
             "name": "Task_14_80717EC",
@@ -63461,7 +63461,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 3.23,
+        "rankSeconds": 3.39,
         "symbolsUsed": [],
         "outcome": "nonmatch",
         "source": "u8 * VerifyFlashSector_Core(u8 *a0, u8 *a1, u32 a2) {\n    u8 *v0;\n    u8 *v1;\n    s32 v2;\n    if (a2 != 0) {\n        v0 = a1;\n        v1 = a0;\n        v2 = a2 - 1;\n        while (*v0 == *v1) {\n            v0++;\n            v1++;\n            v2--;\n            if (v2 == -1) return (u8 *)0;\n        }\n        return v0 + 1 - 1;\n    }\n    return (u8 *)0;\n}\n",
@@ -63640,7 +63640,7 @@
             "candidates": 129
           }
         },
-        "rankSeconds": 4.05,
+        "rankSeconds": 14.95,
         "symbolsUsed": [
           {
             "name": "gVramHeapMaxTileSlots",
@@ -63837,7 +63837,7 @@
             "candidates": 216
           }
         },
-        "rankSeconds": 13.5,
+        "rankSeconds": 26.72,
         "symbolsUsed": [
           {
             "name": "ewram_end",
