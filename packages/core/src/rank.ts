@@ -1303,6 +1303,27 @@ export function enumerateCandidates(
           return false; // its own `respell` below reports the throw
         }
       }));
+    /** The boundary contracts a tree derived from `from` is held to, in ONE copy: the respelled
+     *  tree against the default, and every tree composed onto a respelled one (the shape readings,
+     *  the stacked shapes). With `minted`, the placement differential too (`assertPlacementSurvives`):
+     *  a composition may MOVE statements a placing variation put — `/ret-split` lifts an arm out
+     *  below its `if`, `/for-read` moves an init and a step into a `for` header, a stacked shape
+     *  reorders — so a def it moved below a read of the local the variation placed is dropped,
+     *  whichever composition moved it. Each composition once carried its own copy of this list,
+     *  and the shape-reading copy had lost the placement check. */
+    const assertDerivedContracts = (from: SFn, to: SFn, minted?: ReadonlySet<string>): void => {
+      assertResolved(to);
+      assertDerefsTyped(to);
+      assertLocalsWritten(to);
+      assertPostIncrUnshared(to);
+      assertNoOrphanedLocals(from, to);
+      assertLocalStorageStaysInteger(from, to);
+      assertFrameUnionsViewed(to);
+      assertCaseGotosNarrow(to);
+      if (minted !== undefined) {
+        assertPlacementSurvives(from, to, minted);
+      }
+    };
     const respell = (variations: readonly Variation[], make: () => RespellResult, alreadyShaped = false): void => {
       if (!offeredOn(target, variations)) {
         return;
@@ -1314,14 +1335,12 @@ export function enumerateCandidates(
         }
         const alt = 'sfn' in made ? made.sfn : made;
         const proof: { matchOnly?: true } = 'sfn' in made && made.needsProof ? { matchOnly: true } : {};
-        assertResolved(alt);
-        assertDerefsTyped(alt);
-        assertLocalsWritten(alt);
-        assertPostIncrUnshared(alt);
-        assertNoOrphanedLocals(sfn, alt);
-        assertLocalStorageStaysInteger(sfn, alt);
-        assertFrameUnionsViewed(alt);
-        assertCaseGotosNarrow(alt);
+        // The locals this variation minted, for the placement differential every tree derived from
+        // `alt` is held to (`assertDerivedContracts`): a name diff, computed once and only if a
+        // derived tree is built.
+        let mintedByAlt: ReadonlySet<string> | undefined;
+        const minted = (): ReadonlySet<string> => (mintedByAlt ??= createdLocals(sfn, alt));
+        assertDerivedContracts(sfn, alt);
         sources.push({
           variations,
           ...emitted(backend, alt),
@@ -1350,14 +1369,7 @@ export function enumerateCandidates(
               if (read === null) {
                 continue;
               }
-              assertResolved(read);
-              assertDerefsTyped(read);
-              assertLocalsWritten(read);
-              assertPostIncrUnshared(read);
-              assertNoOrphanedLocals(alt, read);
-              assertLocalStorageStaysInteger(alt, read);
-              assertFrameUnionsViewed(read);
-              assertCaseGotosNarrow(read);
+              assertDerivedContracts(alt, read, minted());
               sources.push({
                 variations: [...variations, reading.name],
                 ...emitted(backend, read),
@@ -1391,7 +1403,6 @@ export function enumerateCandidates(
           // fan with nothing measured to license it. What keeps it uninhabited is `initFirstGuards`,
           // which moves only const or pure-read assigns and so cannot lift a read of a base local
           // above its init.
-          const minted = createdLocals(sfn, alt);
           const firedSets = new Set<string>();
           for (const subset of STACKED_SUBSETS) {
             // ONE TRY PER SHAPE — a shape is its own candidate and fails as its own candidate.
@@ -1403,15 +1414,7 @@ export function enumerateCandidates(
               const shaped = applyStacked(subset, alt);
               if (shaped !== null && firstFired(firedSets, shaped.variations)) {
                 shapeVariations = shaped.variations;
-                assertResolved(shaped.out);
-                assertDerefsTyped(shaped.out);
-                assertLocalsWritten(shaped.out);
-                assertPostIncrUnshared(shaped.out);
-                assertNoOrphanedLocals(alt, shaped.out);
-                assertLocalStorageStaysInteger(alt, shaped.out);
-                assertFrameUnionsViewed(shaped.out);
-                assertCaseGotosNarrow(shaped.out);
-                assertPlacementSurvives(alt, shaped.out, minted);
+                assertDerivedContracts(alt, shaped.out, minted());
                 sources.push({
                   variations: [...variations, ...shaped.variations],
                   ...emitted(backend, shaped.out),
