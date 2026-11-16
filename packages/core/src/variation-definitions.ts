@@ -1312,7 +1312,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'mwcc -O4 schedules a narrow counter or a pointer walk differently for the two; at -O0 every compiler ' +
       'builds the for with its own entry test.',
     offeredWhen: {
-      when: 'A do/while after `v = K;` whose literal test of `v` passes for `K`, its body ending by updating `v` from itself, with no `continue`.',
+      when: 'A do/while after `v = K;` whose literal test of `v` passes for `K`, ending in a self-update of `v`, with no `continue`.',
       decidedBy: { symbol: 'readDoWhileAsFor', file: l3('forread') },
     },
     example: {
