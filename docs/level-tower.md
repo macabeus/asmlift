@@ -670,10 +670,17 @@ library's default backends print the tree as structured, under the declaration's
 it fires at, so the text compiled and the text published are one. Two decisions read printed text
 and must not move with a print policy, the return-tail reading's size bound and rank's
 duplicate-source collapse, so they measure the backend's `draft`, the text before the polish with
-the role names but not the dense numbers (`emitDraft`). Two fields on the neutral tree exist only for this stage and are pure C-family
-spelling, the second and third exceptions to the rule above: `const.hex` (print the literal in hex)
-and `assign.compound` (`x += e` / `x++`). Only the polish sets them, and no other backend reads
-them: Pascal prints the same tree with its own spelling.
+the role names but not the dense numbers (`emitDraft`). Two fields on the neutral tree are C-family
+spelling, the second and third exceptions to the rule above. `const.hex` (print the literal in hex)
+exists only for this stage: only the polish sets it, and it is spelling and nothing else.
+`assign.compound` (`x += e` / `x++`) is not: the polish sets it where every compiler builds the two
+spellings alike (a literal `e` on a word or pointer local), and the `/compound-expr` variation
+([`l3/compoundexpr.ts`](../packages/core/src/l3/compoundexpr.ts)) sets it on a ranked candidate for a
+non-literal `e`, where IDO 7.1 orders the add's operands the other way for the compound
+(`synthetic:dotprod`). There the asm decides it, the footing `postincr` is on, and the field is in
+the tower for that reason as much as for the polish. Only the C family reads either field; Pascal
+prints the same tree with its own spelling and ignores them, so a `/compound-expr` candidate prints
+as a duplicate of its source there.
 
 ## A 64-bit value, across the whole tower
 
