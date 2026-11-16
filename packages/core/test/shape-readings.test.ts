@@ -114,6 +114,20 @@ describe('/switch-break: leave a final switch by break', () => {
     expect(breakFinalSwitchReturns(fnOf([sw(undefined), call('k')], { retType: T.void(), locals: [] }))).toBeNull();
     expect(breakFinalSwitchReturns(fnOf([sw(undefined), ret(c(0))]))).toBeNull();
   });
+
+  test('declines: no arm returns, even with an empty default to drop', () => {
+    const plain: Stmt = {
+      k: 'switch',
+      scrutinee: v('a0'),
+      cases: [
+        { values: [0], body: [call('g'), { k: 'break', ofSwitch: true }], fallsThrough: false },
+        { values: [1], body: [call('h'), { k: 'break', ofSwitch: true }], fallsThrough: false },
+      ],
+      default: [{ k: 'break', ofSwitch: true }],
+    };
+    expect(breakFinalSwitchReturns(fnOf([plain], { retType: T.void(), locals: [] }))).toBeNull();
+    expect(breakFinalSwitchReturns(fnOf([{ ...plain, default: [] }], { retType: T.void(), locals: [] }))).toBeNull();
+  });
 });
 
 describe('/compound-expr: x += e for a non-literal e', () => {
