@@ -528,9 +528,18 @@ export const STACKED_VARIATIONS = [...STACKED_SHAPES, ...STACKED_WIDTHS];
  *  `kleod:PauseMenuScreenHandler:agbcc` (fan 32160 before it) in a full bench. `pnpm bench fan synthetic:mixwalk:agbcc`
  *  is the row that demanded it: its winner `/unreduce` keeps a `do`/`while` whose `for` spelling
  *  compiles alike, and before this no candidate held both. */
-export const SHAPE_READINGS: { name: VariationName; apply: (sfn: SFn) => SFn | null }[] = [
-  { name: 'ret-split', apply: splitReturnedMerges },
-  { name: 'switch-break', apply: breakFinalSwitchReturns },
+export const SHAPE_READINGS: {
+  name: VariationName;
+  apply: (sfn: SFn) => SFn | null;
+  /** The LanguageBackend capability every tree this reading builds spells with, where it needs one:
+   *  `/ret-split` always leaves a `return` inside an `if` the other arm follows (never in tail
+   *  position), and `/switch-break` always prints a switch-scoped `break`. On a backend without it
+   *  (Pascal) each candidate would only throw, so the reading is not offered there — the question
+   *  the structurer asks of the same backend for its own early returns and breaks. */
+  needs?: 'spellsEarlyReturn' | 'spellsSwitchBreak';
+}[] = [
+  { name: 'ret-split', apply: splitReturnedMerges, needs: 'spellsEarlyReturn' },
+  { name: 'switch-break', apply: breakFinalSwitchReturns, needs: 'spellsSwitchBreak' },
   { name: 'compound-expr', apply: compoundExpressionAssignments },
   { name: 'for-read', apply: readDoWhileAsFor },
 ];

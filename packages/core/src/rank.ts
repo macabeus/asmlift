@@ -605,6 +605,8 @@ export function enumerateCandidates(
   opts: EnumerateOptions = {},
 ): Candidate[] {
   const backend = opts.backend ?? cBackend;
+  /** The SHAPE READINGS this backend can spell (rank-variations.ts SHAPE_READINGS `needs`). */
+  const shapeReadings = SHAPE_READINGS.filter((r) => r.needs === undefined || backend[r.needs]);
   /** Report a setting that THREW through `onEnumerationError`, as the variations it names (none for
    *  the function's own tree). */
   const reportThrow = (variations: readonly Variation[], e: unknown): void =>
@@ -1291,7 +1293,7 @@ export function enumerateCandidates(
     // semantics from inside the pass (Candidate.matchOnly carries the argument).
     let onlyRespelled: typeof SHAPE_READINGS | undefined;
     const readsOnlyRespelled = (): typeof SHAPE_READINGS =>
-      (onlyRespelled ??= SHAPE_READINGS.filter((r) => {
+      (onlyRespelled ??= shapeReadings.filter((r) => {
         if (!offeredOn(target, [r.name])) {
           return false;
         }
@@ -1472,7 +1474,7 @@ export function enumerateCandidates(
     // that tree and the differ referees. Offered here on the un-respelled tree; `respell` composes
     // each onto every other respell variation's source. `/ret-split`'s polarity is the structured
     // tree's, so `/flip-join` gives the other one.
-    for (const reading of SHAPE_READINGS) {
+    for (const reading of shapeReadings) {
       respell([reading.name], () => reading.apply(sfn));
     }
     // `/volatile` — declare a pointer local holding a NUMERIC address as pointing to volatile
