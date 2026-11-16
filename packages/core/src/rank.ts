@@ -3069,8 +3069,9 @@ function stillbornNote(stillborn: Stillborn, fan: number): string {
  *  not optimize for something the published metric measures differently.
  *
  *  THE SHAPE HABITS next (shape-habits.ts `shapeHabitCount`): an `else` after a return, a merged
- *  local that is only returned, a shift idiom, a `do`/`while` a reader writes as `for`. The
- *  readability report counts each the same way. Last of the text terms, so it decides only
+ *  local that is only returned and a `do`/`while` a reader writes as `for`, which the shape
+ *  readings remove, and a shift idiom, which no reading removes (it prefers a candidate another
+ *  variation spelled without the shifts). The readability report counts each the same way. Last of the text terms, so it decides only
  *  between two spellings that tie on everything above, the line count included.
  *
  *  ALL FOUR COUNT THE PUBLISHED TEXT, after the readability polish (l3/polish/), for the same

@@ -1,7 +1,11 @@
-// asmlift — the readability habits a SHAPE READING removes, counted off printed C text. The
-// benchmark's readability report publishes them (apps/benchmark/src/eval/quality.ts), and rank's
-// tie-break reads the same counts (rank.ts `compareScored`), so the two can never weigh one habit
-// two ways. Pure text functions: browser-safe.
+// asmlift — shape habits counted off printed C text: three a SHAPE READING removes (an `else` after
+// a return and a merged local only returned, /ret-split; a `do`/`while` a reader writes as `for`,
+// /for-read) and one no reading removes yet (`shiftTruth`, a shift idiom where a reader writes the
+// narrowing cast: no shift-idiom reading was built, since the spelling is byte-identical on agbcc
+// alone). The benchmark's readability report publishes them (apps/benchmark/src/eval/quality.ts),
+// and rank's tie-break reads the same counts (rank.ts `compareScored`), so the two can never weigh
+// one habit two ways; there `shiftTruth` only prefers a candidate that some other variation already
+// spelled without the shifts. Pure text functions: browser-safe.
 
 /** The shape counters (bench-schema `QualityHabits` documents each). */
 export interface ShapeHabits {
