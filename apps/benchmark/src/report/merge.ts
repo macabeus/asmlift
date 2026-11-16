@@ -1,10 +1,12 @@
-// Merge synthetic.json + real.json → results.json (the single committed artifact; the tier
-// files are gitignored intermediates), annotating each function with its measured gap size. Run
+// Merge synthetic.json + real.json → the committed artifact, split by project into
+// results/index.json + results/projects/<project>.json (bench-schema ./artifact; the tier files
+// are gitignored intermediates), annotating each function with its measured gap size. Run
 // AFTER `bench run`. A near-pure data transform — pushing the
 // snapshot into the web app is report/publish.ts, a named step — with one REFUSAL: a tier whose
 // run-time provenance disagrees with merge time is not merged (see ../provenance.ts).
 import type { BenchOutput } from '@asmlift/bench-schema';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { writeArtifactDir } from '@asmlift/bench-schema/artifact-fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { M2C_PINNED_COMMIT, RESULTS_DIR } from '../config';
@@ -74,8 +76,10 @@ export function merge(): void {
     meta: { ...benchMeta(results), asmlift: now, m2c: { commit: M2C_PINNED_COMMIT } },
     results,
   };
-  writeFileSync(join(RESULTS_DIR, 'results.json'), JSON.stringify(out, null, 2));
+  // pretty-printed, so a refresh diff reviews row by row
+  const written = writeArtifactDir(RESULTS_DIR, out, 2);
   console.log(
-    `Merged ${results.length} results (${out.meta.counts.synthetic} synthetic + ${out.meta.counts.real} real) → results/results.json`,
+    `Merged ${results.length} results (${out.meta.counts.synthetic} synthetic + ${out.meta.counts.real} real) → ` +
+      `results/{${written.map((w) => w.file).join(',')}}`,
   );
 }

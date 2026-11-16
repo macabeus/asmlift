@@ -135,7 +135,7 @@ describe('…on BOTH MIPS dialects, which spell the same register two ways', () 
   // nothing gates it, so it is the SHAPE that is the argument and the command is here rather than
   // a figure to be trusted:
   //
-  //   node -e "const R=require('./apps/benchmark/results/results.json').results;
+  //   node -e "const R=require('fs').readdirSync('apps/benchmark/results/projects').flatMap(f=>require('./apps/benchmark/results/projects/'+f).results);
   //   const MN=/^\s*[0-9a-f]+:\t([a-z][\w.]*)\s+(.*)$/; const ex=new Set();
   //   for(const r of R){if(!/:(gcc2\.7\.2kmc|ido7\.1)$/.test(r.id))continue;
   //   for(const l of (r.targetAsm||'').split('\n')){const m=MN.exec(l); if(!m)continue;

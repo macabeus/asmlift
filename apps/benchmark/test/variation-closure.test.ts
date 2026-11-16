@@ -21,6 +21,7 @@
 //
 // A name that fails here is one the type gate cannot refuse: its parts out of kind order, or, in the
 // artifact, a name published before the registry changed.
+import { readArtifactDir } from '@asmlift/bench-schema/artifact-fs';
 import { enumerateRanked } from '@asmlift/cli/rank';
 import { VARIATION_DEFINITIONS } from '@asmlift/core/variation-definitions';
 import {
@@ -30,7 +31,6 @@ import {
   variationToken,
   variationsDefect,
 } from '@asmlift/core/variation-tokens';
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
@@ -42,7 +42,7 @@ import { rankOptionsFor } from '../src/eval/asmlift';
 const nameDefect = (name: string): string | undefined => variationsDefect(splitVariations(name));
 
 describe('closure over the names the committed artifact publishes', () => {
-  const rows = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'results', 'results.json'), 'utf8')).results as {
+  const rows = readArtifactDir(join(import.meta.dirname, '..', 'results')).results as {
     id: string;
     asmlift?: {
       winnerVariations?: string[];

@@ -1,4 +1,4 @@
-// Reproduction shell scripts for one benchmark function (a results.json row), copied from the
+// Reproduction shell scripts for one benchmark function (an artifact row), copied from the
 // Function Explorer. Both call the tool directly with every parameter commented. The m2c script
 // heredoc-embeds the exact inputs the benchmark fed m2c (normalized asm incl. data sections,
 // context header). The asmlift script is benchmark-grade: a `pnpm bench target` pre-step builds

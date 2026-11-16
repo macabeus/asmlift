@@ -10,11 +10,11 @@
 // "ranking unavailable — no scorable candidate ... in.i: In function `UpdateWorldMapNodeTile':".
 // Two bugs made that line: the candidates named three pool globals nobody declared (core, fixed
 // in rank.ts), and the reported stderr line was the useless header instead of the diagnosis.
+import { readArtifactDir } from '@asmlift/bench-schema/artifact-fs';
 import { cBackend } from '@asmlift/core/backend/c';
 import { renderDeclarations, selfDeclaredContextFor } from '@asmlift/core/declare';
 import { enumerateCandidates } from '@asmlift/core/rank';
 import { ARMV4T_AGBCC, C_TYPEDEFS } from '@asmlift/core/target';
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
@@ -111,15 +111,15 @@ describe('the one stderr line the UI shows', () => {
 // relocates the same three pool globals the report names (`gBgTilemapBufs`, `gUnk_08116748`,
 // `gUnk_08116880`, twice each), so the enumeration below still exercises the reported mechanism.
 describe('the reported function ranks: kleod:WorldMapScreenDrawPath:agbcc, opened in the playground', () => {
-  const results = JSON.parse(
-    readFileSync(join(import.meta.dirname, '../src/pages/benchmark/data/results.json'), 'utf8'),
-  ) as { results: { id: string }[] };
+  const results = readArtifactDir(join(import.meta.dirname, '../src/pages/benchmark/data')) as {
+    results: { id: string }[];
+  };
   const row = results.results.find((r) => r.id === 'kleod:WorldMapScreenDrawPath:agbcc');
 
   test('the row the bug report names is in the shipped dataset', () => {
     // Pinned by id inside a file every bench round regenerates: without this, a dataset change
     // turns the acceptance test into an opaque TypeError instead of a sentence.
-    expect(row, 'kleod:WorldMapScreenDrawPath:agbcc present in the shipped results.json').toBeTruthy();
+    expect(row, 'kleod:WorldMapScreenDrawPath:agbcc present in the shipped artifact').toBeTruthy();
   });
 
   test('every candidate compiles in a TU that declares the globals its source spells', () => {

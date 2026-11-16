@@ -61,8 +61,8 @@
 //                                        # only reported, never touched
 //   pnpm bench fidelity [--jobs N] [--project p] [--only s]
 //                                        # pre-publish gate: re-run BOTH repro scripts, every function
-//   pnpm bench merge                     # tiers → results.json, then publish
-//   pnpm bench publish                   # re-stage results.json into the web app
+//   pnpm bench merge                     # tiers → results/{index.json,projects/}, then publish
+//   pnpm bench publish                   # re-stage the merged artifact into the web app
 //   pnpm bench baseline <sym> [--base ref]
 //                                        # the COMMITTED number for a row, plus whether anything
 //                                        # since can have moved it — what a round opens with,
@@ -88,6 +88,7 @@
 // in-process — the debugging path. A shard child is `run --tier <t> --claim <gen> --shard i/N`,
 // which takes rows off the tier's queue (run/queue.ts); nobody types it.
 import { type FunctionResult, moduleOf, resolveRow } from '@asmlift/bench-schema';
+import { artifactLayoutIn, readArtifactDir } from '@asmlift/bench-schema/artifact-fs';
 import {
   CACHE_MISMATCH_EXIT,
   MISMATCH_LOG,
@@ -150,7 +151,7 @@ const { values: opts, positionals } = parseArgs({
     out: { type: 'string' },
     'project-root': { type: 'string' },
     // which committed artifact the comparison gates read. HEAD by default; a branch that has
-    // already committed its own results.json must name its branch point (origin/main), or it
+    // already committed its own artifact must name its branch point (origin/main), or it
     // compares itself against itself and every gate passes vacuously.
     base: { type: 'string' },
     // flags only: store the derived units, and each row's unit, in the manifest
@@ -215,23 +216,30 @@ if (opts.tier !== 'both' && opts.tier !== 'synthetic' && opts.tier !== 'real') {
  *  `bench target` replays the scoring escalation over it to recover the context rung the harness
  *  used.
  *
- *  `results.json` first, because that is the COMMITTED file every checkout has — a user running a
- *  published reproduction script must land on the same rung the benchmark did. The gitignored
- *  per-tier `real.json` is read ONLY for a row `results.json` does not carry at all, so a local
- *  `bench run --tier real --only <sym>` that moves a PUBLISHED row does not refresh the rung — the
- *  reproduction stays frozen at the published one. Right for a reader reproducing a published row,
- *  wrong for an author iterating: the author's confirm is `bench run`, not this. Neither file has
- *  the row, or the row is unscored ⇒ undefined, and the caller takes the richest rung — the
- *  behavior before the rung was derived at all. */
+ *  The committed artifact first, because that is what every checkout has — a user running a
+ *  published reproduction script must land on the same rung the benchmark did. Read whole
+ *  (bench-schema `readArtifact`; an incomplete artifact throws) rather than by the project an id
+ *  starts with, because a row reference is resolved by identity and former names (`resolveRow`),
+ *  never by cutting the id (identity.test.ts). The gitignored per-tier `real.json` is read ONLY for a row the artifact does not carry
+ *  at all, so a local `bench run --tier real --only <sym>` that moves a PUBLISHED row does not
+ *  refresh the rung — the reproduction stays frozen at the published one. Right for a reader
+ *  reproducing a published row, wrong for an author iterating: the author's confirm is `bench
+ *  run`, not this. Neither has the row, or the row is unscored ⇒ undefined, and the caller takes
+ *  the richest rung — the behavior before the rung was derived at all. */
 function publishedAsmliftSource(rowId: string): string | undefined {
-  for (const file of ['results.json', 'real.json']) {
-    let results: FunctionResult[];
-    try {
-      ({ results } = JSON.parse(readFileSync(join(RESULTS_DIR, file), 'utf8')) as { results: FunctionResult[] });
-    } catch {
-      continue;
-    }
-    const row = resolveRow(results, rowId);
+  const sources: (() => FunctionResult[])[] = [
+    () => (artifactLayoutIn(RESULTS_DIR) === 'none' ? [] : readArtifactDir(RESULTS_DIR).results),
+    () => {
+      try {
+        return (JSON.parse(readFileSync(join(RESULTS_DIR, 'real.json'), 'utf8')) as { results: FunctionResult[] })
+          .results;
+      } catch {
+        return [];
+      }
+    },
+  ];
+  for (const read of sources) {
+    const row = resolveRow(read(), rowId);
     if (row) {
       return row.asmlift.outcome === 'match' || row.asmlift.outcome === 'nonmatch' ? row.asmlift.source : undefined;
     }
@@ -880,7 +888,7 @@ switch (command) {
   }
   case 'regression': {
     // The refactor/feature gate `run` deliberately isn't: exit 1 on any match→non-match flip or
-    // any committed row missing from the fresh run. Needs a merged results/results.json.
+    // any committed row missing from the fresh run. Needs a merged artifact in results/.
     const { regressionGate } = await import('./report/regression');
     process.exit(regressionGate(opts.base));
   }

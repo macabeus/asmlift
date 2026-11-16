@@ -1,15 +1,14 @@
 // Pin tests for the Function Explorer's reproduction scripts — real rows from the committed
-// results.json, so the scripts are exercised against exactly what the page renders.
+// artifact, so the scripts are exercised against exactly what the page renders.
 import { type BenchOutput, type FunctionResult, moduleOf } from '@asmlift/bench-schema';
-import { readFileSync } from 'node:fs';
+import { readArtifactDir } from '@asmlift/bench-schema/artifact-fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { vendoredContextPath } from '../src/cases/manifests';
 import { asmliftScript, m2cScript } from '../src/report/repro-scripts';
 
-const rows = (JSON.parse(readFileSync(join(import.meta.dirname, '../results/results.json'), 'utf8')) as BenchOutput)
-  .results;
+const rows = (readArtifactDir(join(import.meta.dirname, '../results')) as BenchOutput).results;
 const byId = new Map(rows.map((r) => [r.id, r]));
 const row = (id: string): FunctionResult => {
   const r = byId.get(id);

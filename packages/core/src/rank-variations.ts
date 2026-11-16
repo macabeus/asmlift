@@ -6,7 +6,7 @@
 // DECLARATION ORDER IS PUBLISHED BEHAVIOUR. `compareScored` breaks a score tie by enumeration
 // order, so the order of `STRUCTURE_VARIATIONS`, `STACKED_VARIATIONS` and every `*_HOISTS` roster
 // decides which of two byte-identical candidates wins and gets its variations into
-// `results.json`. Reordering one of these arrays is a behaviour change wearing a cleanup's
+// the benchmark artifact. Reordering one of these arrays is a behaviour change wearing a cleanup's
 // clothes — never do it as tidying.
 //
 // A SIBLING MODULE, never a `rank/` directory: a directory named `rank` beside `rank.ts` is a

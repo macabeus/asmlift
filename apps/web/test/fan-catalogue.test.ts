@@ -2,8 +2,8 @@
 // rows carrying `fanVariations` over three toolchains (one row noncompile), and the committed
 // artifact the tab renders.
 import type { FunctionResult } from '@asmlift/bench-schema';
+import { readArtifactDir } from '@asmlift/bench-schema/artifact-fs';
 import { VARIATION_KINDS, VARIATION_TOKENS, hasVariation } from '@asmlift/core/variation-tokens';
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
@@ -21,7 +21,7 @@ import {
 import { FAN_SAMPLE } from './fan-sample';
 
 const artifact = (
-  JSON.parse(readFileSync(join(import.meta.dirname, '../src/pages/benchmark/data/results.json'), 'utf8')) as {
+  readArtifactDir(join(import.meta.dirname, '../src/pages/benchmark/data')) as {
     results: FunctionResult[];
   }
 ).results;

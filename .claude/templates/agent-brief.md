@@ -58,8 +58,10 @@ findings verbatim, PR numbers. Hypotheses are labelled as hypotheses.>
    PR title or body, code or docs; write `<board>`, `<worktree>`.
 8. **PR titles and commit subjects stand alone**: what the change does, with no handle, review id
    or run-local label.
-9. **Never hand-merge `apps/benchmark/results/results.json`.** Git line-merges it and every gate is
-   blind to the result. Take one side whole and regenerate with the bench.
+9. **Never hand-merge the benchmark artifact** — any file under `apps/benchmark/results/`
+   (`index.json`, every `projects/<project>.json`, and the pre-split `results.json`) or
+   `apps/web/src/pages/benchmark/data/`. Git line-merges them and every gate is blind to the
+   result. Take one side whole and regenerate with the bench.
 10. **Do not merge your own PR.** A green `pr-wait` means: file the `merge-slot` and return. Only a
     merge agent the coordinator briefs as one merges, and only the PR it was given.
 11. **Do not write the memory directory.** What you learn goes to the board as a post.
@@ -81,9 +83,9 @@ Finish shipping PR <pr> (branch `<branch>`, pushed at <head sha>) for round <HAN
 behind PR <ahead> and filed <awaiting-base message filename>, quoted below. That PR is now
 <MERGED at <sha> | CLOSED | HELD>. Owed: <the message's owed list, verbatim>.
 
-1. `git fetch origin`; rebase onto `origin/main`. A conflict in
-   `apps/benchmark/results/results.json` is resolved by taking one side whole and regenerating in
-   step 2 (Hard rule 9). A conflict in `apps/web/src/pages/benchmark/lib/declines-census.json` (it
+1. `git fetch origin`; rebase onto `origin/main`. A conflict in any
+   artifact file (`apps/benchmark/results/**`, `apps/web/src/pages/benchmark/data/**`) is resolved
+   by taking one side whole and regenerating in step 2 (Hard rule 9). A conflict in `apps/web/src/pages/benchmark/lib/declines-census.json` (it
    moves only when a decline message or a class does) is resolved by running
    `pnpm regen:declines-census` and committing the regenerated JSON as the resolution. A conflict
    resolved by editing code is listed in your answer as code no reviewer read.

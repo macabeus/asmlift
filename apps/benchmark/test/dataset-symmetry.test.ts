@@ -8,6 +8,7 @@
 // Toolchain-free (the dataset sources plus the committed artifact), so CI runs it on a hosted
 // runner with no compilers: `.github/workflows/ci.yml` → `pnpm exec vitest run apps/benchmark/test`.
 import { FEATURES, type Identifiable, rowNames } from '@asmlift/bench-schema';
+import { readArtifactDir } from '@asmlift/bench-schema/artifact-fs';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -243,7 +244,7 @@ describe('every FeatureDef demonstrates the tag it defines', () => {
 describe('the dataset cites only benchmark rows that exist', () => {
   const DATASET = join(import.meta.dirname, '..', 'dataset');
   const rows = (
-    JSON.parse(readFileSync(join(import.meta.dirname, '..', 'results', 'results.json'), 'utf8')) as {
+    readArtifactDir(join(import.meta.dirname, '..', 'results')) as {
       results: Identifiable[];
     }
   ).results;
@@ -285,7 +286,7 @@ describe('the dataset cites only benchmark rows that exist', () => {
   it.each(found)('dataset/$file:$line cites $cited', ({ cited, file, line }) => {
     expect(
       CITABLE.has(cited) || RETIRED.has(cited),
-      `dataset/${file}:${line} cites '${cited}', which is not a row in the committed results.json nor a retired row.\n` +
+      `dataset/${file}:${line} cites '${cited}', which is not a row in the committed artifact nor a retired row.\n` +
         `  Renamed? Update the citation. Not a benchmark row (a checkout function, a dogfooding\n` +
         `  find)? Write it in prose naming where to look, so the spelling stops promising a row.`,
     ).toBe(true);

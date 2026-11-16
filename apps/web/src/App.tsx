@@ -1,6 +1,6 @@
 // The shell: a constant frame (shared Header card + primary tab row, in one max-width container)
 // with two swappable views — the Playground (always mounted, so the editor keeps its state and the
-// ranking worker stays warm) and the Benchmark (lazy — ECharts + the committed results.json are
+// ranking worker stays warm) and the Benchmark (lazy — ECharts + the committed benchmark data are
 // heavy, so a plain playground visit never downloads them; mounted on first visit, then kept alive
 // and hidden). Because the header, tabs, and container are the shell's, toggling views never shifts
 // the page frame. Navigation state lives in the URL FRAGMENT via nuqs (see hash-adapter.ts):

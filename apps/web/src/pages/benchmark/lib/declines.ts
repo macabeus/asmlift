@@ -281,7 +281,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // it claims span the arithmetic outside the single-precision four (double adds, `fabs`), the FPU
     // loads and stores, the moves in both directions, the conversions and two compares — and NO paired
     // single, which an earlier label advertised at zero inhabitants:
-    //   node -e 'const R=require("./apps/benchmark/results/results.json").results;const c={};
+    //   node -e 'const R=require("fs").readdirSync("apps/benchmark/results/projects").flatMap(f=>require("./apps/benchmark/results/projects/"+f).results);const c={};
     //   for(const r of R){if(r.asmlift.outcome!=="declined")continue;
     //   for(const m of (r.asmlift.errorMarkers||[])){const g=
     //   /unmodelled floating-point instruction .([\w.]+)./.exec(m);if(g)c[g[1]]=(c[g[1]]||0)+1;}}

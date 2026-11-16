@@ -1,7 +1,7 @@
 // Pin tests for the symmetric outcome classifier — the semantics the whole taxonomy rides on:
 // each marker family, the positional `?`-placeholder rules (a legal ternary must NEVER
 // false-positive), hard-failure detection, and the deterministic compiler-error extraction.
-import { readFileSync } from 'node:fs';
+import { readArtifactDir } from '@asmlift/bench-schema/artifact-fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
@@ -96,7 +96,7 @@ describe('compilerErrorLines (pinned)', () => {
 // IT COSTS 12 ms AND NO BENCH, which is the whole argument for it: the incident it catches was
 // found by a reader of the pull request, after a 1,068 s run had already published the row.
 describe('the committed artifact obeys the committed classifier', () => {
-  const artifact = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'results', 'results.json'), 'utf8')) as {
+  const artifact = readArtifactDir(join(import.meta.dirname, '..', 'results')) as {
     results: {
       id: string;
       m2c?: { source?: string; outcome: string };

@@ -1,8 +1,10 @@
 #!/bin/sh
 # Is the committed benchmark artifact newer than the code it measures?
 #
-# `apps/benchmark/results/results.json` stamps the commit it was generated at
-# (`meta.asmlift.commit`). Every number a PR publishes — the totals in its body, the rows the
+# The artifact in `apps/benchmark/results/` — `index.json` (meta, and the project list) plus one
+# `projects/<project>.json` per project; a commit from before that split holds the single
+# `results.json` instead — stamps the commit it was generated at (`meta.asmlift.commit`, in
+# `index.json`). Every number a PR publishes — the totals in its body, the rows the
 # site renders, what `bench regression` compares against — comes from that file, so a branch
 # that regenerates it and then keeps changing the decompiler is publishing numbers a rule
 # version that no longer exists produced. Four adversarial findings across the last two rounds
@@ -24,7 +26,7 @@
 #      stop — but that lets a rebase switch the whole check off: rebasing after regenerating
 #      rewrites the commit the artifact names while the artifact keeps naming the old sha, and
 #      after a force-push that sha is not on the remote at all. So the two cases are separated by
-#      the artifact BLOB. Identical to a base's ⇒ the branch published no numbers of its own and
+#      the artifact BLOBS. Identical to a base's ⇒ the branch published no numbers of its own and
 #      the stamp is the base's business (main squash-merges, so main's own stamp is always
 #      unreachable) ⇒ UNKNOWN. Different from every base's ⇒ this branch published numbers whose
 #      provenance nothing can check ⇒ regenerate after the final rebase.
@@ -49,7 +51,10 @@ top=$(git rev-parse --show-toplevel 2>/dev/null) || {
 }
 cd "$top"
 
-artifact=apps/benchmark/results/results.json
+dir=apps/benchmark/results
+# the file carrying the stamp: the split layout's index, else a pre-split checkout's single file
+artifact=$dir/index.json
+[ -f "$artifact" ] || artifact=$dir/results.json
 
 # what the artifact measures — a commit touching any of these invalidates it
 # (`packages/bench-schema` is deliberately absent: it defines the vocabulary the site RENDERS,
@@ -94,16 +99,31 @@ done
 echo "provenance: base(s) excluded:$bases"
 
 # Does this branch publish an artifact of its own? Compared by blob, not by commit, because that
-# is the only question the stamp's reachability cannot answer after a rebase. Hashed from the file
-# ON DISK, not `HEAD:$artifact`, so it is the same bytes the stamp above was read from: an agent
+# is the only question the stamp's reachability cannot answer after a rebase. Hashed from the files
+# ON DISK, not `HEAD:$dir`, so they are the same bytes the stamp above was read from: an agent
 # who regenerates and runs this before committing would otherwise be told its artifact is the
 # base's — and skip verdicts 2 and 3 on the numbers it is about to publish. In CI the two are the
-# same file.
+# same files. The artifact is SEVERAL files, so the comparison is of every artifact file's path
+# and blob at once: one project file differing, one more or one fewer, is an artifact of its own
+# (and so is any split artifact against a base that still holds the single file).
+LC_ALL=C
+export LC_ALL
+disk_blobs() {
+  for f in "$dir/index.json" "$dir/results.json" "$dir"/projects/*.json; do
+    [ -f "$f" ] && printf '%s %s\n' "$f" "$(git hash-object "$f")"
+  done | sort
+}
+ref_blobs() {
+  git ls-tree -r "$1" -- "$dir/index.json" "$dir/results.json" "$dir/projects/" 2>/dev/null |
+    awk -F '\t' '$2 == d "/index.json" || $2 == d "/results.json" || $2 ~ "^" d "/projects/[^/]*\\.json$" {
+      split($1, m, " "); print $2 " " m[3]
+    }' d="$dir" | sort
+}
 own=yes
-head_blob=$(git hash-object "$artifact" 2>/dev/null || true)
+head_blobs=$(disk_blobs)
 for ref in $bases; do
-  base_blob=$(git rev-parse --verify --quiet "$ref:$artifact" || true)
-  if [ -n "$head_blob" ] && [ "$head_blob" = "$base_blob" ]; then
+  base_blobs=$(ref_blobs "$ref")
+  if [ -n "$head_blobs" ] && [ "$head_blobs" = "$base_blobs" ]; then
     own=no
   fi
 done

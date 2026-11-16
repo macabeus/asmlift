@@ -52,7 +52,7 @@ Neither moved a benchmark row, so gate 6 would not have caught them either. Run 
 
 ### Why gate 6 is on this list, separately
 
-`pnpm bench regression` **only compares two `results.json` files** — it does not run anything. Run
+`pnpm bench regression` **only compares two artifacts** — it does not run anything. Run
 `bench run` and `bench merge` first, or it will cheerfully compare the committed results against
 themselves and report "0 lost, 0 gained" without having executed a single row.
 

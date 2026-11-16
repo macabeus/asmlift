@@ -1,5 +1,5 @@
 // The Benchmark view — the asmlift-vs-m2c report, lazy-loaded as its own chunk (ECharts + the
-// committed results.json are heavy, so a plain playground visit never pays for them). Rendered by
+// committed benchmark data are heavy, so a plain playground visit never pays for them). Rendered by
 // the shell (../App.tsx), which owns the shared header + primary nav, so this view only renders its
 // own sub-tabs and content — the page frame stays put when toggling. `onOpenInPlayground`
 // hands a row's input back to the editor. Syntax highlighting uses the global VS Code `.pl-*` palette

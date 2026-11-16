@@ -1,9 +1,12 @@
 // The benchmark contract: ONE definition imported by both the producer (apps/benchmark) and the
 // consumer (apps/web) — the result/manifest types here, plus the closed feature vocabulary they
-// range over in ./features. No runtime dependencies, no I/O, browser-safe by construction: its one
-// import is a type, the toolchain ids @asmlift/core defines.
+// range over in ./features, and the committed artifact's split layout in ./artifact. No runtime
+// dependencies, no I/O, browser-safe by construction: its one import is a type, the toolchain ids
+// @asmlift/core defines. Reading and writing that layout on disk is the separate, Node-only entry
+// `@asmlift/bench-schema/artifact-fs`.
 import type { ToolchainId } from '@asmlift/core/target';
 
+export * from './artifact';
 export * from './features';
 export * from './identity';
 

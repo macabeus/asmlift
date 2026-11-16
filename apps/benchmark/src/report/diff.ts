@@ -20,12 +20,9 @@ import {
 import { optLevel, shellJoinFlags } from '@asmlift/core/codegen-flags';
 import { TOOLCHAIN_TARGETS, isToolchainId } from '@asmlift/core/target';
 import { joinVariations } from '@asmlift/core/variation-tokens';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 
 import { retiredRows } from '../cases/retired';
-import { RESULTS_DIR } from '../config';
-import { RESULTS_PATH, baseNotice, gitFacts, readCommitted, sameRun, scrub } from './committed';
+import { RESULTS_PATH, baseNotice, gitFacts, readCommitted, readFresh, sameRun, scrub } from './committed';
 import { rowsAddedSince } from './regression';
 
 /** The fields a published claim is made of, named individually when they move.
@@ -588,7 +585,7 @@ export function appearedLines(fans: FanReport, cost: CostReport, base: string): 
  *  unchanged corpus", asked of two artifacts instead of two transcripts.
  *
  *  BUT NOT RETROSPECTIVELY, and that is a property of the gate rather than of the field. `diffGate`
- *  returns 2 at `notRegenerated` unless a LIVE run's `results.json` is on disk, so this comparison
+ *  returns 2 at `notRegenerated` unless a LIVE run's artifact is on disk, so this comparison
  *  is always ONE COMMITTED ARTIFACT against the run on this machine right now. "Did THIS round
  *  move it" is answerable; "what did the 21 days between these two tags do" is not, from here —
  *  two historical artifacts never meet. The field is recorded on every row either way, so that
@@ -684,8 +681,8 @@ export function costLines(r: CostReport, base: string): string[] {
 
 /** Is the artifact on disk still the base's own committed file, with no run behind it?
  *
- *  This gate reads whatever bytes happen to sit at `apps/benchmark/results/results.json` — and
- *  that file is COMMITTED, so on a source-only branch with a clean tree it already IS the base's.
+ *  This gate reads whatever bytes happen to sit in `apps/benchmark/results/` — and that artifact
+ *  is COMMITTED, so on a source-only branch with a clean tree it already IS the base's.
  *  Running the gate then compares the base against ITSELF and prints `0 field change(s)` in about
  *  a second, which is indistinguishable from the ~200s run it is supposed to summarise. That green
  *  line is what a PR body publishes as its neutrality proof, so the cheapest way to produce it
@@ -702,7 +699,7 @@ export const notRegenerated = (base: BenchOutput, fresh: BenchOutput): boolean =
  *  0 iff not one compared field moved and the row set is identical, 2 if nothing was compared. */
 export function diffGate(base = 'HEAD'): number {
   const committed = readCommitted(base);
-  const fresh = JSON.parse(readFileSync(join(RESULTS_DIR, 'results.json'), 'utf8')) as BenchOutput;
+  const fresh = readFresh();
 
   // What was compared, before the verdict — a reader of a PR body can otherwise only take the
   // tick on trust. The base by SHA (a branch name is a different commit on every machine), and

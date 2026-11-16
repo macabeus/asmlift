@@ -36,7 +36,7 @@
 //      enforceable remedy for shared text is "make the two files differ", and it cannot tell
 //      move-to-doc from reword. The rewording is where the divergence entered.)
 //   9. A DERIVABLE FIGURE LEFT AS PROSE. `docs/bench-cost.md` §3 states five fields of
-//      `results/results.json` in prose, and `CountCollectedGems`'s fan is hand-typed in several
+//      the artifact in prose, and `CountCollectedGems`'s fan is hand-typed in several
 //      files while being one integer in that same committed JSON. §3 is checked against the
 //      artifact rather than read; nothing before checked it at all.
 //  10. A VERDICT THAT CLOSES A ROW, WITH NO EVIDENCE BEHIND IT. A precedent that asks for MORE work
@@ -59,6 +59,7 @@
 //     LOG is not checked for freshness — a historical incident is not a stale price, and no
 //     measured threshold separates them.
 import { type Identifiable, resolveRow } from '@asmlift/bench-schema';
+import { readArtifactDir } from '@asmlift/bench-schema/artifact-fs';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -70,7 +71,7 @@ const TEMPLATES_DIR = join(ROOT, '.claude', 'templates');
 const DOCS_DIR = join(ROOT, 'docs');
 const BENCH_COST_DOC = join(DOCS_DIR, 'bench-cost.md');
 const DISCIPLINE_DOC = join(DOCS_DIR, 'measurement-discipline.md');
-const ARTIFACT = join(ROOT, 'apps', 'benchmark', 'results', 'results.json');
+const ARTIFACT = join(ROOT, 'apps', 'benchmark', 'results');
 
 /** The two prompts that drive a measured round. `dogfood-klonoa.md` and `update-m2c.md` are not in
  *  the duplication pair: they describe different workflows and share no phase structure. They ARE
@@ -370,7 +371,7 @@ describe('a verdict that ENDS a round is linked to its evidence', () => {
 describe('the unmatchable register is falsified by the artifact', () => {
   // The register says of itself that "an entry here closes a row to future rounds and that is
   // exactly the kind of claim that rots unwatched". It does not rot on a CLOCK the way the cost
-  // figures gated below do; it rots the instant somebody matches the row. `results.json` knows, and
+  // figures gated below do; it rots the instant somebody matches the row. The artifact knows, and
   // `citations.test.ts` already holds the ids in this page to rows that exist, so what is left is
   // the one assertion the entry's own falsification condition names.
   const REGISTER = join(DOCS_DIR, 'unmatchable-quirks.md');
@@ -406,7 +407,7 @@ describe('the unmatchable register is falsified by the artifact', () => {
     return entries.map((l) => l.match(ROW_ID)![1]);
   };
 
-  it('every row it closes is still a nonmatch in results.json', () => {
+  it('every row it closes is still a nonmatch in the artifact', () => {
     const ids = registerRows();
     // THE PAGE HAS TO STILL PARSE, and the register alone can no longer prove it: its only entry's row
     // was retired with the project source it came from (2026-09-13) and the table is empty. So the
@@ -423,7 +424,7 @@ describe('the unmatchable register is falsified by the artifact', () => {
         'entry at all (delete this gate) or its shape moved and this check went blind',
     ).toBeGreaterThan(0);
 
-    const artifact = JSON.parse(readFileSync(ARTIFACT, 'utf8')).results as (Identifiable & {
+    const artifact = readArtifactDir(ARTIFACT).results as (Identifiable & {
       asmlift?: { outcome?: string };
     })[];
     const falsified: string[] = [];
@@ -436,7 +437,7 @@ describe('the unmatchable register is falsified by the artifact', () => {
       // gate is vacuous. The duplication is with a suite whose coverage of this page is conditional
       // (`docs` being in its `SCANNED` list) and whose failure message is about citations, not
       // about a closed row.
-      expect(row, `${REGISTER} closes ${id}, which is not a row in the committed results.json`).toBeDefined();
+      expect(row, `${REGISTER} closes ${id}, which is not a row in the committed artifact`).toBeDefined();
       if (row?.asmlift?.outcome === 'match') {
         falsified.push(id);
       }
@@ -450,7 +451,7 @@ describe('the unmatchable register is falsified by the artifact', () => {
     const stillLive = retired.filter((ref) => resolveRow(artifact, ref) !== undefined);
     expect(
       stillLive,
-      `${REGISTER} retires these rows and the committed results.json still carries them: ${stillLive.join(', ')}`,
+      `${REGISTER} retires these rows and the committed artifact still carries them: ${stillLive.join(', ')}`,
     ).toEqual([]);
   });
 });
@@ -547,9 +548,9 @@ describe('docs/bench-cost.md', () => {
     if (missing) {
       return;
     } // the test above is the one that reports this
-    const meta = JSON.parse(readFileSync(ARTIFACT, 'utf8'));
+    const meta = readArtifactDir(ARTIFACT);
     const artifactAt = Date.parse(meta.meta.generatedAt);
-    expect(Number.isFinite(artifactAt), 'results.json has no parseable meta.generatedAt').toBe(true);
+    expect(Number.isFinite(artifactAt), 'the artifact has no parseable meta.generatedAt').toBe(true);
 
     const stale: string[] = [];
     for (const row of rows) {
@@ -592,7 +593,7 @@ describe('docs/bench-cost.md', () => {
    *
    *  Only the CURRENT artifact is derivable, so §3's paragraphs about EARLIER artifacts are outside
    *  this gate entirely — which is where its one false figure survived. A figure about a previous
-   *  run is a `git show <sha>:apps/benchmark/results/results.json` away; re-measure it when you
+   *  run is a `git archive <sha> apps/benchmark/results` away; re-measure it when you
    *  move it, because inheriting a sentence does not check it. */
   it('§3 quotes the artifact it says it is summed out of', () => {
     if (!existsSync(BENCH_COST_DOC)) {
@@ -604,7 +605,7 @@ describe('docs/bench-cost.md', () => {
     const end = doc.findIndex((l, i) => i > start && /^##\s/.test(l));
     const text = doc.slice(start, end === -1 ? doc.length : end).join(' ');
 
-    const artifact = JSON.parse(readFileSync(ARTIFACT, 'utf8'));
+    const artifact = readArtifactDir(ARTIFACT);
     const ranked = (tier: string) =>
       artifact.results.filter((r: { tier: string; asmlift?: { rankSeconds?: number } }) => {
         return r.tier === tier && typeof r.asmlift?.rankSeconds === 'number';
@@ -619,7 +620,7 @@ describe('docs/bench-cost.md', () => {
     const group = (n: number) => Math.round(n).toLocaleString('en-US');
 
     const real = ranked('real') as CostRow[];
-    const synthetic = ranked('synthetic');
+    const synthetic = ranked('synthetic') as CostRow[];
     // THE DEAREST ROW IS DERIVED, NOT NAMED. Naming it checked that the doc quoted the right
     // seconds for a row THIS TEST had picked, and said nothing about the doc's actual claim, which
     // is that no row costs more. A sentence calling a row the dearest while three rows cost more
@@ -648,7 +649,7 @@ describe('docs/bench-cost.md', () => {
     const missing = expected.filter((e) => !flat.includes(e));
     expect(
       missing,
-      `docs/bench-cost.md §3 disagrees with apps/benchmark/results/results.json. Every figure there is ` +
+      `docs/bench-cost.md §3 disagrees with the artifact in apps/benchmark/results/. Every figure there is ` +
         `derived from the artifact, so re-read it rather than re-typing it — expected: ${expected.join(' · ')}`,
     ).toEqual([]);
 

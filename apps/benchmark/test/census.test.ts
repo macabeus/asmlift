@@ -8,15 +8,15 @@
 // every row added and would fail for reasons the paragraph is not about) — what is asserted is
 // the property the paragraph's argument rests on.
 //
-// WHAT THIS CANNOT DO, the same limit citations.test.ts states for itself: results.json holds
+// WHAT THIS CANNOT DO, the same limit citations.test.ts states for itself: the artifact holds
 // each row's winner, not what the row would win with a variation ablated. A green assertion here says
 // the property still holds, never that the mechanism behind it is still load-bearing.
+import { readArtifactDir } from '@asmlift/bench-schema/artifact-fs';
 import { hasVariation } from '@asmlift/core/variation-tokens';
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const rows = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'results', 'results.json'), 'utf8')).results as {
+const rows = readArtifactDir(join(import.meta.dirname, '..', 'results')).results as {
   id: string;
   asmlift?: { winnerVariations?: string[] };
 }[];

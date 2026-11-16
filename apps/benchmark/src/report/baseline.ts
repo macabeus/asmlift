@@ -18,7 +18,7 @@ import { execFileSync } from 'node:child_process';
 
 import { REPO_ROOT } from '../config';
 import { MEASURED_PATHS, SCORING_PATHS } from '../provenance';
-import { RESULTS_PATH, readCommitted } from './committed';
+import { ARTIFACT_PATHS, readCommitted } from './committed';
 
 /** The rows one typed argument selects.
  *
@@ -90,12 +90,12 @@ const lines = (out: string | undefined): string[] => (out ? out.split('\n').filt
 /** Commits on `base` that landed AFTER the artifact was committed, split into the ones that
  *  decide a measurement and the ones around it.
  *
- *  The handle is the artifact FILE's own commit, not `meta.asmlift.commit`: main squash-merges,
+ *  The handle is the artifact FILES' own commit (either layout), not `meta.asmlift.commit`: main squash-merges,
  *  so the stamp names a branch commit main does not contain, it is unresolvable once the merged
  *  branch is pruned, and a range against it is a fork-point range rather than "since the
  *  artifact". */
 export function commitsSinceArtifact(base: string): { at?: string; scoring: string[]; harness: string[] } {
-  const at = git('log', '-1', '--format=%H', base, '--', RESULTS_PATH);
+  const at = git('log', '-1', '--format=%H', base, '--', ...ARTIFACT_PATHS);
   if (!at) {
     return { scoring: [], harness: [] };
   }
