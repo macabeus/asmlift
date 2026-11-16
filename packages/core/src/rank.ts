@@ -523,6 +523,48 @@ function emitted(backend: LanguageBackend, t: SFn): { source: string; draft: str
   return { source, draft: draft === source ? source : draft };
 }
 
+/** The duplicate key of a candidate's draft (`TreeSource.draft`), kept in place of the draft itself.
+ *
+ *  The key is a pure, injective function of the draft text. The draft is split into lines, each line
+ *  is replaced by its index in a table of the lines seen so far, and the indices are written out in a
+ *  prefix-free code: an index below 0x8000 is one UTF-16 unit, and a larger one is two units whose
+ *  first has the top bit set. Splitting on `\n` round-trips through `join`, the table only grows,
+ *  and the code reads back unambiguously from the left. So two keys are equal exactly when the two
+ *  drafts are equal. It is still a comparison of values, never a hash, so no two drafts can merge.
+ *
+ *  This is a matter of size and nothing else. A draft differs from its published text wherever the
+ *  polish re-spells something, and holding one per candidate doubled the strings a fan keeps alive
+ *  while it is being enumerated. On `kleod:PauseMenuScreenHandler:agbcc` (2026-11-15, its fan of
+ *  55,360, `bench fan --enumerate`) every one of the 55,360 drafts differed, 365 MB of them, and the
+ *  heap after the last full collection was 1540 MB, which left a shard too little room to rank the
+ *  row. Keyed this way the keys are 9.3 MB over a table of 1,075 lines, that heap is 1185 MB, and the
+ *  enumerated fan is the same list. A function's candidates repeat the same lines, so the table
+ *  stays small and a key costs about one unit per line. */
+export class DraftKeys {
+  readonly #lines = new Map<string, number>();
+
+  key(draft: string): string {
+    const units: number[] = [];
+    for (const line of draft.split('\n')) {
+      let id = this.#lines.get(line);
+      if (id === undefined) {
+        id = this.#lines.size;
+        this.#lines.set(line, id);
+      }
+      if (id < 0x8000) {
+        units.push(id);
+      } else {
+        units.push(0x8000 | (id >>> 15), id & 0x7fff);
+      }
+    }
+    let out = '';
+    for (let i = 0; i < units.length; i += 4096) {
+      out += String.fromCharCode(...units.slice(i, i + 4096));
+    }
+    return out;
+  }
+}
+
 /** Did `bound-plus-one-counter-wraps` CAUSE this structuring's decline? The rule fires from every
  *  attempt `forPlanAt` makes, committed or not, and on loops the thrown refusal never reaches
  *  (`synthetic:sw_gotocase_inner:ido7.1` fires it and declines on its switches' cases), so its firing
@@ -1044,7 +1086,9 @@ export function enumerateCandidates(
   const abortsRow = (settingVariations: readonly Variation[], s?: StructureSetting): boolean =>
     settingVariations.length === 0 && (s === undefined || isDefaultSetting(s));
 
+  /** keyed by `draftKeys.key(draft)`, never by the draft itself (DraftKeys says why) */
   const seen = new Map<string, Candidate>();
+  const draftKeys = new DraftKeys();
   const seenTrees = new Set<string>();
   /** the pre-respell variations' own tree dedup — see their loop for why it is not `seenTrees` */
   const seenPreRespell = new Set<string>();
@@ -2696,7 +2740,7 @@ export function enumerateCandidates(
               // trees as one text where they differ only in what it re-spells (a local's number, a
               // literal's base), and collapsing those would keep the first route's variations where
               // the tie-break below picks the other's.
-              const draft = sp.draft;
+              const draft = draftKeys.key(sp.draft);
               // Collapse a candidate whose source is identical (a function with no divergent `if`
               // structures the same either way): no point scoring a duplicate. Deduping the
               // WHOLE emitted set (not just scored survivors) is equivalent — an identical source

@@ -1,17 +1,25 @@
-// The `/narrow-decl`, `/narrow-load` and `/narrow-read` variations (l3/narrowdecl.ts): `s32 v; v =
-// (u8)(x - 1);` is spelled `u8 v; v = x - 1;`, the spelling `kleod:sub_0803E8CC` was compiled from,
-// `s32 v; v = p[4];` is spelled `u8 v; v = p[4];`, the one `pokeemerald:LoadMonInfo` was, and `s32 v;
-// v = f(); … (u8)v …` is spelled `u8 v; v = f(); … v …`, the one `pokeemerald:RtcGetDayCount` was.
-// Each refusal edits one fact of an accepted tree: a structured fixture below, or a hand-built one
-// where the fact (a pointer operand, a `for` init) is not a lift's to produce.
+// The `/narrow-decl`, `/narrow-load`, `/narrow-read` and `/narrow-range` variations
+// (l3/narrowdecl.ts): `s32 v; v = (u8)(x - 1);` is spelled `u8 v; v = x - 1;`, the spelling
+// `kleod:sub_0803E8CC` was compiled from, `s32 v; v = p[4];` is spelled `u8 v; v = p[4];`, the one
+// `pokeemerald:LoadMonInfo` was, `s32 v; v = f(); … (u8)v …` is spelled `u8 v; v = f(); … v …`, the
+// one `pokeemerald:RtcGetDayCount` was, and `u32 v; … v = (u16)(v + 1);` is spelled `u16 v; … v =
+// v + 1;`, the one `pokeemerald:StringCopyN` was. Each refusal edits one fact of an accepted tree: a
+// structured fixture below, or a hand-built one where the fact (a pointer operand, a `for` head) is
+// not a lift's to produce or the tree is another toolchain's lift (KMC gcc's read-truncated counter).
 import { describe, expect, it } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import { pascalBackend } from '../src/backend/pascal';
 import { parse } from '../src/ir/parse';
+import { T } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
 import type { Expr, SFn } from '../src/l3/ast';
-import { narrowDeclarations, narrowLoadDeclarations, narrowReadDeclarations } from '../src/l3/narrowdecl';
+import {
+  narrowDeclarations,
+  narrowLoadDeclarations,
+  narrowRangeDeclarations,
+  narrowReadDeclarations,
+} from '../src/l3/narrowdecl';
 import { recoverTypes } from '../src/raise/recover';
 import { STACKED_SUBSETS, STACKED_VARIATIONS, StackedMemberThrew, applyStacked } from '../src/rank-variations';
 import { structure } from '../src/structure/structure';
@@ -95,6 +103,7 @@ const structured = (ir: string): SFn => {
 const local = (sfn: SFn, name: string) => sfn.locals.find((l) => l.name === name);
 
 const v0 = { k: 'var' as const, name: 'v0' };
+const a0 = { k: 'var' as const, name: 'a0' };
 const cast = (width: number, signed: boolean, e: Expr): Expr => ({
   k: 'cast',
   to: { kind: 'int', width, signed },
@@ -171,7 +180,7 @@ describe('narrowDeclarations', () => {
     expect(narrowDeclarations(bumped)).toBeNull();
   });
 
-  it('does not narrow a local whose one write is a `for` loop init', () => {
+  it('narrows a local whose one write is a `for` loop init, which every member walks', () => {
     const sfn = structured(NAMED);
     const write = sfn.body.find((st) => st.k === 'assign' && st.name === 'v0')!;
     const looped = {
@@ -187,7 +196,9 @@ describe('narrowDeclarations', () => {
         ...sfn.body.filter((st) => st !== write),
       ],
     };
-    expect(narrowDeclarations(looped)).toBeNull();
+    const out = narrowDeclarations(looped)!;
+    expect(local(out, 'v0')?.type).toEqual({ kind: 'int', width: 8, signed: false });
+    expect(cBackend.emit(out)).toContain('for (v0 = ((u8 *)&gA)[12] - 1;');
   });
 
   it('does not narrow a local whose one write is not a narrowing cast', () => {
@@ -393,7 +404,7 @@ describe('narrowReadDeclarations', () => {
     },
   );
 
-  it.each(SIDES)('does not narrow a local whose write %s the call is a `for` loop step', (_, at) => {
+  it.each(SIDES)('takes a local whose write %s the call is a `for` loop step', (_, at) => {
     const looped = at(structured(READ), {
       k: 'for',
       init: { k: 'break' },
@@ -401,7 +412,7 @@ describe('narrowReadDeclarations', () => {
       inc: { k: 'assign', name: 'v0', value: { k: 'const', value: 0 } },
       body: [],
     });
-    expect(narrowReadDeclarations(looped)).toBeNull();
+    expect(local(narrowReadDeclarations(looped)!, 'v0')?.type).toEqual({ kind: 'int', width: 8, signed: false });
   });
 
   it('does not narrow a local whose reads are cast to two widths', () => {
@@ -431,6 +442,320 @@ describe('narrowReadDeclarations', () => {
       expect(narrowReadDeclarations(at(structured(READ), { k: 'assign', name: 'v0', value }))).toBeNull();
     },
   );
+});
+
+// pokeemerald:StringCopyN's shape: a byte copy indexed by a counter the asm zero-extends to 16 bits
+// at its step, against a byte bound
+const COPY = `fn copy {
+^bb0(%0: unk32, %1: unk32, %2: unk32):
+  %3: unk32 = zext %2 {width=8}
+  %4: unk32 = const {value=0}
+  %5: u32 = icmp_ult %4, %3
+  cond_br %5, ^bb1(%4), ^bb2()
+^bb1(%6: unk32):
+  %7: unk32 = add %1, %6
+  %8: s32 = load %7 {off=0, signed=false, width=1}
+  %9: unk32 = add %0, %6
+  store %9, %8 {off=0, width=1}
+  %10: unk32 = const {value=1}
+  %11: unk32 = add %6, %10
+  %12: unk32 = zext %11 {width=16}
+  %13: u32 = icmp_ult %12, %3
+  cond_br %13, ^bb1(%12), ^bb2()
+^bb2():
+  ret
+}
+`;
+
+// kleod:WorldMapScreenDrawUnlockedWorlds's shape: a byte counter passed to three calls and tested
+// against a literal bound
+const PASSED = `fn passed {
+^bb0():
+  %0: unk32 = const {value=0}
+  br ^bb1(%0)
+^bb1(%1: unk32):
+  %2: s32 = call %1 {target="valid"}
+  %3: unk32 = const {value=24}
+  %4: unk32 = shl %2, %3
+  %5: unk32 = const {value=0}
+  %6: u32 = icmp_ne %4, %5
+  cond_br %6, ^bb2(), ^bb3()
+^bb2():
+  %7: s32 = call %1 {target="draw"}
+  br ^bb3()
+^bb3():
+  %8: unk32 = const {value=1}
+  %9: unk32 = add %1, %8
+  %10: unk32 = zext %9 {width=8}
+  %11: unk32 = const {value=6}
+  %12: u32 = icmp_ule %10, %11
+  cond_br %12, ^bb1(%10), ^bb4()
+^bb4():
+  ret
+}
+`;
+
+describe('narrowReadDeclarations over a stepped counter', () => {
+  // synthetic:narrowcnt as KMC gcc lifts it: a counter truncated at its reads and stepped bare
+  const i = { k: 'var' as const, name: 'i' };
+  const r = { k: 'var' as const, name: 'r' };
+  const one = { k: 'const' as const, value: 1 };
+  const counted = (step: Expr, extra: SFn['body'] = []): SFn => ({
+    name: 'narrowcnt',
+    params: [{ name: 'a0', type: T.s(32) }],
+    locals: [
+      { name: 'i', type: T.s(32) },
+      { name: 'r', type: T.s(32) },
+    ],
+    retType: T.s(32),
+    body: [
+      { k: 'assign', name: 'r', value: { k: 'const', value: 0 } },
+      { k: 'assign', name: 'i', value: { k: 'const', value: 0 } },
+      {
+        k: 'dowhile',
+        cond: { k: 'bin', op: '<', l: cast(16, true, i), r: { k: 'const', value: 10 } },
+        body: [
+          { k: 'assign', name: 'r', value: { k: 'bin', op: '+', l: r, r: cast(16, true, i) } },
+          ...extra,
+          { k: 'assign', name: 'i', value: step },
+        ],
+      },
+      { k: 'return', value: r },
+    ],
+  });
+  const plus = (l: Expr, rr: Expr): Expr => ({ k: 'bin', op: '+', l, r: rr });
+
+  it('declares a counter read through one cast and stepped bare at that width', () => {
+    const src = cBackend.emit(narrowReadDeclarations(counted(plus(i, one)))!);
+    expect(src).toContain('s16 i;');
+    expect(src).toContain('r = r + i;');
+    expect(src).toContain('i = i + 1;');
+    expect(src).toContain('} while (i < 10);');
+  });
+
+  it('takes a step through the other low-bit operators', () => {
+    const steps: Expr[] = [
+      { k: 'bin', op: '-', l: { k: 'bin', op: '*', l: i, r: { k: 'const', value: 3 } }, r: a0 },
+      { k: 'bin', op: '^', l: { k: 'un', op: '~', e: i }, r: { k: 'bin', op: '<<', l: i, r: one } },
+    ];
+    for (const step of steps) {
+      expect(local(narrowReadDeclarations(counted(step))!, 'i')?.type).toEqual(T.s(16));
+    }
+  });
+
+  it('does not take a bare read whose high bits reach the write', () => {
+    // a shift right brings high bits down, a shift amount reads the whole value, and a compare or
+    // a second write's operand reads it as a value
+    const reads: Expr[] = [
+      { k: 'bin', op: '>>', l: i, r: one },
+      { k: 'bin', op: '<<', l: one, r: i },
+      plus(i, { k: 'bin', op: '>>', l: i, r: one }),
+      { k: 'bin', op: '<', l: i, r: a0 },
+    ];
+    for (const step of reads) {
+      expect(narrowReadDeclarations(counted(step))).toBeNull();
+    }
+  });
+
+  it('does not take a bare read outside a write back into the counter', () => {
+    const elsewhere: SFn['body'] = [{ k: 'assign', name: 'r', value: plus(r, i) }];
+    expect(narrowReadDeclarations(counted(plus(i, one), elsewhere))).toBeNull();
+  });
+
+  it('does not take a step through a float', () => {
+    const f: Expr = { k: 'fconst', bits: '3ff8000000000000' };
+    expect(narrowReadDeclarations(counted({ k: 'cast', to: T.s(32), e: plus(i, f) }))).toBeNull();
+  });
+
+  it('takes the counter a `for` steps', () => {
+    const sfn = counted(plus(i, one));
+    const loop = sfn.body[2] as Extract<SFn['body'][number], { k: 'dowhile' }>;
+    const looped: SFn = {
+      ...sfn,
+      body: [
+        sfn.body[0]!,
+        {
+          k: 'for',
+          init: sfn.body[1]!,
+          cond: loop.cond,
+          inc: loop.body[1]!,
+          body: [loop.body[0]!],
+        },
+        sfn.body[3]!,
+      ],
+    };
+    expect(cBackend.emit(narrowReadDeclarations(looped)!)).toContain('for (i = 0; i < 10; i = i + 1) {');
+  });
+});
+
+describe('narrowRangeDeclarations', () => {
+  const counter = (sfn: SFn) => local(sfn, 'v0')?.type;
+  /** the tree with `st` at the end of the body of its first loop */
+  const inLoop = (sfn: SFn, st: SFn['body'][number]): SFn => {
+    let done = false;
+    const put = (list: SFn['body']): SFn['body'] =>
+      list.map((s) => {
+        if (!done && (s.k === 'for' || s.k === 'dowhile' || s.k === 'while')) {
+          done = true;
+          return { ...s, body: [...s.body, st] };
+        }
+        return s.k === 'if' ? { ...s, then: put(s.then), else: put(s.else) } : s;
+      });
+    return { ...sfn, body: put(sfn.body) };
+  };
+  const call = (arg: Expr): SFn['body'][number] => ({ k: 'exprstmt', value: { k: 'call', fn: 'use', args: [arg] } });
+  const minus1: Expr = { k: 'bin', op: '-', l: v0, r: { k: 'const', value: 1 } };
+
+  it("declares a counter stepped through a cast at the cast's width, and drops the cast", () => {
+    const before = structured(COPY);
+    const src0 = cBackend.emit(before);
+    expect(src0).toContain('u32 v0;');
+    expect(src0).toContain('v0 = (u16)(v0 + 1)');
+    const src = cBackend.emit(narrowRangeDeclarations(before)!);
+    expect(src).toContain('u16 v0;');
+    expect(src).toContain('v0 = v0 + 1');
+    expect(src).toContain('*(u8 *)(a0 + v0) = *(u8 *)(a1 + v0);');
+  });
+
+  it('declares a counter passed to calls and tested against a literal', () => {
+    const before = structured(PASSED);
+    expect(cBackend.emit(before)).toContain('v0 = (u8)(v0 + 1);');
+    const after = narrowRangeDeclarations(before)!;
+    expect(counter(after)).toEqual({ kind: 'int', width: 8, signed: false });
+    expect(cBackend.emit(after)).toContain('v0 = v0 + 1;');
+  });
+
+  it('declares an s32 counter at a signed width too', () => {
+    const sfn = structured(COPY.replace('zext %11 {width=16}', 'sext %11 {width=16}'));
+    const signed = { ...sfn, locals: sfn.locals.map((l) => (l.name === 'v0' ? { ...l, type: T.s(32) } : l)) };
+    expect(counter(narrowRangeDeclarations(signed)!)).toEqual({ kind: 'int', width: 16, signed: true });
+  });
+
+  it('does not narrow a u32 local to a signed width, which would read a negative value back', () => {
+    const sfn = structured(COPY.replace('zext %11 {width=16}', 'sext %11 {width=16}'));
+    expect(counter(sfn)).toEqual(T.u(32));
+    expect(narrowRangeDeclarations(sfn)).toBeNull();
+  });
+
+  it('does not narrow a u32 local an expression of which reaches a call as a changed type', () => {
+    const sfn = inLoop(structured(COPY), call(minus1));
+    expect(narrowRangeDeclarations(sfn)).toBeNull();
+    // passed bare it is the same value, and through a cast the same bits
+    expect(narrowRangeDeclarations(inLoop(structured(COPY), call(v0)))).not.toBeNull();
+    expect(narrowRangeDeclarations(inLoop(structured(COPY), call(cast(32, true, minus1))))).not.toBeNull();
+  });
+
+  it('takes a call argument the callee declares an integer', () => {
+    const sfn = { ...inLoop(structured(COPY), call(minus1)), declaredArgs: { use: ['u32'] } };
+    expect(narrowRangeDeclarations(sfn)).not.toBeNull();
+    // a 64-bit parameter reads the value; a float one never arrives (target.ts keeps it `undefined`)
+    expect(narrowRangeDeclarations({ ...sfn, declaredArgs: { use: ['s64'] } })).toBeNull();
+    expect(narrowRangeDeclarations({ ...sfn, declaredArgs: { use: ['long long'] } })).toBeNull();
+    expect(narrowRangeDeclarations({ ...sfn, declaredArgs: { use: [undefined] } })).toBeNull();
+  });
+
+  it('does not narrow a u32 local when an unsigned compare would read it signed', () => {
+    const sfn = structured(COPY.replace('%3: unk32 = zext %2 {width=8}', '%3: s32 = add %2, %2'));
+    expect(cBackend.emit(sfn)).toContain('u32 v0;');
+    expect(narrowRangeDeclarations(sfn)).toBeNull();
+  });
+
+  it('does not narrow a local one of whose writes is out of range', () => {
+    const sfn = structured(COPY);
+    const wide = (list: SFn['body']): SFn['body'] =>
+      list.map((s) =>
+        s.k === 'for' && s.init.k === 'assign' ? { ...s, init: { ...s.init, value: { k: 'const', value: 65536 } } } : s,
+      );
+    const out = { ...sfn, body: wide(sfn.body) };
+    expect(cBackend.emit(out)).toContain('v0 = 65536');
+    expect(narrowRangeDeclarations(out)).toBeNull();
+  });
+
+  it('does not narrow a local whose writes are cast to two widths', () => {
+    const sfn = inLoop(structured(COPY), { k: 'assign', name: 'v0', value: cast(8, false, minus1) });
+    expect(narrowRangeDeclarations(sfn)).toBeNull();
+  });
+
+  it('does not narrow a local a `v++` also writes', () => {
+    const sfn = inLoop(structured(COPY), { k: 'exprstmt', value: { k: 'postincr', name: 'v0', by: 1 } });
+    expect(narrowRangeDeclarations(sfn)).toBeNull();
+  });
+
+  it('does not narrow a local whose address is taken', () => {
+    const sfn = inLoop(structured(COPY), call({ k: 'addr', name: 'v0' }));
+    expect(narrowRangeDeclarations(sfn)).toBeNull();
+  });
+
+  it('leaves a local written once to /narrow-decl', () => {
+    expect(narrowRangeDeclarations(structured(NAMED))).toBeNull();
+  });
+
+  // a u32 local written once through a cast, which /narrow-decl and /narrow-load refuse as unsigned
+  const once = (signed: boolean): SFn => ({
+    name: 'f',
+    params: [
+      { name: 'a0', type: T.u(32) },
+      { name: 'a2', type: T.u(32) },
+    ],
+    locals: [{ name: 'v0', type: { kind: 'int', width: 32, signed } }],
+    retType: T.s(32),
+    body: [
+      { k: 'assign', name: 'v0', value: cast(16, false, { k: 'bin', op: '+', l: a0, r: { k: 'const', value: 1 } }) },
+      call(v0),
+      call(v0),
+      { k: 'return', value: { k: 'bin', op: '<', l: v0, r: { k: 'var', name: 'a2' }, unsignedCmp: true } },
+    ],
+  });
+
+  it('declares a u32 local written once at its cast width, which no write-side member takes', () => {
+    expect(narrowDeclarations(once(false))).toBeNull();
+    expect(narrowLoadDeclarations(once(false))).toBeNull();
+    const src = cBackend.emit(narrowRangeDeclarations(once(false))!);
+    expect(src).toContain('u16 v0;');
+    expect(src).toContain('v0 = a0 + 1;');
+  });
+
+  it('leaves a signed local written once through a cast to /narrow-decl', () => {
+    expect(narrowDeclarations(once(true))).not.toBeNull();
+    expect(narrowRangeDeclarations(once(true))).toBeNull();
+  });
+
+  // written on two arms and read through the cast both writes store
+  const arms = (): SFn => ({
+    name: 'f',
+    params: [
+      { name: 'a0', type: T.s(32) },
+      { name: 'a1', type: T.s(32) },
+      { name: 'a2', type: T.s(32) },
+    ],
+    locals: [{ name: 'v0', type: T.s(32) }],
+    retType: T.s(32),
+    body: [
+      {
+        k: 'if',
+        cond: { k: 'var', name: 'a2' },
+        then: [{ k: 'assign', name: 'v0', value: cast(8, false, a0) }],
+        else: [{ k: 'assign', name: 'v0', value: cast(8, false, { k: 'var', name: 'a1' }) }],
+      },
+      call(cast(8, false, v0)),
+      call(cast(8, false, v0)),
+    ],
+  });
+
+  it('spells a read cast to the declared type bare', () => {
+    const src = cBackend.emit(narrowRangeDeclarations(arms())!);
+    expect(src).toContain('u8 v0;');
+    expect(src).toContain('use(v0);');
+    expect(src).not.toContain('(u8)');
+  });
+
+  it('leaves a local /narrow-read also takes to /narrow-read in a candidate holding both', () => {
+    const both = applyStacked(
+      STACKED_VARIATIONS.filter((x) => x.name === 'narrow-read' || x.name === 'narrow-range'),
+      arms(),
+    )!;
+    expect(both.variations).toEqual(['narrow-read']);
+  });
 });
 
 describe('/narrow-decl and /narrow-load stacked', () => {
@@ -489,7 +814,7 @@ describe('/narrow-decl and /narrow-read stacked', () => {
 describe('the stacked subsets', () => {
   const names = STACKED_SUBSETS.map((subset) => subset.map((x) => x.name).join('/'));
   const shapes = [[], ['initfirst'], ['pollguard'], ['pollread'], ['initfirst', 'pollguard', 'pollread']];
-  const widths = [
+  const THREE = [
     [],
     ['narrow-decl'],
     ['narrow-load'],
@@ -499,6 +824,7 @@ describe('the stacked subsets', () => {
     ['narrow-load', 'narrow-read'],
     ['narrow-decl', 'narrow-load', 'narrow-read'],
   ];
+  const widths = [...THREE, ['narrow-range'], ['narrow-read', 'narrow-range']];
 
   it('offers every shape choice with every width subset, each once, the shapes first', () => {
     const product = shapes.flatMap((s) => widths.map((w) => [...s, ...w].join('/'))).filter((n) => n !== '');
