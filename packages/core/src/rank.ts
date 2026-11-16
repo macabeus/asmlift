@@ -1309,8 +1309,7 @@ export function enumerateCandidates(
      *  a composition may MOVE statements a placing variation put — `/ret-split` lifts an arm out
      *  below its `if`, `/for-read` moves an init and a step into a `for` header, a stacked shape
      *  reorders — so a def it moved below a read of the local the variation placed is dropped,
-     *  whichever composition moved it. Each composition once carried its own copy of this list,
-     *  and the shape-reading copy had lost the placement check. */
+     *  whichever composition moved it. */
     const assertDerivedContracts = (from: SFn, to: SFn, minted?: ReadonlySet<string>): void => {
       assertResolved(to);
       assertDerefsTyped(to);
@@ -1359,9 +1358,7 @@ export function enumerateCandidates(
         // own source, nor a stacked one: the readings are offered on the un-respelled tree, and on
         // the stacked sources derived from it, by their own `respell` below. And only a reading
         // that finds no site on the un-respelled tree (`readsOnlyRespelled`): there the shape
-        // exists only because a respell variation built it, which is the reach the composition is
-        // for, while a reading the tree already has its own candidate for would be crossed with
-        // every respell source and, on the dearest rows, run the ranker out of heap.
+        // exists only because a respell variation built it.
         if (!alreadyShaped && !variations.some(isShapeReading)) {
           for (const reading of readsOnlyRespelled()) {
             try {
@@ -1468,15 +1465,10 @@ export function enumerateCandidates(
     // referees; its gate keeps it off every shape where the fold rule does not apply, which is
     // every operand but a shared subtraction.
     respell(['zerosub'], () => zeroSubNegates(sfn));
-    // The SHAPE READINGS (rank-variations.ts SHAPE_READINGS): `/ret-split` (return from each arm
-    // of an if whose merged local is only returned, l3/retsplit.ts), `/switch-break` (a void
-    // function's final switch left by `break;`, l3/switchbreak.ts), `/compound-expr` (`x += e` for
-    // a non-literal `e`, l3/compoundexpr.ts) and `/for-read` (a do/while whose first test is known
-    // to pass, as a `for`, l3/forread.ts). Each is one program with the tree as recovered and a
-    // different tree to some compiler (each module states its measurements), so it rides beside
-    // that tree and the differ referees. Offered here on the un-respelled tree; `respell` composes
-    // each onto every other respell variation's source. `/ret-split`'s polarity is the structured
-    // tree's, so `/flip-join` gives the other one.
+    // The SHAPE READINGS (rank-variations.ts SHAPE_READINGS; each module states its compiled
+    // pairs), offered here on the un-respelled tree; `respell` composes each onto every other
+    // respell variation's source. `/ret-split`'s polarity is the structured tree's, so `/flip-join`
+    // gives the other one.
     for (const reading of shapeReadings) {
       respell([reading.name], () => reading.apply(sfn));
     }
@@ -3076,8 +3068,9 @@ function stillbornNote(stillborn: Stillborn, fan: number): string {
  *  THE SHAPE HABITS next (shape-habits.ts `shapeHabitCount`): an `else` after a return, a merged
  *  local that is only returned and a `do`/`while` a reader writes as `for`, which the shape
  *  readings remove, and a shift idiom, which no reading removes (it prefers a candidate another
- *  variation spelled without the shifts). The readability report counts each the same way. Last of the text terms, so it decides only
- *  between two spellings that tie on everything above, the line count included.
+ *  variation spelled without the shifts). The readability report counts each the same way. Last
+ *  of the text terms, so it decides only between two spellings that tie on everything above, the
+ *  line count included.
  *
  *  ALL FOUR COUNT THE PUBLISHED TEXT, after the readability polish (l3/polish/), for the same
  *  reason again: the report counts that text. A tie-break runs only among equal scores, so it moves

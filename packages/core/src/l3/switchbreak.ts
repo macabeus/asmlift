@@ -3,10 +3,10 @@
 //
 // Nothing follows the switch but the end of the function (or a bare `return;`), so leaving an arm
 // for the code after the switch and returning are one program, and so are an empty `default:` and
-// none. Not one tree to two compilers: with the arms left by `break;`, mwcc 2.4.2 build 81
-// (`synthetic:cwret_g17`, `synthetic:cwret_g125`) and IDO 7.1 (`synthetic:sw_void`) lost their
-// matches and `synthetic:sw_defmid:ido7.1` gained one (full bench, 2026-11-12, as a print-only
-// rewrite). So it is a candidate beside the `return;` spelling, never in its place.
+// none. Not one tree to two compilers: with every arm left by `break;`, mwcc 2.4.2 build 81
+// (`synthetic:cwret_g17`, `synthetic:cwret_g125`) and IDO 7.1 (`synthetic:sw_void`) lose their
+// matches and `synthetic:sw_defmid:ido7.1` gains one (a full bench with the rewrite applied to every
+// lift). So it is a candidate beside the `return;` spelling, never in its place.
 //
 // WHERE IT FIRES: the function returns `void` and its body's last statement is a `switch`, or a
 // `switch` then a bare `return;`. Every bare `return;` inside an arm becomes a switch-scoped

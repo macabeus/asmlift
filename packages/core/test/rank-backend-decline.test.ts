@@ -282,7 +282,7 @@ test('a refusal of a RESPELL VARIATION on a pre-respell tree carries the pre-res
 
 // A SHAPE READING THE BACKEND CANNOT SPELL IS NOT OFFERED. `/ret-split` always leaves a `return`
 // the other arm follows, which Pascal (`spellsEarlyReturn: false`) refuses on every input, so on
-// that backend each of its candidates was a reported throw and never a candidate.
+// that backend each of its candidates would only be a reported throw.
 // `if (a1 < 0) v = a0 + 200; else v = g(a1); return v;`
 const MERGED = [
   'f:',

@@ -1246,8 +1246,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       '`v` afterwards. The assembly does not say whether the source merged the value first. Which arm ' +
       'returns first is the branch sense of the tree it rides, so `/flip-join` gives the other polarity.',
     compilerBehavior:
-      'Over the same body agbcc, IDO, KMC gcc and gcc 2.7.2 allocate the merged value and the two returns ' +
-      'differently on some shapes and alike on others; mwcc collapses most of them.',
+      'Every compiler builds the merged value and the two returns alike on some bodies and differently on ' +
+      "others: MathUtil_Div16Shift's compiles alike on agbcc and apart on IDO and mwcc.",
     offeredWhen: {
       when: 'An if with both arms before `return v;`, each arm ending by setting `v` (a local at the return type) or by leaving.',
       decidedBy: { symbol: 'splitReturnedMerges', file: l3('retsplit') },
