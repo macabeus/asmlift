@@ -1,8 +1,21 @@
 // Static, build-time import of the merged benchmark output. No fetch, no server.
-import type { BenchOutput } from '@asmlift/bench-schema';
+//
+// `bench publish` writes it split by project (`../data/index.json` + `../data/projects/*.json`,
+// bench-schema ./artifact); every file is bundled here and merged back by the same reader the
+// harness uses, so a project the index lists with no file fails the page loudly instead of
+// rendering a benchmark without it.
+import { type BenchOutput, readArtifact } from '@asmlift/bench-schema';
 
-import raw from '../data/results.json';
+const DATA = '../data/';
+const files = import.meta.glob<unknown>(['../data/index.json', '../data/projects/*.json'], {
+  eager: true,
+  import: 'default',
+});
 
-export const bench = raw as unknown as BenchOutput;
+export const bench: BenchOutput = readArtifact({
+  where: 'apps/web/src/pages/benchmark/data',
+  files: () => Object.keys(files).map((k) => k.slice(DATA.length)),
+  read: (rel) => files[DATA + rel],
+});
 export const results = bench.results;
 export const meta = bench.meta;

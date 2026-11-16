@@ -1193,7 +1193,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // exactly the instructions `utag` does. raise/truncload.ts folds the narrow read into a cast of
   // the wider one where the bytes are the field's LOW-ORDER end. WHICH ROWS THAT LIFTS IS A
   // MEASUREMENT, and the committed artifact is where it is read — `node -e` over
-  // apps/benchmark/results/results.json filtering `^synthetic:(unitrunc|utag|uhalf|ureread|uniwrite|unidev):`
+  // apps/benchmark/results/projects/synthetic.json filtering `^synthetic:(unitrunc|utag|uhalf|ureread|uniwrite|unidev):`
   // prints the outcome and the decline of every cell. As it stands:
   //   • `unitrunc` LIFTS on all four toolchains — one word member and its low byte, which is the
   //     fold's own shape.
@@ -4278,7 +4278,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // judges it like any other. What still declines `ProcessOamBuffers` is the rest of its frame —
   // three objects, a capture spilled to a slot, the addresses handed to `CpuSet` and to DMA.
   // Recompute the rows declining on the sp guard rather than read them:
-  //   python3 -c "import json; a=json.load(open('apps/benchmark/results/results.json'));
+  //   python3 -c "import json; a=json.load(open('apps/benchmark/results/projects/synthetic.json'));
   //   print([r['id'] for r in a['results'] if r['asmlift']['outcome']=='declined' and
   //     any('stack pointer used as data' in m for m in (r['asmlift']['errorMarkers'] or []))])"
   // `pokeemerald:GetMoveTarget:agbcc` is not one of them and is not a stack decline at all: its
@@ -9206,7 +9206,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // carrying `flip-join`/`flip-branch`, on FOUR toolchains, and 5 of the 17 MATCH — TWO of
   // those five REAL (`kleod:ProcessHBlankWait:agbcc`, `kleod:UpdateHUDCounterDisplay:agbcc`), the
   // other three `synthetic:ifand_far:agbcc`, `synthetic:ifor_near:agbcc` and
-  // `synthetic:ifor_near:mwcc_242_81`. Recompute the set by filtering `results.json` on
+  // `synthetic:ifor_near:mwcc_242_81`. Recompute the set by filtering `results/projects/synthetic.json` on
   // `asmlift.winnerVariations` matching `(^|/)(flip-join|flip-branch)(/|$)`. For G2 the exposure is
   // the 9 MATCHing `nested-loop` rows — all synthetic, all agbcc, all the DMA/`livebase` poll
   // family — plus `fib`, `nestedloop` and `sumto`.
@@ -9884,7 +9884,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // all, the other two `&GameplayMainLoop`), and its `refSource` writes
   // `gCallbackQueue.current[1] = UpdateWorldMapNodeAnim;` seven times, once per arm — per-arm on
   // both sides, which is why firing PAYS here. (Both counts are `python3` over
-  // `results/results.json`, not a reading of the C.)
+  // the artifact (`results/projects/`), not a reading of the C.)
   //
   // AND THE WHOLE-ROW NUMBER IS A VARIATION'S NUMBER, WHICH BUYS LESS THAN "ENUMERATED, THEREFORE
   // IMMUNE". −17/352 is a per-FUNCTION delta, and enumeration means the differ picks rather than a
@@ -9925,7 +9925,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // — a shipped decomp's own function, not a probe written for this family — and until this block
   // named it, it was cited NOWHERE, so nothing warned an author developing here that they could
   // break it. Naming it here is enough: `dataset-symmetry.test.ts` ("the dataset cites only
-  // benchmark rows that exist") pins every `project:sym` in this tree against `results.json`, in
+  // benchmark rows that exist") pins every `project:sym` in this tree against the artifact, in
   // the same CI step as `citations.test.ts` — verified by renaming this citation and watching that
   // suite go red, which is also why it should NOT be added to `citations.test.ts`'s `SCANNED`.
   // (Every one of the twelve turns `pnpm bench regression` red, which is an OUTCOME gate over all
@@ -9954,7 +9954,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // (rank.ts: `preference`, `deviceVolatile`, `castCount`, `lineCount`, enumeration order) —
   // which makes these rows outcome-inert but NOT publication-inert: the variation changes the C they
   // ship, the `bench diff` source-byte field this project has already paid for twice (#112/#113).
-  // The cheap route is `grep`ping `winnerVariations` in `results/results.json` (27 rows carry it, 18
+  // The cheap route is `grep`ping `winnerVariations` in `results/projects/` (27 rows carry it, 18
   // of them MATCH); the ablation is what decides which of those 18 actually depend on it.
   //
   // WHAT EACH MAP BUYS, MEASURED (`symbols:` deleted, re-run, cache off):

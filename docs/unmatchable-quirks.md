@@ -111,7 +111,7 @@ The target is seven Thumb instructions, `0a78 0270 0130 0131 002a f9d1 7047`:
 ldrb r2, [r1]    strb r2, [r0]    adds r0, #1    adds r1, #1    cmp r2, #0    bne .-10    bx lr
 ```
 
-Two sources are in play below and `results.json` already names them, so this page uses its words
+Two sources are in play below and the artifact already names them, so this page uses its words
 rather than "published" for both. The **`refSource`** — the kleod ground truth — is
 `void StrCpy(u8 *dst, u8 *src)` with `u32 c` and a loop body that reads `*src` into `c`, stores it
 through `dst`, **reads `*src` into `c` a second time**, then advances both pointers. The

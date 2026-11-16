@@ -6,7 +6,8 @@
   "type": "module",
   "description": "The asmlift's benchmark contract: result/manifest types + the closed feature vocabulary",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./artifact-fs": "./src/artifact-fs.ts"
   },
   "dependencies": {
     "@asmlift/core": "workspace:*"

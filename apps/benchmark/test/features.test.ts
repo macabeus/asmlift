@@ -11,6 +11,7 @@ import {
   definitionsOutOfStep,
   featuresByEvidence,
 } from '@asmlift/bench-schema';
+import { readArtifactDir } from '@asmlift/bench-schema/artifact-fs';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -28,7 +29,7 @@ import {
 } from '../src/cases/features';
 
 const REAL_DIR = join(import.meta.dirname, '..', 'dataset', 'real');
-const RESULTS = join(import.meta.dirname, '..', 'results', 'results.json');
+const RESULTS = join(import.meta.dirname, '..', 'results');
 
 interface Fn {
   sym: string;
@@ -41,7 +42,7 @@ const manifests = readdirSync(REAL_DIR)
   .map((f) => JSON.parse(readFileSync(join(REAL_DIR, f), 'utf8')) as { project: string; functions: Fn[] });
 
 const rows = (
-  JSON.parse(readFileSync(RESULTS, 'utf8')).results as {
+  readArtifactDir(RESULTS).results as {
     id: string;
     project: string;
     sym: string;
@@ -231,7 +232,7 @@ describe('tags match their evidence', () => {
     const body = definitionOf(stripped).body;
     return tags.filter((t) => JUDGEMENT_FLOOR[t] && !JUDGEMENT_FLOOR[t](body, asm, stripped));
   };
-  /** Every floor a row fails, minus the ones only its object could have met while `results.json`
+  /** Every floor a row fails, minus the ones only its object could have met while the artifact
    *  — a published artifact — has not met the row yet. A row the next `bench run` publishes is
    *  held to those too, and to every source-reading floor it is held on the spot. */
   const floorFailures = (entries: typeof authored) =>

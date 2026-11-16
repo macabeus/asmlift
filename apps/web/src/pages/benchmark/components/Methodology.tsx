@@ -165,7 +165,8 @@ export function Methodology({ rows }: { rows: FunctionResult[] }) {
       <section>
         <H>Regenerating the data</H>
         <P>
-          This view renders a committed <span className="font-mono">results.json</span>; regenerate it with{' '}
+          This view renders the committed benchmark artifact (one{' '}
+          <span className="font-mono">projects/&lt;project&gt;.json</span> per project); regenerate it with{' '}
           <span className="rounded bg-slate-800 px-1.5 py-0.5 font-mono text-teal-300">pnpm bench run</span> then{' '}
           <span className="rounded bg-slate-800 px-1.5 py-0.5 font-mono text-teal-300">pnpm bench merge</span>.
         </P>

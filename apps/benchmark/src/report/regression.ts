@@ -1,4 +1,4 @@
-// The MATCH-REGRESSION gate: did any function that matched in the committed results.json stop
+// The MATCH-REGRESSION gate: did any function that matched in the committed artifact stop
 // matching in the fresh one? `stale-check` answers "may this run replace the dataset" (coverage +
 // provenance); THIS answers "did the code get worse" — the question a refactor or feature round
 // must ask before committing. `bench run` itself exits 0 either way by design (a nonmatch is a
@@ -15,12 +15,9 @@ import {
   retiredKeySet,
   retirementKeys,
 } from '@asmlift/bench-schema';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 
 import { retiredRows } from '../cases/retired';
-import { RESULTS_DIR } from '../config';
-import { baseNotice, gitFacts, readCommitted, sameRun } from './committed';
+import { baseNotice, gitFacts, readCommitted, readFresh, sameRun } from './committed';
 
 export interface OutcomeFlip {
   id: string;
@@ -126,14 +123,14 @@ export function rowsAddedSince(base: BenchOutput, self: BenchOutput): BenchOutpu
   return { ...self, results: self.results.filter((r) => !baseKeys.has(join.headKey(r))) };
 }
 
-/** CLI entry: the committed results.json at `base` vs the freshly merged one, PLUS the branch's own
+/** CLI entry: the committed artifact at `base` vs the freshly merged one, PLUS the branch's own
  *  committed artifact vs the fresh one over the rows `base` does not have. Returns the process exit
  *  code — 0 iff no match was lost and no committed row vanished, in EITHER comparison. `base`
  *  defaults to HEAD; a branch that has already committed its own artifact must pass its branch
  *  point instead, or the first comparison compares the branch against itself. */
 export function regressionGate(base = 'HEAD'): number {
   const committed = readCommitted(base);
-  const fresh = JSON.parse(readFileSync(join(RESULTS_DIR, 'results.json'), 'utf8')) as BenchOutput;
+  const fresh = readFresh();
   const report = compareOutcomes(committed, fresh, retiredRows());
   const notice = baseNotice({ base, generatedAt: committed.meta.generatedAt, ...gitFacts(base) });
   console.log(`regression: ${notice.named}`);

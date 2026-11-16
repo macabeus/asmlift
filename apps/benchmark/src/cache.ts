@@ -310,7 +310,7 @@ export async function cachedM2cResult(
   //      It also covers the caret-line fix in `pickDiagnostics` (compile/util.ts): an mwcc
   //      diagnostic block that OPENS on a caret now hands over its explanation. That reaches a C
   //      row in principle, and `v` is still not bumped for it, because it rewrites none: NO row of
-  //      the 1,068 published carries a wrapper-prefixed caret marker (measured over results.json),
+  //      the 1,068 published carries a wrapper-prefixed caret marker (measured over the artifact),
   //      so bumping `v` would recompute every entry to change nothing.
   // `sliced` is that register for the normalizer reading the row's own function out of the target
   // disassembly (m2c-normalizer.ts `disasmToM2c`). Its input changes only where that disassembly

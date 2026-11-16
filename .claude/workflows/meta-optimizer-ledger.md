@@ -20,7 +20,7 @@
   accepts INLINE JSON as well as a path** (`packages/cli/src/main.ts`), so
   `docs/ranked-repro.md`'s canonical command runs verbatim — iteration 2 re-derived this as a
   live defect because the ledger stopped at #84.
-- **#87** `bench diff` exits **2** ("nothing was compared") when `results.json` still carries the
+- **#87** `bench diff` exits **2** ("nothing was compared") when the artifact still carries the
   base's `meta.generatedAt`, and prints base sha + fresh stamp — the loop's hard invariant was
   satisfiable in 0.9s on a clean tree, having run nothing, and that green line is what #86's body
   published as its proof; `eslint.config.mjs` ignores `research/**` and
@@ -40,7 +40,7 @@
 4. `pgrep -f` waits matching the waiting shell → deadlock (cost 8 hours once).
 5. The LBG repro needs `--proto '{"thunk_HeapFree":{"params":1}}'` — worth 60 points.
 6. `pnpm bench regression` is weak once a branch commits artifacts; the real check is a per-row
-   diff against `origin/main`'s `results.json`.
+   diff against `origin/main`'s artifact.
 7. Diffing the two `.s` TEXTS instead of objdiff's rendering produced 145 bogus rows once;
    alignment padding rendered as `lsl rN,#0` vs `.hword 0` produced 8 more.
 8. ~~A full `pnpm bench run` is ~5 minutes~~ — TRUE WHEN WRITTEN, FALSE SINCE. Measured
@@ -48,7 +48,7 @@
    the 17 days to that date on an unchanged 252 rows. `docs/bench-cost.md` holds the dated table;
    never quote a bench cost from this ledger.
 9. Rebasing a capability branch conflicts in the three generated artifacts and usually nothing
-   else — never hand-merge `results.json`; discard both sides and regenerate.
+   else — never hand-merge an artifact file (`apps/benchmark/results/**`); discard both sides and regenerate.
 
 ## Known-open, already named — report only with NEW evidence or a concrete fix
 

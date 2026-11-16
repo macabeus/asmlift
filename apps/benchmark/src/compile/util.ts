@@ -65,7 +65,7 @@ export function pickDiagnostics(lines: string[]): string[] {
 
 /** An ABSOLUTE path in a diagnostic, collapsed to its basename. Every file a compile module names
  *  is an mkdtemp scratch file, so the directory is a machine- AND run-local accident: two runs of
- *  the identical failure print different text, which lands verbatim in results.json and churns the
+ *  the identical failure print different text, which lands verbatim in the artifact and churns the
  *  committed artifact on every regeneration (and across machines). The basename is the part that
  *  carries information — `c.c:1076:` says which candidate file and line. Stops at `:` so the
  *  line/column suffix survives, and the leading `/` must open a TOKEN so that prose like

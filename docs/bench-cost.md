@@ -136,7 +136,7 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   25 of them read `src`/`len` ALONE, which is a dataset edit reported as a decompiler change.
 
   **`--fan` refuses when the committed artifact prices none of the rows it selected.** The size
-  guard reads `fanSize` off `results.json`, so an artifact that parses and prices nothing —
+  guard reads `fanSize` off the artifact, so an artifact that parses and prices nothing —
   `results: []` from a shard that wrote no rows, a schema move under `asmlift.fanSize`, or a
   whole-corpus artifact with no row of the project you selected — bounds nothing, and used to turn
   the guard off with no output at all (still enumerating the 77,760-candidate row at 25 s, against
@@ -3157,7 +3157,7 @@ THE FOURTH RUN PREDICTED ZERO AND GOT ZERO, which is the stronger control becaus
 predicate, moved it to one exported constant, and rewrote comments, a web label and two documents.
 The `bench-slot` notice filed before the run predicted **0 field changes, 0 flips, fan 1.00×**, on
 the argument that no corpus `targetAsm` carries the token the predicate newly matches
-(`grep -c '\$f[a-z]*[0-9]\+f' apps/benchmark/results/results.json` is 0).
+(`grep -c '\$f[a-z]*[0-9]\+f' apps/benchmark/results/results.json` was 0, at the single-file artifact of the time).
 `pnpm bench diff --base b347c22f` — this branch's own previous artifact — prints **0 field
 change(s), 0 added, 0 removed, 0 retired**, **fan 67,760 → 67,760 (1.00×), 0 rows moved**, and
 **cost 1,326.7 s → 1,319.0 s (0.99×)**. So the same tree, benched four times in seven hours, priced

@@ -85,7 +85,7 @@ rg -n "sym: '(spillorder|spillorder_rev|outparam)'" apps/benchmark/dataset/synth
 
 The line numbers that command printed are not reproduced here: the dataset is appended to every
 round, so a pasted line number rots within days while the row ids in
-`apps/benchmark/results/results.json` (`synthetic:<sym>:agbcc`) do not renumber.
+`apps/benchmark/results/projects/synthetic.json` (`synthetic:<sym>:agbcc`) do not renumber.
 
 Every one of the 30 measured sources was recompiled with the real compiler, instrumented copy with tracing off, and tracing on. All 30 assembly comparisons passed (the compile driver’s appended `.text/.align` footer was accounted for).
 

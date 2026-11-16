@@ -23,7 +23,9 @@ describe('what counts as a dirty tree', () => {
   });
 
   test("the benchmark's own regenerated artifacts do not", () => {
-    expect(codeDirtyFrom(' M apps/benchmark/results/results.json\n M apps/web/src/data/summary.json\n')).toBe(false);
+    expect(codeDirtyFrom(' M apps/benchmark/results/projects/kleod.json\n M apps/web/src/data/summary.json\n')).toBe(
+      false,
+    );
   });
 
   test('untracked .claude/commands/ docs do not, and untracked .claude/settings does', () => {
@@ -41,7 +43,7 @@ describe('what counts as a dirty tree', () => {
   // included) so a reader can tell an untracked file from a modified one without re-running git.
   test('the same rule can name the offending lines, artifact churn excluded', () => {
     expect(
-      codeDirtyPaths(' M apps/benchmark/results/results.json\n?? .envrc.probe\n M packages/core/src/rank.ts\n'),
+      codeDirtyPaths(' M apps/benchmark/results/index.json\n?? .envrc.probe\n M packages/core/src/rank.ts\n'),
     ).toEqual(['?? .envrc.probe', ' M packages/core/src/rank.ts']);
     expect(codeDirtyPaths('')).toEqual([]);
     // Porcelain's two columns are staged-then-unstaged. Keeping them is the whole point of

@@ -1,7 +1,7 @@
 // THE VEHICLE THAT REPRODUCES ONE ROW — hand a reader the row's own generated script, with this
 // machine's paths already in it, in a directory the repo ignores.
 //
-// A subcommand rather than a `node -e '…results.json…' > repro.sh` recipe, for the reason
+// A subcommand rather than a `node -e '…results/projects/<project>.json…' > repro.sh` recipe, for the reason
 // `report/baseline.ts` gives about its own one-liner: in a copy-pasted pipeline the failure is
 // silent. One character wrong in the row id and the REDIRECT has already truncated `repro.sh` to 0
 // bytes when node exits 1; `bash repro.sh` then exits 0 with no output, and the `grep -n '^WARN'`
@@ -26,22 +26,16 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { loadCompleteManifests, resolveProjectRoot } from '../cases/manifests';
-import { REPO_ROOT, RESULTS_DIR } from '../config';
+import { REPO_ROOT } from '../config';
 import { materialize } from '../run/fidelity';
 import { selectRows } from './baseline';
+import { readFresh } from './committed';
 import { asmliftScript, m2cScript } from './repro-scripts';
 
 /** The artifact ON DISK, not `git show <ref>:…`. `bench target` — the script's own step 1 —
- *  reads this same file to pick the scoring rung, so a script generated from some other ref
+ *  reads this same artifact to pick the scoring rung, so a script generated from some other ref
  *  would be run against a rung chosen from this one. */
-function readArtifact(): BenchOutput {
-  const path = join(RESULTS_DIR, 'results.json');
-  try {
-    return JSON.parse(readFileSync(path, 'utf8')) as BenchOutput;
-  } catch (e) {
-    throw new Error(`cannot read ${path}: ${e instanceof Error ? e.message.split('\n')[0] : e}`);
-  }
-}
+const readArtifact = (): BenchOutput => readFresh();
 
 /** The row's project checkout, resolved exactly as `bench fidelity` resolves it (env override >
  *  bench-owned > sibling workspace). Undefined for a row that was measured without a map. */

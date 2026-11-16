@@ -131,7 +131,7 @@ describe('the PPC dump cache does not serve an empty entry', () => {
 // touches this cache, and its disassembly comes from `compile/{ido,kmc,gcc272}.ts`'s own `disasm()`
 // — or, for agbcc, from a `.s` read off disk with no objdump in the path at all, so
 // @asmlift/toolchains' `nonEmptyDump` cannot see it either. Real rows are a large minority of the
-// artifact (`meta.counts` in apps/benchmark/results/results.json holds the current split), so what
+// artifact (`meta.counts` in apps/benchmark/results/index.json holds the current split), so what
 // the two guards above miss is not a corner. The invariant is therefore stated over the CONTRACT,
 // and both tiers cross it.
 describe('the BuiltTarget invariant covers the real tier too', () => {

@@ -4,9 +4,9 @@
 // renders. apps/web has no DOM, so components render through `renderToStaticMarkup`, and the
 // Explorer's URL state through nuqs's testing adapter.
 import { type FunctionResult, resolveRow } from '@asmlift/bench-schema';
+import { readArtifactDir } from '@asmlift/bench-schema/artifact-fs';
 import { VARIATION_DEFINITIONS } from '@asmlift/core/variation-definitions';
 import { VARIATION_KINDS, parseVariation, variationToken } from '@asmlift/core/variation-tokens';
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { NuqsTestingAdapter } from 'nuqs/adapters/testing';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -34,7 +34,7 @@ import { FAN_SAMPLE } from './fan-sample';
 vi.mock('../src/shared/utils/hash-adapter', () => ({ useCurrentHash: () => '' }));
 
 const artifact = (
-  JSON.parse(readFileSync(join(import.meta.dirname, '../src/pages/benchmark/data/results.json'), 'utf8')) as {
+  readArtifactDir(join(import.meta.dirname, '../src/pages/benchmark/data')) as {
     results: FunctionResult[];
   }
 ).results;

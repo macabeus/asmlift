@@ -4,6 +4,7 @@
 // present and only the counts moved, which no other gate can see. These pin the orderings that
 // actually overlap.
 import type { FunctionResult } from '@asmlift/bench-schema';
+import { readArtifactDir } from '@asmlift/bench-schema/artifact-fs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
@@ -805,9 +806,9 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // taxonomy that has drifted away from the messages core emits. This one is written against the
   // data the app renders: if a refusal is reworded, or a gap nobody has named appears, "other"
   // grows and this names the markers instead of the count quietly moving.
-  const artifact = JSON.parse(
-    readFileSync(join(import.meta.dirname, '..', 'src/pages/benchmark/data/results.json'), 'utf8'),
-  ) as { results: FunctionResult[] };
+  const artifact = readArtifactDir(join(import.meta.dirname, '../src/pages/benchmark/data')) as {
+    results: FunctionResult[];
+  };
 
   test('no published decline marker falls into "other"', () => {
     const unclassified = artifact.results

@@ -24,7 +24,7 @@ node <repo>/packages/cli/dist/asmlift.mjs <asm/nonmatchings/…/Fn.s> \
 **That command measures a project checkout's function, and it is NOT how you reproduce a benchmark
 row** — a real-tier row is scored on a different input `.s` and compiled down a different path, so
 it lands on a different number. The next section has the measurement and the vehicle that does
-reproduce a row (the row's own generated script, from `results.json`). Read it before you quote a
+reproduce a row (the row's own generated script, from the artifact). Read it before you quote a
 number against a harness outcome.
 
 Run it from the project checkout and redirect stderr to a file — the `[score]` and `[progress]`
@@ -67,7 +67,7 @@ checkout (below).
 | the command above: `asm/matchings/system/StrCpy.s`, the checkout's `decomp.yaml`, `--score-against build/src/system.o` | `unsigned: 6/9` | `u8 *StrCpy(…) { … return v2; }`    |
 | `pnpm bench repro kleod:StrCpy:agbcc --run` (the row's own script)                                                     | `unsigned: 5/8` | byte-identical to the published row |
 | `pnpm bench fan kleod:StrCpy:agbcc` (the harness's own call, no script)                                                | `unsigned: 5/8` | byte-identical to the published row |
-| the published row, `apps/benchmark/results/results.json`                                                               |           `5/8` | —                                   |
+| the published row, `apps/benchmark/results/projects/kleod.json`                                                        |           `5/8` | —                                   |
 
 Different score, a different denominator, and a different C spelling — on a seven-instruction
 function. Neither run is wrong; they answer different questions, and only the second one is the row.
@@ -210,8 +210,8 @@ pass `--project-root` yourself, `grep -n 'elf:' decomp.yaml` and check the path 
 project.
 
 **`bench target` freezes the PUBLISHED rung, and a local run does not refresh it.** The rung comes
-from `results.json` — the committed file — and the gitignored per-tier `real.json` beside it is
-consulted only for a row `results.json` does not carry at all. So after a `bench run --tier real
+from the artifact — the committed files — and the gitignored per-tier `real.json` beside it is
+consulted only for a row the artifact does not carry at all. So after a `bench run --tier real
 --only <sym>` moves your row, the reproduction still replays the rung the published source pins.
 That is right for reproducing a published row and wrong for watching your own change land: for
 that, the number is `bench run`'s.
@@ -239,7 +239,7 @@ printed the published source byte-for-byte.
 
 Two things it can do that nothing else can:
 
-- **`--show <variations>` prints a NON-WINNING candidate's source.** `results.json` carries the winner's
+- **`--show <variations>` prints a NON-WINNING candidate's source.** The artifact carries the winner's
   C and no other's, while `RankedResult.candidates` — every other candidate, each with its own
   `source` — is computed on every run and discarded. "The near-miss spelling is right and only
   loses on X" is a thing to read here rather than infer.

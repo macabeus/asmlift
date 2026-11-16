@@ -52,7 +52,7 @@ paths. Three agents per iteration, looped:
 `args: {since: "<sha>"}` starts the incremental window at a specific commit.
 
 **The hard invariant** is that nothing it ships may change a measurement: a full bench run, then a
-per-row diff of the regenerated `results.json` against `origin/main`'s (`pnpm bench diff --base
+per-row diff of the regenerated artifact against `origin/main`'s (`pnpm bench diff --base
 origin/main`), comparing every field `report/diff.ts`'s `FIELDS` watches — read the list there, it
 is wider than the score. Every row identical, or it does not ship. The reviewer re-proves this
 rather than trusting the implementer —

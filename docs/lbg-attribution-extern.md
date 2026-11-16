@@ -154,4 +154,4 @@ rg -n "sym: '(ereread|ereadctl|erback|erbctl)'" apps/benchmark/dataset/synthetic
 
 The line numbers that command printed are not reproduced here: the dataset is appended to every
 round, so a pasted line number rots within days while the four row ids in
-`apps/benchmark/results/results.json` (`synthetic:<sym>:agbcc`) do not renumber.
+`apps/benchmark/results/projects/synthetic.json` (`synthetic:<sym>:agbcc`) do not renumber.

@@ -47,7 +47,16 @@
 // whether a row MATCHES — that is `bench run` (`docs/bench-cost.md` §1). It tells you which rows
 // your branch SPELLS differently, which is the question a round asks twenty times before it asks
 // the other one once.
-import { type Identifiable, onlySelects } from '@asmlift/bench-schema';
+import {
+  ARTIFACT_INDEX,
+  type ArtifactIndex,
+  type Identifiable,
+  LEGACY_ARTIFACT,
+  artifactLayout,
+  onlySelects,
+  projectFile,
+} from '@asmlift/bench-schema';
+import { artifactFilesIn } from '@asmlift/bench-schema/artifact-fs';
 import { spawnSync } from 'node:child_process';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -333,7 +342,7 @@ export function rekeyFans(recorded: readonly RecordedRow[], current: readonly Id
 }
 
 /** sym → the fan the committed artifact recorded, for the `--fan` guard. Read off the COMMITTED
- *  `results.json` in this worktree rather than through `git show`: the guard's job is to keep a
+ *  artifact in this worktree rather than through `git show`: the guard's job is to keep a
  *  diagnostic from becoming an overnight job, and a ref that will not resolve must not be able to
  *  turn the guard off. A row the artifact does not carry (a new dataset row) has no recorded
  *  count and is enumerated — the guard protects against the known giants, and says so. */
@@ -676,13 +685,62 @@ export function sweepRequest(o: SweepOptions, rows: SweepPriceRows = DEFAULT_PRI
 
 /** The row ids of this worktree's committed artifact, for `sweepRequest`'s synthetic share;
  *  undefined when it cannot be read, which prices the synthetic tier whole. READ, NOT PARSED: the
- *  artifact is ~63 MB, and `JSON.parse` of it in a sweep's parent made a one-row sweep peak at
+ *  artifact is ~100 MB, and `JSON.parse` of it in a sweep's parent made a one-row sweep peak at
  *  0.41–0.45 GB against 0.21–0.29 GB without it. Decoding it to text in chunks cost as much, in
- *  garbage the heap had not yet collected (0.38–0.43 GB). So this searches the file's BYTES, 1 MiB
- *  at a time, for each `"id": "` key as `JSON.stringify(…, null, 2)` writes it, decodes only the id,
- *  keeps those shaped like a row id, and answers only when it found as many as `meta.counts.total`
- *  says: a truncated or reshaped file reads as unreadable. */
-export function artifactRowIds(path: string = join(RESULTS_DIR, 'results.json')): string[] | undefined {
+ *  garbage the heap had not yet collected (0.38–0.43 GB). So this parses only the small index
+ *  (bench-schema ./artifact: `meta` and the project list), then searches each listed project
+ *  file's BYTES (`idsIn`) for the row ids, and answers only when it found as many as
+ *  `meta.counts.total` says: a missing, truncated or reshaped file reads as unreadable. A
+ *  directory still holding the single pre-split `results.json` is searched the same way. */
+export function artifactRowIds(dir: string = RESULTS_DIR): string[] | undefined {
+  const files = artifactFilesIn(dir);
+  const layout = artifactLayout(files);
+  if (layout === 'none') {
+    return undefined;
+  }
+  let total: number | undefined;
+  let paths: string[];
+  if (layout === 'legacy') {
+    paths = [join(dir, LEGACY_ARTIFACT)];
+  } else {
+    let index: ArtifactIndex;
+    try {
+      index = JSON.parse(readFileSync(join(dir, ARTIFACT_INDEX), 'utf8')) as ArtifactIndex;
+    } catch {
+      return undefined;
+    }
+    // the same refusals bench-schema `readArtifact` makes, as "unreadable": a listed project with
+    // no file, a project file the index does not list, and a stale single file beside the index
+    const listed = Array.isArray(index.projects) ? index.projects.map(projectFile) : undefined;
+    const onDisk = files.filter((f) => f !== ARTIFACT_INDEX && f !== LEGACY_ARTIFACT);
+    if (
+      listed === undefined ||
+      files.includes(LEGACY_ARTIFACT) ||
+      listed.some((f) => !files.includes(f)) ||
+      onDisk.some((f) => !listed.includes(f))
+    ) {
+      return undefined;
+    }
+    total = index.meta?.counts?.total;
+    paths = index.projects.map((p) => join(dir, projectFile(p)));
+  }
+  const ids: string[] = [];
+  for (const path of paths) {
+    const found = idsIn(path);
+    if (found === undefined) {
+      return undefined;
+    }
+    total ??= found.total;
+    ids.push(...found.ids);
+  }
+  return total !== undefined && ids.length === total ? ids : undefined;
+}
+
+/** Every row id in one artifact file, by searching its bytes 1 MiB at a time for each `"id": "`
+ *  key as `JSON.stringify(…, null, 2)` writes it, decoding only the id and keeping those shaped
+ *  like a row id; plus the `meta.counts.total` the file's head carries, when it is a pre-split
+ *  `results.json` that has one. Undefined when the file cannot be opened or read. */
+function idsIn(path: string): { ids: string[]; total?: number } | undefined {
   let fd: number;
   try {
     fd = openSync(path, 'r');
@@ -728,7 +786,7 @@ export function artifactRowIds(path: string = join(RESULTS_DIR, 'results.json'))
       buf.copy(buf, 0, from, view.length);
       kept = view.length - from;
     }
-    return total !== undefined && ids.length === total ? ids : undefined;
+    return { ids, total };
   } catch {
     return undefined;
   } finally {
@@ -807,15 +865,15 @@ export function sweepRefusal(o: SweepOptions): string | undefined {
  *  merely an ugly one: `bench sweep --compare a b; [ $? -eq 1 ] && report` reads it as a finding.
  *  The `try/catch` above wraps `JSON.parse` alone, so a file that PARSES and is not an array of
  *  records reached `compareSweeps` and died on `base.map is not a function` as a raw node stack —
- *  and the realistic input is a reader pointing `--compare` at `apps/benchmark/results/results.json`,
- *  which is a JSON OBJECT and belongs to `bench diff`.
+ *  and the realistic input is a reader pointing `--compare` at a file of `apps/benchmark/results/`
+ *  (the artifact), which is a JSON OBJECT and belongs to `bench diff`.
  *
  *  An EMPTY side is refused for the reason an empty selection is (`head.length === 0` below): it
  *  compares clean against anything, and `bench sweep --compare … && echo clean` is the gate this
  *  command is for. Reproduced: two `[]` files printed `0 record(s) moved … 0 identical` at exit 0. */
 export function recordFileRefusal(file: string, parsed: unknown): string | undefined {
   if (!Array.isArray(parsed)) {
-    return `${file} is not a sweep record file: it parses to ${parsed === null ? 'null' : typeof parsed}, and \`--json\` writes a JSON ARRAY of records. (\`results.json\` is \`bench run\`'s artifact — \`bench diff\` reads that one.)`;
+    return `${file} is not a sweep record file: it parses to ${parsed === null ? 'null' : typeof parsed}, and \`--json\` writes a JSON ARRAY of records. (\`apps/benchmark/results/\` holds \`bench run\`'s artifact — \`bench diff\` reads that one.)`;
   }
   if (parsed.length === 0) {
     return `${file} holds no records, so it compares clean against anything — the run that wrote it swept nothing, or was interrupted mid-write`;

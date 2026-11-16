@@ -1,7 +1,7 @@
 // The Fan Explorer's URL state: the tab, the variation drawer's key, and the link from a drawer row
 // to that row's detail in the Function Explorer.
 import { type FunctionResult, resolveRow } from '@asmlift/bench-schema';
-import { readFileSync } from 'node:fs';
+import { readArtifactDir } from '@asmlift/bench-schema/artifact-fs';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
 
@@ -16,7 +16,7 @@ import {
 import { hashToSearchParams } from '../src/shared/utils/hash-params';
 
 const rows = (
-  JSON.parse(readFileSync(join(import.meta.dirname, '../src/pages/benchmark/data/results.json'), 'utf8')) as {
+  readArtifactDir(join(import.meta.dirname, '../src/pages/benchmark/data')) as {
     results: FunctionResult[];
   }
 ).results;

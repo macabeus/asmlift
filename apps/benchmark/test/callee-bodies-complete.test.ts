@@ -8,9 +8,10 @@
 // rather than as a harness that hands a lift fewer bodies than `bench repro` reads (the runner
 // refuses such a row at run time too, `selectCalleeBodies`).
 import { moduleOf } from '@asmlift/bench-schema';
+import { readArtifactDir } from '@asmlift/bench-schema/artifact-fs';
 import { elfBodyCandidates } from '@asmlift/cli/elf-bodies';
 import { parseAsmData } from '@asmlift/core/frontend/asmdata';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
@@ -29,7 +30,7 @@ interface PublishedRow {
 }
 
 const rows = (
-  JSON.parse(readFileSync(join(import.meta.dirname, '..', 'results', 'results.json'), 'utf8')) as {
+  readArtifactDir(join(import.meta.dirname, '..', 'results')) as {
     results: PublishedRow[];
   }
 ).results.filter((r) => r.tier === 'real' && moduleOf(r.addr) === undefined);

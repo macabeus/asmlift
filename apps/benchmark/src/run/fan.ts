@@ -772,7 +772,7 @@ export function unshowable(
  *  "what would this function's fan cost" is asked about functions that have no row yet — the one
  *  a dogfooding round is about to attempt, the one a round is deciding whether to add, the one
  *  `fan.ts` prices at five hours and nobody has ever enumerated — `LoadBGTilemapData`, which is
- *  NOT a benchmark row (`grep -c LoadBGTilemapData apps/benchmark/results/results.json` → 0), so
+ *  NOT a benchmark row (`grep -rc LoadBGTilemapData apps/benchmark/results/projects` → 0 everywhere), so
  *  `bench fan <row>` cannot reach it. The alternative is a hand-built driver importing core from
  *  outside the workspace, which is how a round meets `ERR_MODULE_NOT_FOUND` before it meets a
  *  count.

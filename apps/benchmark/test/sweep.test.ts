@@ -20,8 +20,10 @@
 // `collect` is assembled from (`mapModesFor`, `optsDigest`) rather than by calling `collect`: every
 // assertion on a hand-built record is blind to what the producer actually emits, so a sweep that
 // collapsed its two map modes onto one key would pass a suite made only of those.
+import type { BenchOutput } from '@asmlift/bench-schema';
+import { writeArtifactDir } from '@asmlift/bench-schema/artifact-fs';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -533,7 +535,7 @@ describe('the sweep refusals', () => {
 describe('the --fan size guard reads its own SELECTION, not just the artifact', () => {
   const artifact = (pairs: [string, number][], rows = pairs.length) => ({
     fans: new Map(pairs),
-    path: '/repo/apps/benchmark/results/results.json',
+    path: '/repo/apps/benchmark/results',
     rows,
   });
   const giant: [string, number] = ['kleod:ProcessInputAndUpdateEntities:agbcc', 77760];
@@ -702,7 +704,7 @@ describe('a --compare side that is not a sweep record file', () => {
     // `bench sweep --compare a b; [ $? -eq 1 ] && report` reads it as a finding. The `try/catch`
     // wrapped `JSON.parse` alone, so a file that PARSES and is not an array reached `compareSweeps`
     // and died on `base.map is not a function` as a raw node stack — and the realistic input is a
-    // reader pointing `--compare` at `results.json`, which is an OBJECT and belongs to `bench diff`.
+    // reader pointing `--compare` at an artifact file, which is an OBJECT and belongs to `bench diff`.
     expect(recordFileRefusal('r.json', {})).toContain('not a sweep record file');
     expect(recordFileRefusal('r.json', {})).toContain('bench diff');
     expect(recordFileRefusal('r.json', null)).toContain('not a sweep record file');
@@ -936,31 +938,49 @@ describe('what a sweep asks the memory admission check for', () => {
 });
 
 describe('artifactRowIds reads the row ids without parsing the artifact', () => {
-  const write = (text: string): string => {
+  const rowsOf = (n: number, project = 'synthetic') =>
+    Array.from({ length: n }, (_, i) => ({ id: `${project}:s${i}:agbcc`, sym: `s${i}`, project, asmlift: {} }));
+  /** A split artifact (bench-schema ./artifact) of `n` synthetic + `m` kleod rows, written by the
+   *  real writer; `total` overrides the index's count. */
+  const split = (n: number, m = 0, total = n + m): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'asmlift-ids-'));
+    const out = {
+      meta: { counts: { total, synthetic: n, real: m } },
+      results: [...rowsOf(m, 'kleod'), ...rowsOf(n)],
+    } as unknown as BenchOutput;
+    writeArtifactDir(dir, out, 2);
+    return dir;
+  };
+  const legacy = (text: string): string => {
     const dir = mkdtempSync(join(tmpdir(), 'asmlift-ids-'));
     writeFileSync(join(dir, 'results.json'), text);
-    return join(dir, 'results.json');
+    return dir;
   };
-  const artifact = (n: number, total = n): string =>
-    JSON.stringify(
-      {
-        meta: { counts: { total, synthetic: n, real: 0 } },
-        results: Array.from({ length: n }, (_, i) => ({ id: `synthetic:s${i}:agbcc`, sym: `s${i}`, asmlift: {} })),
-      },
-      null,
-      2,
-    );
+  const single = (n: number, total = n): string =>
+    JSON.stringify({ meta: { counts: { total, synthetic: n, real: 0 } }, results: rowsOf(n) }, null, 2);
 
-  it('finds every id, across the 1 MiB chunk edges', () => {
-    const ids = artifactRowIds(write(artifact(30000)));
-    expect(ids).toHaveLength(30000);
-    expect(new Set(ids).size).toBe(30000);
-    expect(ids![29999]).toBe('synthetic:s29999:agbcc');
+  it('finds every id across every project file, and across the 1 MiB chunk edges', () => {
+    const ids = artifactRowIds(split(30000, 7));
+    expect(ids).toHaveLength(30007);
+    expect(new Set(ids).size).toBe(30007);
+    expect(ids).toContain('synthetic:s29999:agbcc');
+    expect(ids).toContain('kleod:s6:agbcc');
   });
 
-  it('reads a file whose id count is not its meta total, or that is cut short or missing, as unreadable', () => {
-    expect(artifactRowIds(write(artifact(10, 11)))).toBeUndefined();
-    expect(artifactRowIds(write(artifact(10).slice(0, 400)))).toBeUndefined();
-    expect(artifactRowIds('/no/such/results.json')).toBeUndefined();
+  it('still reads a directory holding the pre-split single results.json', () => {
+    expect(artifactRowIds(legacy(single(30000)))).toHaveLength(30000);
+    expect(artifactRowIds(legacy(single(10, 11)))).toBeUndefined();
+    expect(artifactRowIds(legacy(single(10).slice(0, 400)))).toBeUndefined();
+  });
+
+  it('reads an artifact whose id count is not its meta total, or that is missing a file, as unreadable', () => {
+    expect(artifactRowIds(split(10, 0, 11))).toBeUndefined();
+    const cut = split(10, 3);
+    rmSync(join(cut, 'projects', 'kleod.json'));
+    expect(artifactRowIds(cut)).toBeUndefined();
+    const stale = split(10);
+    writeFileSync(join(stale, 'projects', 'old.json'), '{}');
+    expect(artifactRowIds(stale)).toBeUndefined();
+    expect(artifactRowIds('/no/such/dir')).toBeUndefined();
   });
 });

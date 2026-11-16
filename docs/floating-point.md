@@ -31,7 +31,7 @@ Every figure below names the command that recomputes it. Run them; do not quote 
 ### In the benchmark corpus
 
 ```sh
-node -e "const R=require('./apps/benchmark/results/results.json').results;
+node -e "const R=require('fs').readdirSync('apps/benchmark/results/projects').flatMap(f=>require('./apps/benchmark/results/projects/'+f).results);
 const MN=/^\s*[0-9a-f]+:\t([a-z][\w.]*)/;
 const FP=/^(l|s)(wc1|dc1)$|^(mf|mt|ct|cf)c1$|^bc1[tf]l?$|^(add|sub|mul|div|mov|neg|abs|c|cvt|trunc|round|ceil|floor|sqrt)\.[sdw]|^f[a-z]|^(lfs|lfd|stfs|stfd|psq_|ps_)/;
 const t=r=>(r.targetAsm||'').split('\n').some(l=>{const m=MN.exec(l);return m&&FP.test(m[1])});
@@ -55,13 +55,14 @@ a head against the base it was rebased onto, and an outcome that moved on BOTH s
 Re-derive it against the ref you actually rebased onto:
 
 ```sh
-git show 'origin/main:apps/benchmark/results/results.json' > /tmp/base.json
+mkdir -p /tmp/base && git archive origin/main apps/benchmark/results | tar -x -C /tmp/base
+# then run the recipes from /tmp/base (the artifact is index.json + one projects/<project>.json each)
 ```
 
 The 113 are not one refusal, and the split is three ways:
 
 ```sh
-node -e "const R=require('./apps/benchmark/results/results.json').results;
+node -e "const R=require('fs').readdirSync('apps/benchmark/results/projects').flatMap(f=>require('./apps/benchmark/results/projects/'+f).results);
 const MN=/^\s*[0-9a-f]+:\t([a-z][\w.]*)/;
 const FP=/^(l|s)(wc1|dc1)\$|^(mf|mt|ct|cf)c1\$|^bc1[tf]l?\$|^(add|sub|mul|div|mov|neg|abs|c|cvt|trunc|round|ceil|floor|sqrt)\.[sdw]|^f[a-z]|^(lfs|lfd|stfs|stfd|psq_|ps_)/;
 const t=r=>(r.targetAsm||'').split('\n').some(l=>{const m=MN.exec(l);return m&&FP.test(m[1])});
@@ -289,7 +290,7 @@ homes as target data (`TargetDescription.fpu`), and last the decode, which lands
 instruction is in the decoded set — rerun it against the artifact you rebased onto:
 
 ```sh
-node -e "const R=require('./apps/benchmark/results/results.json').results;
+node -e "const R=require('fs').readdirSync('apps/benchmark/results/projects').flatMap(f=>require('./apps/benchmark/results/projects/'+f).results);
 const MN=/^\s*[0-9a-f]+:\t([a-z][\w.]*)/;
 const FP=/^(l|s)(wc1|dc1)\$|^(mf|mt|ct|cf)c1\$|^bc1[tf]l?\$|^(add|sub|mul|div|mov|neg|abs|c|cvt|trunc|round|ceil|floor|sqrt)\.[sdw]|^f[a-z]|^(lfs|lfd|stfs|stfd|psq_|ps_)/;
 const fpm=r=>(r.targetAsm||'').split('\n').map(l=>MN.exec(l)).filter(m=>m&&FP.test(m[1])).map(m=>m[1]);

@@ -652,7 +652,7 @@ false negative this script exists to prevent.
 3. **A round never merges its own PR**, whatever `docs/measurement-discipline.md` §8's table says
    to do with a ready verdict. Every merge goes through Phase 3.
 4. **An artifact is regenerated, never hand-merged.** The gates in this repo are blind to a
-   hand-merged `results.json`.
+   hand-merged artifact file (`apps/benchmark/results/**`).
 5. **Everything in [`docs/measurement-discipline.md`](../../docs/measurement-discipline.md)** —
    numbers come from commands; a compiler claim is verified by compiling; never explain a
    discrepancy, re-run it; never ask a human what a command answers; a measured null ships. Those

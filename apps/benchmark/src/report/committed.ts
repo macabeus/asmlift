@@ -1,16 +1,35 @@
-// Reading the COMMITTED results.json, for the three gates that compare a fresh run against it
+// Reading the COMMITTED artifact, for the three gates that compare a fresh run against it
 // (stale-check, regression, diff). One place, because the ref they read is part of the answer:
 // on a branch that has already committed its own artifact, `HEAD` compares the branch against
 // ITSELF and every gate passes vacuously — which is why the real check is against the branch
 // POINT (`origin/main`), and why every gate here takes a `--base`.
-import { type BenchOutput, type FunctionResult, type Identifiable, joinArtifacts } from '@asmlift/bench-schema';
+//
+// The artifact is split by project (bench-schema ./artifact: `index.json` + `projects/*.json`),
+// and a ref from before the split holds the single `results.json`; both are read through the one
+// join in bench-schema, so a gate against a base that predates the split still works.
+import {
+  ARTIFACT_INDEX,
+  ARTIFACT_PROJECTS_DIR,
+  type ArtifactSource,
+  type BenchOutput,
+  type FunctionResult,
+  type Identifiable,
+  LEGACY_ARTIFACT,
+  joinArtifacts,
+  readArtifact,
+} from '@asmlift/bench-schema';
+import { artifactLayoutIn, readArtifactDir } from '@asmlift/bench-schema/artifact-fs';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 
 import { REPO_ROOT, RESULTS_DIR } from '../config';
 
-export const RESULTS_PATH = 'apps/benchmark/results/results.json';
+/** The artifact's directory, repo-relative — what a gate names in its output. */
+export const RESULTS_PATH = 'apps/benchmark/results';
+/** Every repo-relative path that holds the artifact, in either layout: what `git log -- …` asks
+ *  about to find the commit that last wrote it. */
+export const ARTIFACT_PATHS = [ARTIFACT_INDEX, ARTIFACT_PROJECTS_DIR, LEGACY_ARTIFACT].map(
+  (f) => `${RESULTS_PATH}/${f}`,
+);
 
 /** `git …` in the repo, or `undefined` when git declines to answer. Used only for the provenance
  *  LINE a gate prints about itself, so a question git cannot answer must degrade to "not shown",
@@ -91,26 +110,50 @@ export function readCommitted(ref = 'HEAD'): BenchOutput {
   if (ref.trim() === '') {
     throw new Error(`empty --base ref: git reads the staging INDEX for it, which is not a base — name a commit`);
   }
-  let raw: string;
-  try {
-    // execFile, not a shell string: `ref` comes straight from `--base`, and a shell would have to
-    // be trusted with whatever it contains — a ref with a space, a `$` or a `;` in it would
-    // otherwise be re-split, expanded or run rather than read.
-    raw = execFileSync('git', ['show', `${ref}:${RESULTS_PATH}`], {
+  // execFile, not a shell string: `ref` comes straight from `--base`, and a shell would have to
+  // be trusted with whatever it contains — a ref with a space, a `$` or a `;` in it would
+  // otherwise be re-split, expanded or run rather than read.
+  const run = (args: string[]): string =>
+    execFileSync('git', args, {
       cwd: REPO_ROOT,
       encoding: 'utf8',
       maxBuffer: 256e6,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-  } catch (e) {
+  const fail = (e: unknown): never => {
     throw new Error(
       `cannot read ${RESULTS_PATH} at '${ref}' — fetch the ref first (git fetch origin) or pass a --base that exists: ${
         e instanceof Error ? e.message.split('\n')[0] : e
       }`,
     );
+  };
+  let listing: string;
+  try {
+    listing = run(['ls-tree', '-r', '--name-only', `${ref}^{commit}`, '--', `${RESULTS_PATH}/`]);
+  } catch (e) {
+    return fail(e);
   }
-  return JSON.parse(raw) as BenchOutput;
+  const files = listing
+    .split('\n')
+    .filter(Boolean)
+    .map((f) => f.slice(RESULTS_PATH.length + 1));
+  const src: ArtifactSource = {
+    where: `${ref}:${RESULTS_PATH}`,
+    files: () => files,
+    read: (rel) => {
+      try {
+        return JSON.parse(run(['show', `${ref}:${RESULTS_PATH}/${rel}`])) as unknown;
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  };
+  return readArtifact(src);
 }
+
+/** This worktree's own artifact, read off disk — the freshly merged one every gate compares. A
+ *  missing or incomplete artifact throws (bench-schema `readArtifact`), naming what is missing. */
+export const readFresh = (dir = RESULTS_DIR): BenchOutput => readArtifactDir(dir);
 
 /** Compile-dir names and machine temp paths are run-local noise, not measurement: a cold run
  *  re-mints them inside embedded asm comments, so comparing them raw reports a change that no
@@ -135,7 +178,7 @@ export const sameRun = (a: BenchOutput, b: BenchOutput): boolean => a.meta.gener
 /** Every row keyed by id — the shape all three gates walk. */
 export const byId = (o: BenchOutput): Map<string, FunctionResult> => new Map(o.results.map((r) => [r.id, r]));
 
-/** This worktree's own `results.json`, read off disk rather than through git: the readers are the
+/** This worktree's own artifact, read off disk rather than through git: the readers are the
  *  guards and price estimates a command prints before it spends anything, and a ref that will not
  *  resolve must not switch them off. `results` absent and `unreadable` absent means there is no
  *  artifact at all; `unreadable` means there is one that will not parse, which a caller must say
@@ -145,17 +188,13 @@ export function readWorktreeArtifact(dir = RESULTS_DIR): {
   results?: FunctionResult[];
   unreadable?: string;
 } {
-  const path = join(dir, 'results.json');
-  if (!existsSync(path)) {
-    return { path };
+  if (artifactLayoutIn(dir) === 'none') {
+    return { path: dir };
   }
   try {
-    const { results } = JSON.parse(readFileSync(path, 'utf8')) as BenchOutput;
-    return Array.isArray(results)
-      ? { path, results }
-      : { path, unreadable: `${path} has no top-level \`results\` array` };
+    return { path: dir, results: readArtifactDir(dir).results };
   } catch (e) {
-    return { path, unreadable: `${path}: ${e instanceof Error ? e.message.split('\n')[0] : String(e)}` };
+    return { path: dir, unreadable: e instanceof Error ? e.message.split('\n')[0] : String(e) };
   }
 }
 

@@ -43,9 +43,9 @@ Key facts about the setup (verified 2026-08-05):
 1. `git ls-remote https://github.com/matt-kempster/m2c.git HEAD` for the target sha (or use `$1`).
    Read the current pin; record the range `OLD..NEW` and `git log --oneline OLD..NEW` in the m2c
    checkout after `git fetch origin`.
-2. **Snapshot first**: copy `apps/benchmark/results/results.json` to the scratchpad as
-   `results-old.json` *before* anything reruns. The whole row-diff analysis depends on it. Snapshot
-   the working tree's file, but check it is the committed one: after any local `bench run` the
+2. **Snapshot first**: copy the artifact (`apps/benchmark/results/index.json` + `projects/`) to the
+   scratchpad as `results-old/` *before* anything reruns. The whole row-diff analysis depends on it. Snapshot
+   the working tree's files, but check they are the committed ones: after any local `bench run` the
    "before" side is not what main published. `pnpm bench baseline <sym>` reads a single row straight
    from `origin/main`, and [`docs/baseline-freshness.md`](../../docs/baseline-freshness.md) is the
    rule for which of two numbers wins.
@@ -55,7 +55,8 @@ Key facts about the setup (verified 2026-08-05):
 4. Smoke-test the new m2c under the local Python before the full run: `python3 m2c.py --help`
    (upstream occasionally breaks on newer Pythons; catch it in 2 seconds, not mid-run).
 5. `pnpm bench run` (background it), then `pnpm bench merge` — `run` only writes the per-tier
-   files; `merge` produces `results.json` and republishes the web data. Both steps are required.
+   files; `merge` produces the artifact (`results/index.json` + one `results/projects/<project>.json`
+   per project) and republishes the web data. Both steps are required.
    What that costs, how to background and wait on it, and why you never kill one you have not
    proven hung: [`docs/bench-cost.md`](../../docs/bench-cost.md), dated — never quote a bench
    timing from memory. The laws every number here is held to are
@@ -66,7 +67,7 @@ Key facts about the setup (verified 2026-08-05):
 
 ## Phase 2 — Attribute every moved row
 
-Diff old vs new `results.json` per row id, comparing THREE things for the m2c column: `outcome`,
+Diff old vs new artifact per row id, comparing THREE things for the m2c column: `outcome`,
 `diffScore`, and the full `source` **text**. The text diff is the honesty check — it tells you
 which rows the upstream commits touched at all, and proves the rest of the range inert on the
 dataset. Report the outcome-tally table (match/nonmatch/noncompile/declined/failed, old → new).
@@ -77,7 +78,8 @@ For each moved row:
    message that disappeared).
 2. Find the candidate commit: grep the m2c checkout for the error message / touched behavior,
    match against the commit list.
-3. **Bisect-verify** — do not attribute on vibes. Dump the row's `targetAsm` from `results.json`
+3. **Bisect-verify** — do not attribute on vibes. Dump the row's `targetAsm` from its project file
+   (`apps/benchmark/results/projects/<project>.json`)
    to a scratch `.s` file, then in the m2c checkout run
    `python3 m2c.py -t <target> -f <sym> <file.s>` at `<commit>~1` and at `<commit>` and confirm
    the flip. Target strings: agbcc → `arm-gcc-c`; MIPS/PPC rows were fed *normalized* asm, so
@@ -114,8 +116,9 @@ different from asmlift's raising tower — port **ideas, never code**.
    + verified attribution, the commit-by-commit portability review, and a ranked follow-up list
    for asmlift. `research/` is **gitignored — never cite its paths in the commit message or
    anything that leaves this machine.**
-2. Commit `apps/benchmark/M2C_COMMIT`, `apps/benchmark/results/results.json`, and the republished
-   `apps/web/src/data/summary.json` + `apps/web/src/pages/benchmark/data/results.json` together,
+2. Commit `apps/benchmark/M2C_COMMIT`, the artifact (`git add -A apps/benchmark/results`: the index
+   and every project file), and the republished `apps/web/src/data/summary.json` +
+   `apps/web/src/pages/benchmark/data/` together,
    on the current branch. Message: headline numbers, what moved and the verified why, one line.
    Push.
 3. Final report to the user: headline (moved or held), the moved rows with attribution, and the

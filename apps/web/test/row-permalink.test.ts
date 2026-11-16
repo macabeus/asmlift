@@ -3,13 +3,13 @@
 // has since renamed still opens its row, through the row's `aliases`. These pin that over the real
 // artifact.
 import { type FunctionResult, resolveRow } from '@asmlift/bench-schema';
-import { readFileSync } from 'node:fs';
+import { readArtifactDir } from '@asmlift/bench-schema/artifact-fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 // the snapshot the Explorer itself renders (`bench merge` publishes it beside the harness artifact)
-const ARTIFACT = join(import.meta.dirname, '../src/pages/benchmark/data/results.json');
-const rows = (JSON.parse(readFileSync(ARTIFACT, 'utf8')) as { results: FunctionResult[] }).results;
+const ARTIFACT = join(import.meta.dirname, '../src/pages/benchmark/data');
+const rows = readArtifactDir(ARTIFACT).results;
 
 describe('a row permalink', () => {
   test('the link the Explorer writes — the row id — opens that row, on every row of the artifact', () => {

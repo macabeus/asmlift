@@ -3,12 +3,13 @@
 // what makes CI fail if the mechanism breaks, so the claim's precondition is that the row still
 // exists — and a row's symbol changes whenever a manifest does. This asserts the precondition.
 //
-// It cannot check that the row still EXERCISES the mechanism: results.json holds a row's outcome,
+// It cannot check that the row still EXERCISES the mechanism: the artifact holds a row's outcome,
 // not what it would score with the mechanism disabled. Only ablation shows that.
 //
 // `project:sym` is therefore reserved for rows. A checkout function or a dogfooding find is real
 // evidence but cannot be re-run that way, so it goes in prose naming where to look.
 import { type Identifiable, retiredIdentifiable, retiredKeySet, retirementKeys, rowNames } from '@asmlift/bench-schema';
+import { readArtifactDir } from '@asmlift/bench-schema/artifact-fs';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -22,14 +23,13 @@ const ROOT = join(import.meta.dirname, '..', '..', '..');
  *
  *  EXCLUDED IS NOT UNGUARDED. `apps/benchmark/dataset` — the attribution blocks, where a `/unmerge`
  *  blast-radius list names twelve rows an ablation flips — is pinned by `dataset-symmetry.test.ts`'s
- *  "the dataset cites only benchmark rows that exist": same regex, same `results.json`, same CI step
+ *  "the dataset cites only benchmark rows that exist": same regex, same artifact, same CI step
  *  (`vitest run apps/benchmark/test`), over a WIDER file set than this one (`.ts` + `.json`, minus
  *  vendored `tu/`), and checked by renaming a citation there and watching that suite go red. So do
  *  not add `dataset` here: it would be a second assertion of one convention. */
 const SCANNED = ['packages/core/src', 'packages/core/test', 'packages/cli/src', 'packages/cli/test', 'docs'];
 
-const rows = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'results', 'results.json'), 'utf8'))
-  .results as Identifiable[];
+const rows = readArtifactDir(join(import.meta.dirname, '..', 'results')).results as Identifiable[];
 
 /** Every name a row answers to, with and without its toolchain — its id AND its former names
  *  (`aliases`), so an upstream rename leaves every citation of the old spelling resolving. */
@@ -129,7 +129,7 @@ describe('every cited benchmark row exists', () => {
   it.each(found)('$file:$line cites $cited', ({ cited, file, line }) => {
     expect(
       CITABLE.has(cited) || RETIRED.has(cited),
-      `${file}:${line} cites '${cited}', which is not a row in the committed results.json nor a retired row.\n` +
+      `${file}:${line} cites '${cited}', which is not a row in the committed artifact nor a retired row.\n` +
         `  Renamed upstream? Add the old name to the row's aliases. Not a benchmark row (a checkout\n` +
         `  function, a dogfooding find)? Write it in prose naming where to look, so the spelling stops\n` +
         `  promising a row.`,
@@ -158,7 +158,7 @@ describe('a dataset fact a core test copied in', () => {
     expect(
       m![1],
       `${SOURCE} pins its marker-length worst case at '${m?.[1]}', and the longest agbcc symbol in ` +
-        `results.json is '${longestAgbccSymbol}' (${longestAgbccSymbol.length} chars). The test is ` +
+        `the artifact is '${longestAgbccSymbol}' (${longestAgbccSymbol.length} chars). The test is ` +
         `measuring a shorter name than the corpus has, so its margin is not the corpus's margin.`,
     ).toBe(longestAgbccSymbol);
   });
@@ -173,7 +173,7 @@ describe('the retired-row register', () => {
     // leaving that retired row out of the register.
     const live = retiredKeySet(REGISTER);
     const carried = rows.filter((r) => retirementKeys(r).some((k) => live.has(k))).map((r) => r.id);
-    expect(carried, `dataset/retired-rows.json retires rows results.json still carries: ${carried.join(', ')}`).toEqual(
+    expect(carried, `dataset/retired-rows.json retires rows the artifact still carries: ${carried.join(', ')}`).toEqual(
       [],
     );
   });

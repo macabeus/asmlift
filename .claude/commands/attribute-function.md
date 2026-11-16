@@ -74,7 +74,7 @@ Three docs carry what this command shares with `/match-function`, and it does no
    claiming a MOVE and need the before/after pair from one command. Otherwise do not re-derive a
    `CURRENT` baseline "to be sure": four agents in one chain did, at 450–471 s each.
 2. Reproduce outside the harness with **the row's own generated script**: `pnpm bench repro $1
-   --run`. It writes that script (`results.json` → `scripts.asmlift`) into the gitignored
+   --run`. It writes that script (the row's `scripts.asmlift` in the artifact) into the gitignored
    `.local/repro/<row>/` with this machine's paths filled in, runs it, and prints the `[ranked]`
    line. Two commands look like this one and are not: `pnpm bench target` is the script's step 1
    (no `[score]`, no input `.s`), and the project-checkout command at the top of
@@ -88,7 +88,7 @@ Three docs carry what this command shares with `/match-function`, and it does no
    that table is sorted best-first, so the last line is the WORST candidate.
 3. **Read the FAN before you name a missing capability**: `pnpm bench fan $1` prints every
    candidate the harness ranked for this row — its variations, score over its own denominator,
-   dropped, withheld — and `--show <variations>` prints any one of their SOURCES, which `results.json`
+   dropped, withheld — and `--show <variations>` prints any one of their SOURCES, which the artifact
    does not carry for a non-winner. An attribution that says "asmlift never considers X" is a claim
    about this list, so read it. Its `[ranked]` line carries the same `synthesized` count and
    `[asmlift source <sha>]` stamp as the vehicles above, so it is quotable in the same way.
@@ -284,14 +284,14 @@ attribution line for every decline naming its first blocker. Constraints learned
    `pnpm lint`, `pnpm format` check. **`pnpm format` is `prettier --write .`, a tree WRITE**, and
    step 1 above is a bench you were told to background: `pnpm bench in-flight` first, exit 1 means
    wait.
-3. Artifacts (`apps/benchmark/results/results.json`, both web copies) regenerated at the source
+3. Artifacts (`apps/benchmark/results/` — `index.json` + `projects/*.json` — and both web copies) regenerated at the source
    commit's HEAD (`meta.asmlift.dirty` must be false) and committed separately — **after** your
    final rebase, as the last commit. A rebase rewrites the commit the artifact's stamp names, and
    it can slide a base commit that changes the decompiler underneath numbers measured without one.
    `scripts/check-artifact-provenance.sh` fails both; run it before opening the PR.
 4. Zero-flip over the previously committed rows blocks the branch, same as `/match-function`.
    `pnpm bench diff --base origin/main` is that check by row and field, and its output is the
-   report's list of what moved. It exits **2**, "nothing was compared", if `results.json` still
+   report's list of what moved. It exits **2**, "nothing was compared", if the artifact still
    carries the base's `generatedAt` — the artifact is committed, so a gate run before `run`+`merge`
    compares the base with itself and prints a green line in a second.
 

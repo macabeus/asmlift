@@ -4,6 +4,7 @@
 // entry is on the page with its definition, that every link resolves, that every cost view carries its
 // sentence, and that every price is a level's.
 import { type FunctionResult, resolveRow } from '@asmlift/bench-schema';
+import { readArtifactDir } from '@asmlift/bench-schema/artifact-fs';
 import { shellJoinFlags } from '@asmlift/core/codegen-flags';
 import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import {
@@ -15,7 +16,6 @@ import {
 } from '@asmlift/core/variation-definitions';
 import { readerRules } from '@asmlift/core/variation-gates';
 import { VARIATION_KINDS, VARIATION_TOKENS, variationToken } from '@asmlift/core/variation-tokens';
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, test, vi } from 'vitest';
@@ -51,7 +51,7 @@ import { FAN_SAMPLE } from './fan-sample';
 vi.setConfig({ testTimeout: 30_000 });
 
 const artifact = (
-  JSON.parse(readFileSync(join(import.meta.dirname, '../src/pages/benchmark/data/results.json'), 'utf8')) as {
+  readArtifactDir(join(import.meta.dirname, '../src/pages/benchmark/data')) as {
     results: FunctionResult[];
   }
 ).results;

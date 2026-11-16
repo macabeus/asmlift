@@ -11,7 +11,7 @@ For every `(function × toolchain)` case it runs BOTH decompilers and records, p
 **one classifier, applied identically to both columns** (`src/eval/outcome.ts`):
 
 > **Vocabulary.** A **case** is the measurement unit: one function on one toolchain (one function
-> can appear as several cases); after a run, each case is one **row** in `results.json` — the two
+> can appear as several cases); after a run, each case is one **row** of the artifact (`results/projects/<project>.json`) — the two
 > words name the same thing before and after measurement. A **tier** is a dataset half: synthetic
 > (authored probes) vs real (verbatim decomp-project functions). A **candidate** is one compilable
 > source a decompiler emits for a case (asmlift may emit several and rank them); the **target
@@ -262,8 +262,8 @@ pnpm bench in-flight                  # is a run measuring this worktree RIGHT N
                                       #   refuses a second run writing a tier file the live one is
                                       #   writing, or a second FULL bench anywhere on this machine;
                                       #   `--no-lock` is the sanctioned way past that
-pnpm bench:merge                      # = bench merge: tiers -> results/results.json, then publish
-pnpm bench publish                    # re-stage results.json into the web app alone
+pnpm bench:merge                      # = bench merge: tiers -> results/{index.json,projects/}, then publish
+pnpm bench publish                    # re-stage the merged artifact into the web app alone
 pnpm bench:smoke                      # one trivial fn through every available toolchain
 pnpm bench repro <sym|id> --run       # reproduce ONE published row outside the harness: writes
                                       #   that row's own generated script into .local/repro/<row>/
@@ -320,10 +320,10 @@ pnpm bench regression --base origin/main   # gate: exit 1 on any lost match or v
 pnpm bench diff --base origin/main         # gate: exit 1 if ANY compared field moved, row by row --
                                            #   and then NAMES the field moves on rows this branch
                                            #   added since `--base`, which are `ADDED` there forever
-                                           #   exit 2 if results.json was never regenerated: it is
+                                           #   exit 2 if the artifact was never regenerated: it is
                                            #   committed, so an unrun gate compares the base with
                                            #   ITSELF and prints a green line having measured nothing
-cd apps/web && pnpm run build         # the site (the Benchmark view renders results.json)
+cd apps/web && pnpm run build         # the site (the Benchmark view renders the artifact)
 ```
 
 ### Caching (what a number means)
@@ -669,7 +669,7 @@ the round that first ran it.
 | `compile/`         | one module per toolchain — real-tier build + candidate steps shared (candidate-compile commands live in `dataset/toolchains/`)                                                                                                                                        |
 | `eval/`            | `evaluate.ts` (both decompilers on one case), `asmlift.ts`, `m2c.ts`, `m2c-normalizer.ts` (objdump-to-GNU-as normalizer), `outcome.ts` (the symmetric classifier), `quality.ts`                                                                                       |
 | `run/`             | `runner.ts` (the ONE case loop), `orchestrate.ts` (spawns the shards, stitches their part files), `queue.ts` (the row queue and its journal, `--resume`), `fidelity.ts` (the script-fidelity gate), `fan.ts` (one row's whole candidate fan), `smoke.ts`, `verify.ts` |
-| `report/`          | `merge.ts` (pure: tiers -> results.json), `gap-size.ts`, `repro-scripts.ts`, the three gates (`stale-check`/`regression`/`diff`) over `committed.ts`, `publish.ts`                                                                                                    |
+| `report/`          | `merge.ts` (pure: tiers -> the split artifact), `gap-size.ts`, `repro-scripts.ts`, the three gates (`stale-check`/`regression`/`diff`) over `committed.ts`, `publish.ts`                                                                                              |
 | `toolchains.ts`    | 4 toolchain adapters over `@asmlift/toolchains` (`buildTarget` + `score`)                                                                                                                                                                                             |
 | `decomp-config.ts` | candidate compilation through the real `decomp.yaml` user path                                                                                                                                                                                                        |
 | `cache.ts`         | content-keyed result cache (tmp-then-rename; m2c dirty-checkout fail-closed; versioned key)                                                                                                                                                                           |
@@ -693,12 +693,14 @@ vocabulary every row's `features` is drawn from. The harness's own toolchain-fre
 - **Tag a function**: list only judgement tags (`memory`, `struct`, …) — the source- and
   codegen-evidenced ones are derived per row. See
   [`@asmlift/bench-schema`](../../packages/bench-schema/README.md).
-- Re-run and re-merge; the Benchmark view re-renders from the committed `results.json`.
+- Re-run and re-merge; the Benchmark view re-renders from the committed artifact.
 
 ## Committed artifacts
 
-`results/results.json` (pretty-printed so refresh diffs review case-by-case) plus
-`apps/web/src/pages/benchmark/data/results.json`, and
+The artifact, split by project so no file reaches GitHub's 100 MiB file limit:
+`results/index.json` (`meta`, the project list, and the row order as per-project runs) plus one
+`results/projects/<project>.json` per project (pretty-printed so refresh diffs review
+case-by-case); its compact copy in `apps/web/src/pages/benchmark/data/` (same layout); and
 `apps/web/src/data/summary.json` are committed; the per-tier `synthetic.json`/`real.json` are
 gitignored intermediates. Provenance in `meta.asmlift` records the commit + a dirty flag that
 ignores these artifact paths themselves; the summary-results consistency test (apps/web) fails

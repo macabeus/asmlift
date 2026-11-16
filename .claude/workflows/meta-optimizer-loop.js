@@ -28,7 +28,7 @@ asmlift is a TS matching-decompiler. A loop runs \`/attribute-function\` on the 
 \`/match-function\` builds the capability those rows gate. Each round is a Workflow of ~8 agents.
 **Never quote the corpus totals from this file** — they were 834 rows / 433 / 357 when it was
 written and are wrong by now. Read them from the committed artifact
-(\`apps/benchmark/results/results.json\`'s \`meta.counts\`, and the totals \`pnpm bench diff\` prints),
+(\`apps/benchmark/results/index.json\`'s \`meta.counts\`, and the totals \`pnpm bench diff\` prints),
 and a single row's number from \`pnpm bench baseline <sym>\`.
 
 ## READ THIS FIRST — the ledger, not the whole corpus
@@ -89,7 +89,7 @@ const SCOPE = `
 
 **THE HARD INVARIANT — output neutrality, proved mechanically.**
 
-Run the full bench on your branch and diff the regenerated \`results.json\` against \`origin/main\`'s
+Run the full bench on your branch and diff the regenerated artifact against \`origin/main\`'s
 committed one on every field \`report/diff.ts\`'s \`FIELDS\` watches — read the list THERE rather
 than from memory, it is wider than the score. **Every one must be identical.** Timings and the
 provenance stamp are the only permitted differences, and you must name which differed.

@@ -7,6 +7,7 @@
 // carry the row's own inputs with this machine's paths substituted; and the out dir must be one
 // `bench run`'s dirty-tree preflight tolerates.
 import type { BenchOutput } from '@asmlift/bench-schema';
+import { readArtifactDir } from '@asmlift/bench-schema/artifact-fs';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -17,8 +18,7 @@ import { REPO_ROOT } from '../src/config';
 import { repro, reproDirFor, setupRefusal } from '../src/report/repro';
 import { LOCAL_SCRATCH_DIR } from '../src/run/preflight';
 
-const results = (JSON.parse(readFileSync(join(import.meta.dirname, '../results/results.json'), 'utf8')) as BenchOutput)
-  .results;
+const results = (readArtifactDir(join(import.meta.dirname, '../results')) as BenchOutput).results;
 
 const dirs: string[] = [];
 const scratch = (): string => {

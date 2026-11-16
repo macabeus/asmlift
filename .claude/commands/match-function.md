@@ -147,7 +147,7 @@ each one's variations, its score against its own denominator, the ones the score
 ones withheld — in the harness's own configuration (the row's target object, prototypes, context compile and
 symbol map), so it is comparable with the published row rather than with a checkout. The flags:
 
-- `--show <variations>` prints that candidate's SOURCE. Nothing else can: `results.json` carries the
+- `--show <variations>` prints that candidate's SOURCE. Nothing else can: the artifact carries the
   winner's C and no other's, so "the near-miss spelling is right and only loses on X" is a claim
   you can now read instead of infer. `--show winner` is the winner (on the SCORED path only — under
   `--enumerate` nothing has been scored, so `--enumerate --show winner` is refused rather than
@@ -289,7 +289,7 @@ Before declaring the branch done: `pnpm bench run` (all tiers), `pnpm bench:merg
 `pnpm bench regression --base origin/main` and `pnpm bench diff --base origin/main`. **Any lost
 match blocks the branch.** Pass the base ref: both gates read the COMMITTED artifact, so on a
 branch that has already committed its own they compare it against itself and pass vacuously.
-Keep the order too: `diff` exits **2**, "nothing was compared", if `results.json` still carries the
+Keep the order too: `diff` exits **2**, "nothing was compared", if the artifact still carries the
 base's `generatedAt` — run before `run`+`merge` it compares the base with itself in a second and
 prints a green line. `regression` answers "did a match break"; `diff` names every row and field that
 moved — that list is the PR body's inventory of what the round did, and for a commit claiming to
@@ -323,7 +323,7 @@ ended this fan` means this tree does not stop the row the artifact says it stops
 Four things this gate does not catch by itself:
 
 - **The regenerated artifact is the LAST commit on the branch — after the final rebase.**
-  `results.json` stamps the commit it was generated at, and every number you publish reads from it,
+  The artifact (`apps/benchmark/results/index.json`) stamps the commit it was generated at, and every number you publish reads from it,
   so a commit that touches core, cli, the harness or the dataset after it silently republishes
   numbers a rule version that no longer exists produced. Rebasing counts twice over: it rewrites
   the commit the stamp names, and it can slide a base commit that changes the decompiler underneath
@@ -505,7 +505,7 @@ launch anything long. What this command leans on:
 2. **Every new rewrite needs a gate** — a new default and a new variation alike — and the gate must
    be justified by a row it protects. Ungated rewrites have regressed matches here repeatedly (multi-use const → `sum_to`; base-CSE without the
    loop-gate; const-MMIO RMW without the scalar-fixed-offset gate).
-3. **Never edit the benchmark to make a row look better** — no manifest tweaks, no results.json
+3. **Never edit the benchmark to make a row look better** — no manifest tweaks, no artifact
    edits, no adding context that a real user of the published repro script would not have. If the
    harness is genuinely wrong, fix it as its own clearly-labelled commit and say the numbers moved
    for harness reasons.

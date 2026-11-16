@@ -1564,7 +1564,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
   // instance that happens to fit. The message carries the function's NAME and the instruction's
   // text, so its length is the caller's as much as this file's. Measured across the agbcc rows in
   // the artifact, the longest symbol is 37 characters:
-  //   python3 -c "import json;a=json.load(open('apps/benchmark/results/results.json'));\
+  //   python3 -c "import json;a=json.load(open('apps/benchmark/results/projects/kleod.json'));\
   //     print(max((r['id'].split(':')[1] for r in a['results'] if r['id'].endswith(':agbcc')),key=len))"
   // and at that name the runtime refusal's reason loses its last few characters in the artifact.
   // That is acceptable and it is why the assertion below is about CONTENT and not length: both

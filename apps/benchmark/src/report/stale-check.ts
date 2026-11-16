@@ -1,4 +1,4 @@
-// Is the COMMITTED results.json measurement-stale against the freshly merged one? The comparison
+// Is the COMMITTED artifact measurement-stale against the freshly merged one? The comparison
 // is measurement-level, not byte-level: `generatedAt`/provenance always differ, and cold
 // runs re-mint scratch-dir names inside embedded asm comments — neither is a reason to commit.
 //
@@ -6,12 +6,9 @@
 //   - coverage shrank (fewer rows, or a toolchain vanished — e.g. Docker was down and its rows
 //     were skipped): committing would destroy data, not refresh it
 //   - dirty provenance: numbers from uncommitted code must never be published
-import { type BenchOutput, type FunctionResult, joinArtifacts } from '@asmlift/bench-schema';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { type FunctionResult, joinArtifacts } from '@asmlift/bench-schema';
 
-import { RESULTS_DIR } from '../config';
-import { readCommitted, scrub } from './committed';
+import { readCommitted, readFresh, scrub } from './committed';
 
 /** One decompiler's side of a row as this file COMPARES it: whole, minus what a re-run re-mints
  *  for reasons that are not the measurement.
@@ -44,7 +41,7 @@ export const comparableRow = (r: FunctionResult): string =>
 
 export function staleCheck(base = 'HEAD'): 'stale' | 'fresh' {
   const committed = readCommitted(base);
-  const fresh = JSON.parse(readFileSync(join(RESULTS_DIR, 'results.json'), 'utf8')) as BenchOutput;
+  const fresh = readFresh();
 
   if (fresh.meta.asmlift?.dirty !== false) {
     throw new Error('fresh results carry dirty/unknown provenance — refusing to treat as a refresh');

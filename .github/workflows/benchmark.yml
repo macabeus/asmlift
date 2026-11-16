@@ -167,7 +167,7 @@ jobs:
       # A lost match must FAIL rather than be published as the new number. `stale-check` below only
       # refuses on shrunken coverage or dirty provenance, so without this a match→non-match flip is
       # committed as a routine refresh. Runs after `merge`, which is what it compares against — run
-      # before it, and it compares the committed results.json with itself and always passes.
+      # before it, and it compares the committed artifact with itself and always passes.
       - name: Zero-lost-match gate
         run: pnpm bench regression
 
@@ -180,9 +180,12 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add apps/benchmark/results/results.json \
-                  apps/web/src/pages/benchmark/data/results.json \
-                  apps/web/src/data/summary.json
+          # -A: the artifact is split by project, so a run can also REMOVE a file (a project that
+          # left the dataset, or the pre-split single results.json); the tier intermediates and
+          # run logs beside it are gitignored
+          git add -A apps/benchmark/results \
+                     apps/web/src/pages/benchmark/data \
+                     apps/web/src/data/summary.json
           git commit -m "bench: refresh results (automated run)"
           # tolerate commits that landed on main during the run (artifact commits rebase cleanly;
           # a genuine artifact conflict still fails loudly)
