@@ -88,7 +88,7 @@
 // in-process — the debugging path. A shard child is `run --tier <t> --claim <gen> --shard i/N`,
 // which takes rows off the tier's queue (run/queue.ts); nobody types it.
 import { type FunctionResult, moduleOf, resolveRow } from '@asmlift/bench-schema';
-import { artifactLayoutIn, readArtifactProject } from '@asmlift/bench-schema/artifact-fs';
+import { artifactLayoutIn, readArtifactDir } from '@asmlift/bench-schema/artifact-fs';
 import {
   CACHE_MISMATCH_EXIT,
   MISMATCH_LOG,
@@ -217,9 +217,10 @@ if (opts.tier !== 'both' && opts.tier !== 'synthetic' && opts.tier !== 'real') {
  *  used.
  *
  *  The committed artifact first, because that is what every checkout has — a user running a
- *  published reproduction script must land on the same rung the benchmark did. Only the row's own
- *  project file is read (bench-schema `readArtifact` with a project; a listed project with no file
- *  throws). The gitignored per-tier `real.json` is read ONLY for a row the artifact does not carry
+ *  published reproduction script must land on the same rung the benchmark did. Read whole
+ *  (bench-schema `readArtifact`; an incomplete artifact throws) rather than by the project an id
+ *  starts with, because a row reference is resolved by identity and former names (`resolveRow`),
+ *  never by cutting the id (identity.test.ts). The gitignored per-tier `real.json` is read ONLY for a row the artifact does not carry
  *  at all, so a local `bench run --tier real --only <sym>` that moves a PUBLISHED row does not
  *  refresh the rung — the reproduction stays frozen at the published one. Right for a reader
  *  reproducing a published row, wrong for an author iterating: the author's confirm is `bench
@@ -227,8 +228,7 @@ if (opts.tier !== 'both' && opts.tier !== 'synthetic' && opts.tier !== 'real') {
  *  the richest rung — the behavior before the rung was derived at all. */
 function publishedAsmliftSource(rowId: string): string | undefined {
   const sources: (() => FunctionResult[])[] = [
-    () =>
-      artifactLayoutIn(RESULTS_DIR) === 'none' ? [] : readArtifactProject(RESULTS_DIR, rowId.split(':')[0]).results,
+    () => (artifactLayoutIn(RESULTS_DIR) === 'none' ? [] : readArtifactDir(RESULTS_DIR).results),
     () => {
       try {
         return (JSON.parse(readFileSync(join(RESULTS_DIR, 'real.json'), 'utf8')) as { results: FunctionResult[] })
