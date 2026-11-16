@@ -237,7 +237,7 @@ function assessHabits(parts: FnParts): QualityHabits {
   }
 
   return {
-    ...shapeHabits(parts.stmts),
+    ...shapeHabits(parts.stmts, [parts.signature, ...parts.decls.map((d) => d.line)]),
     ptrDeref0,
     decimalMasks,
     incrStmts,

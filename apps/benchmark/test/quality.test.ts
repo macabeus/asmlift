@@ -197,6 +197,29 @@ describe('assessQuality habit counters (counted, never score-penalized)', () => 
     expect(habits(loop('0', '!= a0')).doWhileForable).toBe(0);
   });
 
+  test("a do/while counted as for-able only where /for-read takes it: its refusals are the counter's", () => {
+    const loop = (decl: string, body: string): string =>
+      `void f(void) {\n    ${decl} i;\n    i = 0;\n    do {\n${body}    } while (i < 5);\n}\n`;
+    const step = '        i = i + 1;\n';
+    expect(habits(loop('s32', `        h(i);\n${step}`)).doWhileForable).toBe(1);
+    expect(habits(loop('s32', '        h(i);\n        i++;\n')).doWhileForable).toBe(1);
+    // a `continue` bound to this loop skips the step the `for` would run
+    const cont = `        if (g(i) != 0) {\n            i = i + 2;\n            continue;\n        }\n        h(i);\n${step}`;
+    expect(habits(loop('s32', cont)).doWhileForable).toBe(0);
+    // one bound to an inner loop does not
+    const inner = `        do {\n            if (g(i) != 0) {\n                continue;\n            }\n        } while (h(i) != 0);\n${step}`;
+    expect(habits(loop('s32', inner)).doWhileForable).toBe(1);
+    // a last statement that does not update the counter from itself
+    expect(habits(loop('s32', '        h(i);\n        i = g(0);\n')).doWhileForable).toBe(0);
+    expect(habits(loop('s32', `${step}        h(i);\n`)).doWhileForable).toBe(0);
+    // an init the counter's type does not hold, a volatile counter, a counter declared nowhere here
+    expect(habits(loop('s32', step).replace('i = 0;', 'i = 200;').replace('i < 5', 'i != 7')).doWhileForable).toBe(1);
+    expect(habits(loop('s8', step).replace('i = 0;', 'i = 200;').replace('i < 5', 'i != 7')).doWhileForable).toBe(0);
+    expect(habits(loop('volatile s32', step)).doWhileForable).toBe(0);
+    expect(habits(loop('s32', step).replace('    s32 i;\n', '')).doWhileForable).toBe(0);
+    expect(habits(loop('u8', step).replace('void f(void) {\n    u8 i;', 'void f(u8 *i) {')).doWhileForable).toBe(1);
+  });
+
   test('placeholder parameters and loop tests reading a generic local', () => {
     const src =
       's32 f(s32 a0, u8 *a1, s32 n) {\n    s32 v0;\n    s32 i;\n    for (i = 0; i < n; i++) {\n    }\n    while (v0 < a0) {\n        v0++;\n    }\n    do {\n    } while (v0 != 0);\n    return v0;\n}\n';

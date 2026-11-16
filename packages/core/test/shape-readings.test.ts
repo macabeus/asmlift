@@ -187,6 +187,13 @@ describe("the tie-break's habit count (shape-habits.ts)", () => {
     expect(shapeHabitCount(merged)).toBe(1);
     expect(shapeHabitCount(elseAfter)).toBe(1);
     expect(shapeHabitCount('s32 f(s32 a0) {\n    if (a0 != 0) return 1;\n    return 0;\n}\n')).toBe(0);
+    const loop = (body: string): string =>
+      `void f(void) {\n    s32 i;\n    i = 0;\n    do {\n${body}        i = i + 1;\n    } while (i < 5);\n}\n`;
+    expect(shapeHabitCount(loop('        h(i);\n'))).toBe(1);
+    // the reading refuses a loop a `continue` leaves, so it is no habit a reading removes
+    expect(
+      shapeHabitCount(loop('        if (g(i) != 0) {\n            i = i + 2;\n            continue;\n        }\n')),
+    ).toBe(0);
   });
 });
 
