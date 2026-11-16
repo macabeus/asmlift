@@ -13,6 +13,7 @@ import {
   mentionedName,
   negateCond,
 } from '../l3/ast';
+import { forHeaderOf } from '../l3/forheader';
 
 // Spell a loop update at the place the bottom test reads the variable: the one `name` leaf becomes
 // `name++`. Returns null unless the rendered test MENTIONS `name` exactly once, and that mention is
@@ -83,45 +84,15 @@ export function stampOrderedBases(body: Stmt[], licensed: ReadonlySet<string> | 
   return body.map((s) => mapStmtExprs(s, stamp));
 }
 
-// Does any statement CONTINUE this loop (vs. a nested one)? A `continue` inside a nested while/dowhile/
-// for targets THAT loop, so we do not descend into them; but `if`/`switch` do not capture `continue`,
-// so we scan through those. The structurer emits `continue;` for an edge into the header of a `while
-// (1)` (structureRegion) and into the latch of a `for` (`forPlanAt`), so a `while` can hold one: this
-// guards the one case where the while→for re-bracketing would change semantics (a `continue` runs
-// `inc` under `for`, skips it under `while`).
-function hasEnclosingContinue(stmts: Stmt[]): boolean {
-  const scan = (s: Stmt): boolean => {
-    switch (s.k) {
-      case 'continue':
-        return true;
-      case 'if':
-        return s.then.some(scan) || s.else.some(scan);
-      case 'switch':
-        return s.cases.some((c) => c.body.some(scan)) || (s.default ?? []).some(scan);
-      case 'while':
-      case 'dowhile':
-      case 'for':
-        return false; // nested loop captures its own continue
-      default:
-        return false;
-    }
-  };
-  return stmts.some(scan);
-}
-
 // Re-spell an eligible test-at-top `while` as a `for` (quality only). PURELY cosmetic — the C
 // desugaring `for(init;cond;inc){body}` compiles identically to `init; while(cond){body; inc}`, so it
-// NEVER changes a byte-exact match. Conservative preconditions (a Ghidra `findLoopVariable`-style
-// recognition that moves NO op — the init already precedes the loop, the increment is already the
-// body's last statement):
-//   • the `while` is IMMEDIATELY preceded by `assign(iv, e0)` (the init literally precedes it);
-//   • the `while` cond references `iv`;
-//   • the body's LAST statement is `assign(iv, e1)` with `e1` referencing `iv` (a genuine self-update —
-//     the increment is literally the body's last op, not an unrelated trailing assign);
-//   • the body EXCLUDING that increment has no `continue` targeting THIS loop — a `continue` RUNS `inc`
-//     under `for` but SKIPS it under `while`, so folding the increment into the header would change
-//     semantics. This is the one hazard of the transform; all others are pure re-bracketing.
-// Any precondition failing leaves the `while` untouched. Runs bottom-up so inner loops convert first.
+// NEVER changes a byte-exact match. A Ghidra `findLoopVariable`-style recognition that moves NO op
+// (the init already precedes the loop, the increment is already the body's last statement), under
+// the header rule `/for-read` shares (l3/forheader.ts `forHeaderOf`: a plain init right before the
+// loop, a test that reads the counter, a self-updating last statement, no `continue` bound to this
+// loop — a `continue` RUNS `inc` under `for` but SKIPS it under `while`, the one hazard of the
+// transform). Any precondition failing leaves the `while` untouched. Runs bottom-up so inner loops
+// convert first.
 export function recognizeForLoops(stmts: Stmt[]): Stmt[] {
   const out: Stmt[] = [];
   for (const s0 of stmts) {
@@ -140,21 +111,11 @@ export function recognizeForLoops(stmts: Stmt[]): Stmt[] {
                 }
               : s0;
 
-    const prev = out[out.length - 1];
-    if (s.k === 'while' && s.body.length >= 1 && prev && prev.k === 'assign') {
-      const iv = prev.name;
-      const inc = s.body[s.body.length - 1];
-      if (
-        inc.k === 'assign' &&
-        inc.name === iv &&
-        exprVars(inc.value).has(iv) &&
-        exprVars(s.cond).has(iv) &&
-        !hasEnclosingContinue(s.body.slice(0, -1))
-      ) {
-        out.pop(); // the init assign moves into the for-header
-        out.push({ k: 'for', init: prev, cond: s.cond, inc, body: s.body.slice(0, -1) });
-        continue;
-      }
+    const header = s.k === 'while' ? forHeaderOf(out[out.length - 1], s.cond, s.body) : null;
+    if (s.k === 'while' && header !== null) {
+      out.pop(); // the init assign moves into the for-header
+      out.push({ k: 'for', init: header.init, cond: s.cond, inc: header.inc, body: header.body });
+      continue;
     }
     out.push(s);
   }

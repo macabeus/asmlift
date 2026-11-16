@@ -14,10 +14,13 @@
 //   • the test is `v OP L` (`<`, `<=`, `>`, `>=`, `!=`) with `v` bare on the left and both `K` and
 //     `L` integer literals in 0 .. 2^31-1, so the test's signedness cannot change its answer, and
 //     `K` is in range of `v`'s declared type (a narrower `v` would hold another value);
-//   • the body's last statement assigns `v` (it becomes the step), and no `continue` binds to
-//     this loop — a `continue` skips the step in the `do` and runs it in the `for`.
+//   • the loop passes the header rule the structurer's `while` → `for` shares (l3/forheader.ts
+//     `forHeaderOf`): the body's last statement updates `v` from itself (it becomes the step), and
+//     no `continue` binds to this loop — a `continue` skips the step in the `do` and runs it in
+//     the `for`.
 import type { IrType } from '../ir/types';
-import { type Expr, type SFn, type Stmt, isLoop, mapStmtLists, stmtLists } from './ast';
+import { type Expr, type SFn, type Stmt, mapStmtLists } from './ast';
+import { forHeaderOf } from './forheader';
 
 const MAX = 2 ** 31 - 1;
 const literal = (e: Expr): number | null =>
@@ -51,11 +54,6 @@ function fits(t: IrType | undefined, k: number): boolean {
   return t.kind === 'int' && k < 2 ** (t.signed ? t.width - 1 : t.width);
 }
 
-/** Does a `continue` in `body` bind to the loop that holds it — none inside a nested loop counts? */
-function continuesHere(body: readonly Stmt[]): boolean {
-  return body.some((s) => s.k === 'continue' || (!isLoop(s) && stmtLists(s).some(continuesHere)));
-}
-
 export function readDoWhileAsFor(sfn: SFn): SFn | null {
   const types = new Map<string, IrType>([
     ...sfn.params.map((p) => [p.name, p.type] as const),
@@ -67,23 +65,14 @@ export function readDoWhileAsFor(sfn: SFn): SFn | null {
     for (const s0 of stmts) {
       const s = mapStmtLists(s0, list);
       const init = out[out.length - 1];
-      if (s.k === 'dowhile' && init?.k === 'assign' && init.compound !== true) {
-        const v = init.name;
-        const k = literal(init.value);
+      const header = s.k === 'dowhile' ? forHeaderOf(init, s.cond, s.body) : null;
+      if (s.k === 'dowhile' && header !== null) {
+        const v = header.init.name;
+        const k = literal(header.init.value);
         const c = s.cond;
         const l = c.k === 'bin' && c.l.k === 'var' && c.l.name === v ? literal(c.r) : null;
-        const step = s.body[s.body.length - 1];
-        if (
-          k !== null &&
-          l !== null &&
-          c.k === 'bin' &&
-          holds(c.op, k, l) &&
-          fits(types.get(v), k) &&
-          step?.k === 'assign' &&
-          step.name === v &&
-          !continuesHere(s.body)
-        ) {
-          out[out.length - 1] = { k: 'for', init, cond: c, inc: step, body: s.body.slice(0, -1) };
+        if (k !== null && l !== null && c.k === 'bin' && holds(c.op, k, l) && fits(types.get(v), k)) {
+          out[out.length - 1] = { k: 'for', init: header.init, cond: c, inc: header.inc, body: header.body };
           changed = true;
           continue;
         }

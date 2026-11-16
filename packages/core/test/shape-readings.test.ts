@@ -13,6 +13,7 @@ import { splitReturnedMerges } from '../src/l3/retsplit';
 import { breakFinalSwitchReturns } from '../src/l3/switchbreak';
 import { enumerateCandidates } from '../src/rank';
 import { shapeHabitCount } from '../src/shape-habits';
+import { recognizeForLoops } from '../src/structure/ast-rewrites';
 import { ARMV4T_AGBCC } from '../src/target';
 
 const v = (name: string): Expr => ({ k: 'var', name });
@@ -154,6 +155,21 @@ describe('/for-read: a do/while whose first test passes, as a for', () => {
     expect(readDoWhileAsFor(loop(0, '<', 6, [step, call('g')]))).toBeNull();
     const fn = fnOf([set('v0', c(0)), { k: 'dowhile', cond: bin('<', v('v0'), v('a0')), body: [step] }, ret(v('v0'))]);
     expect(readDoWhileAsFor(fn)).toBeNull();
+  });
+
+  test('declines a last statement that does not update the counter from itself, as the while → for does', () => {
+    const fresh = set('v0', { k: 'call', fn: 'h', args: [] });
+    const body = [call('g', v('v0')), fresh];
+    expect(readDoWhileAsFor(loop(0, '<', 10, body))).toBeNull();
+    const asWhile: Stmt[] = [set('v0', c(0)), { k: 'while', cond: bin('<', v('v0'), c(10)), body }];
+    expect(recognizeForLoops(asWhile).map((s) => s.k)).toEqual(['assign', 'while']);
+    // with a self-update, both read the loop as a for
+    expect(readDoWhileAsFor(loop(0, '<', 10, [call('g', v('v0')), step]))).not.toBeNull();
+    expect(
+      recognizeForLoops([set('v0', c(0)), { k: 'while', cond: bin('<', v('v0'), c(10)), body: [call('g'), step] }]).map(
+        (s) => s.k,
+      ),
+    ).toEqual(['for']);
   });
 
   test('declines an init the counter type cannot hold', () => {
