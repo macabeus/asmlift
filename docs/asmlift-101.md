@@ -216,11 +216,14 @@ Language **backends** then print L3 as concrete source: C, Pascal, and a deliber
 C++ (`packages/core/src/backend/`). One neutral AST, three output languages — every language-specific
 decision (Pascal's `:=`, C's `?:`) lives in a backend, never in the tower. The one node that breaks
 the rule says so where it is declared: `postincr` is C's `n++`, and it is in the tower because the
-asm decides it rather than the output language (`docs/level-tower.md`). Two more are spelling and
-nothing else, `const.hex` and `assign.compound`, set only by the C family's readability polish
-(`packages/core/src/l3/polish/`). That polish runs last inside the C printer, where the caller asks
-for it (`polished(backend, facts)`: the CLI, the benchmark and the web app do, the library default
-does not), and compiles to the same bytes as the text before it. Decisions that read printed text
+asm decides it rather than the output language (`docs/level-tower.md`). Two more are C spelling,
+`const.hex` and `assign.compound`, which the C family's readability polish sets
+(`packages/core/src/l3/polish/`) and Pascal ignores. `const.hex` is spelling and nothing else.
+`assign.compound` is also set by the `/compound-expr` variation (`packages/core/src/l3/compoundexpr.ts`)
+on a ranked candidate, because for a non-literal `x += e` IDO 7.1 emits other bytes than for
+`x = x + e`: there the asm decides it, as it does `postincr`. The polish runs last inside the C
+printer, where the caller asks for it (`polished(backend, facts)`: the CLI, the benchmark and the web
+app do, the library default does not), and compiles to the same bytes as the text before it. Decisions that read printed text
 measure that earlier text, the backend's `draft`.
 
 ### 2.5 Idioms — when the compiler writes riddles

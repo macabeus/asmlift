@@ -3,14 +3,17 @@
 //
 // WHAT MAY LIVE HERE. A rewrite whose C is the SAME PROGRAM in every dialect the printer serves and
 // compiles to the same bytes on every compiler the bench covers, at every level the pass fires at —
-// `*p` as `p[0]`, `x = x + 1` as `x++`. Not a rewrite the compiler can see: an early return's
-// polarity, a narrower declared type or a `do`/`while` turned `for` move code on agbcc, so they are
-// ranked candidates (a variation), never a polish. Nor is dropping the `else` after a branch that
-// returns, which reads as the same program and is NOT the same tree to agbcc: in `sa3:VramMalloc`'s
-// inner loop, `if (c) { return x; } else { if (d) break; v2 = …; }` and its flattened twin allocate
-// registers differently (agbcc -O2 -mthumb-interwork, compiled; 9 against 35 or more). Each rewrite
-// is its own module, states the condition under which it does not fire, and is pinned by its own
-// test.
+// `*p` as `p[0]`, `x = x + 1` as `x++`. Not a rewrite the compiler can see on SOME compiler or
+// level, however rarely: those are ranked candidates (a variation, in its own L3 module), never a
+// polish. An early return's polarity and a narrower declared counter move code on agbcc -O2; a
+// non-literal `x += e` swaps IDO 7.1's add operands (l3/compoundexpr.ts); a `do`/`while` read as
+// `for` compiles alike at every optimizing level for a word counter, agbcc's included, but not on
+// mwcc -O4 for a narrow counter or a pointer walk, nor at any -O0 (l3/forread.ts). Dropping the
+// `else` after a branch that returns compiled alike on every pair measured at an optimizing level
+// (`sa3:VramMalloc` under its own recipe, and 13 probe pairs on agbcc, IDO 7.1, mwcc 2.4.2 and KMC
+// gcc) and differed at agbcc and gcc 2.7.2 -O0 for a boolean return; it is not a polish only because
+// no pass for it has been built and measured at every level it would fire at. Each rewrite here is
+// its own module, states the condition under which it does not fire, and is pinned by its own test.
 //
 // WHERE IT RUNS, and why that is the whole design. The polish runs inside `emitCFamily`, last, on the
 // tree the printer is about to print (after the pointer-write legalization, so it sees every cast the

@@ -95,6 +95,7 @@ import {
   NO_PIN_KINDS,
   ORDERBASE_HOISTS,
   PRE_RESPELL_VARIATIONS,
+  SHAPE_READINGS,
   SIGNEDNESS,
   STACKED_SUBSETS,
   STRUCTURE_VARIATIONS,
@@ -104,8 +105,10 @@ import {
   applyStacked,
   createdLocals,
   firstFired,
+  isShapeReading,
   sameBases,
 } from './rank-variations';
+import { shapeHabitCount } from './shape-habits';
 import { type Stillborn, stillbornVerdict } from './stillborn';
 import {
   DefaultAcceptsMemo,
@@ -602,6 +605,8 @@ export function enumerateCandidates(
   opts: EnumerateOptions = {},
 ): Candidate[] {
   const backend = opts.backend ?? cBackend;
+  /** The SHAPE READINGS this backend can spell (rank-variations.ts SHAPE_READINGS `needs`). */
+  const shapeReadings = SHAPE_READINGS.filter((r) => r.needs === undefined || backend[r.needs]);
   /** Report a setting that THREW through `onEnumerationError`, as the variations it names (none for
    *  the function's own tree). */
   const reportThrow = (variations: readonly Variation[], e: unknown): void =>
@@ -1232,7 +1237,9 @@ export function enumerateCandidates(
     // kind of independent dimension as signedness —
     // so they are crossed with every source rather than paired (two members of the table may
     // compete for one node, and its order decides; rank-variations.ts); a third blanket composition needs
-    // the same argument, not just a row. And a specific PAIRING is admitted on one of two
+    // the same argument, not just a row. The SHAPE READINGS are that third one, on that argument and
+    // narrower: each composed ALONE onto each respell variation's source, crossed with nothing
+    // (rank-variations.ts SHAPE_READINGS). And a specific PAIRING is admitted on one of two
     // grounds, never on "it might help". FIRST, a row demands the joint spelling AND that
     // spelling is reachable from neither variation alone: /livebase × /indexed, × /sinkinit,
     // × /nearbase and × /coalesce, /scopebase × /coalesce, plus /vol-store × /unreduce and that
@@ -1284,6 +1291,38 @@ export function enumerateCandidates(
     // The PRE-RESPELL loop below has `fn` in scope and no such invariant, so it runs it there.
     // A respell variation returns its tree, or `{ sfn, needsProof }` when it cannot establish its own
     // semantics from inside the pass (Candidate.matchOnly carries the argument).
+    let onlyRespelled: typeof SHAPE_READINGS | undefined;
+    const readsOnlyRespelled = (): typeof SHAPE_READINGS =>
+      (onlyRespelled ??= shapeReadings.filter((r) => {
+        if (!offeredOn(target, [r.name])) {
+          return false;
+        }
+        try {
+          return r.apply(sfn) === null;
+        } catch {
+          return false; // its own `respell` below reports the throw
+        }
+      }));
+    /** The boundary contracts a tree derived from `from` is held to, in ONE copy: the respelled
+     *  tree against the default, and every tree composed onto a respelled one (the shape readings,
+     *  the stacked shapes). With `minted`, the placement differential too (`assertPlacementSurvives`):
+     *  a composition may MOVE statements a placing variation put — `/ret-split` lifts an arm out
+     *  below its `if`, `/for-read` moves an init and a step into a `for` header, a stacked shape
+     *  reorders — so a def it moved below a read of the local the variation placed is dropped,
+     *  whichever composition moved it. */
+    const assertDerivedContracts = (from: SFn, to: SFn, minted?: ReadonlySet<string>): void => {
+      assertResolved(to);
+      assertDerefsTyped(to);
+      assertLocalsWritten(to);
+      assertPostIncrUnshared(to);
+      assertNoOrphanedLocals(from, to);
+      assertLocalStorageStaysInteger(from, to);
+      assertFrameUnionsViewed(to);
+      assertCaseGotosNarrow(to);
+      if (minted !== undefined) {
+        assertPlacementSurvives(from, to, minted);
+      }
+    };
     const respell = (variations: readonly Variation[], make: () => RespellResult, alreadyShaped = false): void => {
       if (!offeredOn(target, variations)) {
         return;
@@ -1295,14 +1334,12 @@ export function enumerateCandidates(
         }
         const alt = 'sfn' in made ? made.sfn : made;
         const proof: { matchOnly?: true } = 'sfn' in made && made.needsProof ? { matchOnly: true } : {};
-        assertResolved(alt);
-        assertDerefsTyped(alt);
-        assertLocalsWritten(alt);
-        assertPostIncrUnshared(alt);
-        assertNoOrphanedLocals(sfn, alt);
-        assertLocalStorageStaysInteger(sfn, alt);
-        assertFrameUnionsViewed(alt);
-        assertCaseGotosNarrow(alt);
+        // The locals this variation minted, for the placement differential every tree derived from
+        // `alt` is held to (`assertDerivedContracts`): a name diff, computed once and only if a
+        // derived tree is built.
+        let mintedByAlt: ReadonlySet<string> | undefined;
+        const minted = (): ReadonlySet<string> => (mintedByAlt ??= createdLocals(sfn, alt));
+        assertDerivedContracts(sfn, alt);
         sources.push({
           variations,
           ...emitted(backend, alt),
@@ -1316,6 +1353,33 @@ export function enumerateCandidates(
         // orthogonal to the respell variations outside the table; subsets compose in the fixed
         // table order, which decides between two members that compete for one node. A stacked variation that
         // never fires declines and costs nothing.
+        // The SHAPE READINGS composed onto this respell variation's source, each alone
+        // (rank-variations.ts SHAPE_READINGS carries the admission argument). Not onto a reading's
+        // own source, nor a stacked one: the readings are offered on the un-respelled tree, and on
+        // the stacked sources derived from it, by their own `respell` below. And only a reading
+        // that finds no site on the un-respelled tree (`readsOnlyRespelled`): there the shape
+        // exists only because a respell variation built it.
+        if (!alreadyShaped && !variations.some(isShapeReading)) {
+          for (const reading of readsOnlyRespelled()) {
+            try {
+              const read = reading.apply(alt);
+              if (read === null) {
+                continue;
+              }
+              assertDerivedContracts(alt, read, minted());
+              sources.push({
+                variations: [...variations, reading.name],
+                ...emitted(backend, read),
+                ...refsOf(read),
+                ...volOf(read),
+                ...proof,
+                ...cmpProof(read),
+              });
+            } catch (e) {
+              reportThrow([...preRespellVariations, ...variations, reading.name], e);
+            }
+          }
+        }
         if (!alreadyShaped) {
           // A shape may REORDER statements, and it is derived after a variation has placed its defs —
           // so the placement is re-checked on the shaped tree (contracts.ts). Differential: judged
@@ -1336,7 +1400,6 @@ export function enumerateCandidates(
           // fan with nothing measured to license it. What keeps it uninhabited is `initFirstGuards`,
           // which moves only const or pure-read assigns and so cannot lift a read of a base local
           // above its init.
-          const minted = createdLocals(sfn, alt);
           const firedSets = new Set<string>();
           for (const subset of STACKED_SUBSETS) {
             // ONE TRY PER SHAPE — a shape is its own candidate and fails as its own candidate.
@@ -1348,15 +1411,7 @@ export function enumerateCandidates(
               const shaped = applyStacked(subset, alt);
               if (shaped !== null && firstFired(firedSets, shaped.variations)) {
                 shapeVariations = shaped.variations;
-                assertResolved(shaped.out);
-                assertDerefsTyped(shaped.out);
-                assertLocalsWritten(shaped.out);
-                assertPostIncrUnshared(shaped.out);
-                assertNoOrphanedLocals(alt, shaped.out);
-                assertLocalStorageStaysInteger(alt, shaped.out);
-                assertFrameUnionsViewed(shaped.out);
-                assertCaseGotosNarrow(shaped.out);
-                assertPlacementSurvives(alt, shaped.out, minted);
+                assertDerivedContracts(alt, shaped.out, minted());
                 sources.push({
                   variations: [...variations, ...shaped.variations],
                   ...emitted(backend, shaped.out),
@@ -1410,6 +1465,13 @@ export function enumerateCandidates(
     // referees; its gate keeps it off every shape where the fold rule does not apply, which is
     // every operand but a shared subtraction.
     respell(['zerosub'], () => zeroSubNegates(sfn));
+    // The SHAPE READINGS (rank-variations.ts SHAPE_READINGS; each module states its compiled
+    // pairs), offered here on the un-respelled tree; `respell` composes each onto every other
+    // respell variation's source. `/ret-split`'s polarity is the structured tree's, so `/flip-join`
+    // gives the other one.
+    for (const reading of shapeReadings) {
+      respell([reading.name], () => reading.apply(sfn));
+    }
     // `/volatile` — declare a pointer local holding a NUMERIC address as pointing to volatile
     // data (l3/volatileptr.ts). A raw constant has no declaration anywhere, so the original
     // qualifier is not derivable — and it is codegen-visible (a volatile MEM is barred from
@@ -3003,7 +3065,14 @@ function stillbornNote(stillborn: Stillborn, fan: number): string {
  *  (apps/benchmark/src/eval/quality.ts `lines`), for the same reason `castCount` is: ranking must
  *  not optimize for something the published metric measures differently.
  *
- *  ALL THREE COUNT THE PUBLISHED TEXT, after the readability polish (l3/polish/), for the same
+ *  THE SHAPE HABITS next (shape-habits.ts `shapeHabitCount`): an `else` after a return, a merged
+ *  local that is only returned and a `do`/`while` a reader writes as `for`, which the shape
+ *  readings remove, and a shift idiom, which no reading removes (it prefers a candidate another
+ *  variation spelled without the shifts). The readability report counts each the same way. Last
+ *  of the text terms, so it decides only between two spellings that tie on everything above, the
+ *  line count included.
+ *
+ *  ALL FOUR COUNT THE PUBLISHED TEXT, after the readability polish (l3/polish/), for the same
  *  reason again: the report counts that text. A tie-break runs only among equal scores, so it moves
  *  no score; what it picks is the text the reader gets.
  *
@@ -3030,6 +3099,7 @@ export function compareScored<S extends { score: number }>(
     gotoCount(a.source) - gotoCount(b.source) ||
     castCount(a.source) - castCount(b.source) ||
     lineCount(a.source) - lineCount(b.source) ||
+    shapeHabitCount(a.source) - shapeHabitCount(b.source) ||
     a.order - b.order
   );
 }

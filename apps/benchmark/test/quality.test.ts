@@ -17,6 +17,9 @@ const NO_HABITS = {
   unusedLocals: 0,
   placeholderParams: 0,
   genericCounters: 0,
+  joinedReturn: 0,
+  shiftTruth: 0,
+  doWhileForable: 0,
 };
 
 describe('assessQuality (pinned)', () => {
@@ -171,6 +174,52 @@ describe('assessQuality habit counters (counted, never score-penalized)', () => 
     expect(h.unusedLocals).toBe(1); // v5
   });
 
+  test('a merged local returned after a two-armed if', () => {
+    const src =
+      's32 f(s32 a0) {\n    s32 v0;\n    if (a0 != 0) {\n        g();\n        v0 = a0 + 1;\n    } else {\n        v0 = 0;\n    }\n    return v0;\n}\n';
+    expect(habits(src).joinedReturn).toBe(1);
+    // the arms set another local, or the else arm ends elsewhere
+    expect(habits(src.replace('v0 = 0;', 'v1 = 0;')).joinedReturn).toBe(0);
+    expect(habits(src.replace('        v0 = 0;\n', '        g();\n')).joinedReturn).toBe(0);
+  });
+
+  test('a truth test of a shifted-out byte and an extension spelled as two shifts', () => {
+    const src =
+      's32 f(s32 a0) {\n    if (g(a0) << 24 != 0) {\n        return (a0 << 16) >> 16;\n    }\n    return (a0 << 24) >> 16;\n}\n';
+    expect(habits(src).shiftTruth).toBe(2); // not the mixed `<< 24) >> 16`
+  });
+
+  test('a do/while whose literal init already passes its literal test', () => {
+    const loop = (init: string, test: string): string =>
+      `void f(void) {\n    u32 i;\n    i = ${init};\n    do {\n        g(i);\n        i = i + 1;\n    } while (i ${test});\n}\n`;
+    expect(habits(loop('0', '<= 6')).doWhileForable).toBe(1);
+    expect(habits(loop('7', '<= 6')).doWhileForable).toBe(0);
+    expect(habits(loop('0', '!= a0')).doWhileForable).toBe(0);
+  });
+
+  test("a do/while counted as for-able only where /for-read takes it: its refusals are the counter's", () => {
+    const loop = (decl: string, body: string): string =>
+      `void f(void) {\n    ${decl} i;\n    i = 0;\n    do {\n${body}    } while (i < 5);\n}\n`;
+    const step = '        i = i + 1;\n';
+    expect(habits(loop('s32', `        h(i);\n${step}`)).doWhileForable).toBe(1);
+    expect(habits(loop('s32', '        h(i);\n        i++;\n')).doWhileForable).toBe(1);
+    // a `continue` bound to this loop skips the step the `for` would run
+    const cont = `        if (g(i) != 0) {\n            i = i + 2;\n            continue;\n        }\n        h(i);\n${step}`;
+    expect(habits(loop('s32', cont)).doWhileForable).toBe(0);
+    // one bound to an inner loop does not
+    const inner = `        do {\n            if (g(i) != 0) {\n                continue;\n            }\n        } while (h(i) != 0);\n${step}`;
+    expect(habits(loop('s32', inner)).doWhileForable).toBe(1);
+    // a last statement that does not update the counter from itself
+    expect(habits(loop('s32', '        h(i);\n        i = g(0);\n')).doWhileForable).toBe(0);
+    expect(habits(loop('s32', `${step}        h(i);\n`)).doWhileForable).toBe(0);
+    // an init the counter's type does not hold, a volatile counter, a counter declared nowhere here
+    expect(habits(loop('s32', step).replace('i = 0;', 'i = 200;').replace('i < 5', 'i != 7')).doWhileForable).toBe(1);
+    expect(habits(loop('s8', step).replace('i = 0;', 'i = 200;').replace('i < 5', 'i != 7')).doWhileForable).toBe(0);
+    expect(habits(loop('volatile s32', step)).doWhileForable).toBe(0);
+    expect(habits(loop('s32', step).replace('    s32 i;\n', '')).doWhileForable).toBe(0);
+    expect(habits(loop('u8', step).replace('void f(void) {\n    u8 i;', 'void f(u8 *i) {')).doWhileForable).toBe(1);
+  });
+
   test('placeholder parameters and loop tests reading a generic local', () => {
     const src =
       's32 f(s32 a0, u8 *a1, s32 n) {\n    s32 v0;\n    s32 i;\n    for (i = 0; i < n; i++) {\n    }\n    while (v0 < a0) {\n        v0++;\n    }\n    do {\n    } while (v0 != 0);\n    return v0;\n}\n';
@@ -178,5 +227,13 @@ describe('assessQuality habit counters (counted, never score-penalized)', () => 
     expect(h.placeholderParams).toBe(2); // a0, a1; not n
     expect(h.genericCounters).toBe(2); // the `while` and the `do`'s test; not the `for` over i
     expect(habits('void f(void) {\n}\n').placeholderParams).toBe(0);
+    // a function pointer's own list is not split, and its name and an array's are both read
+    expect(habits('s32 f(s32 a0, void (*a1)(s32, s32)) {\n    a1(a0, 1);\n    return a0;\n}\n').placeholderParams).toBe(
+      2,
+    );
+    expect(habits('s32 f(u8 a0[4], s32 a1) {\n    return a0[a1];\n}\n').placeholderParams).toBe(2);
+    expect(habits('s32 f(s32 (*cb)(s32 a0), s32 a1) {\n    return cb(a1);\n}\n').placeholderParams).toBe(1);
+    // a pointer to an array is read out of its parentheses too
+    expect(habits('s32 f(s32 a0, s32 (*a1)[4]) {\n    return a1[a0][0];\n}\n').placeholderParams).toBe(2);
   });
 });

@@ -1237,6 +1237,92 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     },
     implementedIn: l3('zerosub'),
   },
+  'ret-split': {
+    title: 'Return from each arm',
+    summary: 'an if whose arms set a local that is then only returned returns from each arm instead',
+    detail:
+      '`if (c) { v = a; } else { v = b; } return v;` becomes `if (c) { return a; } return b;` when `v` is ' +
+      'declared at the return type: one program, since both convert `a` to the same type and nothing reads ' +
+      '`v` afterwards. The assembly does not say whether the source merged the value first. Which arm ' +
+      'returns first is the branch sense of the tree it rides, so `/flip-join` gives the other polarity.',
+    compilerBehavior:
+      'Every compiler builds the merged value and the two returns alike on some bodies and differently on ' +
+      "others: MathUtil_Div16Shift's compiles alike on agbcc and apart on IDO and mwcc.",
+    offeredWhen: {
+      when: 'An if with both arms before `return v;`, each arm ending by setting `v` (a local at the return type) or by leaving.',
+      decidedBy: { symbol: 'splitReturnedMerges', file: l3('retsplit') },
+    },
+    example: {
+      compiler: 'agbcc',
+      unit: 's32 example(s32 a, s32 b) { @ }',
+      before: 's32 r; if (a > b) { r = a - b; } else { r = 7; } return r;',
+      after: 'if (a > b) { return a - b; } return 7;',
+    },
+    implementedIn: l3('retsplit'),
+    seeAlso: ['flip-join', 'ret-join'],
+  },
+  'switch-break': {
+    title: 'Break out of a final switch',
+    summary: "a void function's final switch leaves its arms by `break;` instead of `return;`",
+    detail:
+      'When a switch is the last thing a void function does, leaving an arm and returning are one program, ' +
+      'and so are an empty `default:` and none. Each `return;` inside an arm becomes `break;`, and an empty ' +
+      '`default:` is dropped.',
+    compilerBehavior: 'IDO 7.1 and mwcc 2.4.2 lay out an arm that returns and an arm that breaks differently.',
+    offeredWhen: {
+      when: 'A void function whose last statement is a switch, or a switch then `return;`, with an arm that returns.',
+      decidedBy: { symbol: 'breakFinalSwitchReturns', file: l3('switchbreak') },
+    },
+    example: {
+      compiler: 'ido',
+      unit: 'void example(u32 x, s32 *p) { @ }',
+      before: 'switch (x) { case 0: *p = 1; return; case 1: *p = 2; return; default: *p = 0; return; }',
+      after: 'switch (x) { case 0: *p = 1; break; case 1: *p = 2; break; default: *p = 0; break; }',
+    },
+    implementedIn: l3('switchbreak'),
+  },
+  'compound-expr': {
+    title: 'Compound assignment of an expression',
+    summary: '`x = x + e` is written `x += e` for an `e` that is not a literal',
+    detail:
+      '`x += e` is `x = x + e` with `x` evaluated once, so for a plain local it is the same program. The ' +
+      'printer already writes it for a literal `e`; for any other `e` it is a candidate, because the ' +
+      'compiler can build the two differently.',
+    compilerBehavior: "IDO 7.1 orders the add's operands the other way round for the compound.",
+    offeredWhen: {
+      when: 'A word or pointer local or parameter, not volatile, assigned itself plus or minus a non-literal.',
+      decidedBy: { symbol: 'compoundExpressionAssignments', file: l3('compoundexpr') },
+    },
+    example: {
+      compiler: 'ido',
+      unit: 'int example(int *a, int *b, int n) { int s, i; s = 0; for (i = 0; i < n; i++) { @ } return s; }',
+      before: 's = s + a[i] * b[i];',
+      after: 's += a[i] * b[i];',
+    },
+    implementedIn: l3('compoundexpr'),
+  },
+  'for-read': {
+    title: 'For loop',
+    summary: 'a do/while whose first test is known to pass is written as a for',
+    detail:
+      '`i = K; do { B; i = step; } while (i < L);` with `K < L` is `for (i = K; i < L; i = step) { B }`: the ' +
+      "for's first test holds, so both run the body and the step and then test. Compilers turn such a for " +
+      'into exactly that do/while, so the assembly does not say which the source wrote.',
+    compilerBehavior:
+      'mwcc -O4 schedules a narrow counter or a pointer walk differently for the two; at -O0 every compiler ' +
+      'builds the for with its own entry test.',
+    offeredWhen: {
+      when: 'A do/while after `v = K;` whose literal test of `v` passes for `K`, ending in a self-update of `v`, with no `continue`.',
+      decidedBy: { symbol: 'readDoWhileAsFor', file: l3('forread') },
+    },
+    example: {
+      compiler: 'mwcc',
+      unit: 'void use(s32); void example(void) { u8 i; @ }',
+      before: 'i = 0; do { if (i & 1) use(i); i++; } while (i < 7);',
+      after: 'for (i = 0; i < 7; i++) { if (i & 1) use(i); }',
+    },
+    implementedIn: l3('forread'),
+  },
   volatile: {
     title: 'Volatile pointer local',
     summary: 'a pointer local holding a numeric address points at volatile data',

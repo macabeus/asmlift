@@ -1781,6 +1781,44 @@ export const SYNTHETIC: SynthSpec[] = [
       vtailret: { returnsVoid: true },
     },
   },
+  // AN EARLY RETURN WHERE A MERGED LOCAL COULD STAND (pokeemerald MathUtil_Div16Shift's body). The
+  // source returns from the arm that tests for zero and then returns the quotient. On agbcc the
+  // published winner is `/flip-join/ret-split`, which ties the merged spelling and prints the source's
+  // shape; on IDO and mwcc, where the probe pair compiles apart, other candidates reach it.
+  {
+    sym: 'retsplit_div',
+    src: 's32 retsplit_div(u8 a0, u16 a1, s16 a2){ if (a2 == 0) { return 0; } return (s16)(((s16)a1 << a0) / a2); }',
+    features: ['branch'],
+    toolchains: ALL,
+  },
+  // THE SAME SHAPE WHERE agbcc SEES IT TOO: returning from each arm of a subtraction-or-constant
+  // choice is other code than the merged local on agbcc, IDO, gcc 2.7.2 and KMC gcc (l3/retsplit.ts).
+  {
+    sym: 'retsplit_sub',
+    src: 's32 retsplit_sub(s32 a, s32 b){ if (a > b) { return a - b; } return 7; }',
+    features: ['branch'],
+    toolchains: ALL,
+  },
+  // A `for` over a `u8` counter whose first test is known to pass, the pair mwcc -O4 schedules apart
+  // from the `do`/`while` it rotates into (l3/forread.ts). No toolchain matches it yet.
+  {
+    sym: 'forread_u8',
+    src: 'void use(s32 x);\nvoid forread_u8(void){ u8 i; for (i = 0; i < 7; i++) { if (i & 1) use(i); } }',
+    features: ['narrow'],
+    toolchains: ALL,
+    ctx: 'void use(s32 x); void forread_u8(void);',
+    proto: { use: { params: 1, returnsVoid: true }, forread_u8: { returnsVoid: true } },
+  },
+  // A void function's final switch whose every arm, the default included, leaves by `break;`. IDO
+  // 7.1 builds the default's `break;` apart from a `return;` (l3/switchbreak.ts).
+  {
+    sym: 'sw_brkall',
+    src: 'void sw_brkall(u32 x, s32 *p){ switch (x) { case 0: *p = 1; break; case 1: *p = 2; break; default: *p = 0; break; } }',
+    features: ['store'],
+    toolchains: ALL,
+    ctx: 'void sw_brkall(u32,s32*);',
+    proto: { sw_brkall: { returnsVoid: true } },
+  },
   // Dense 8-case switch → a jump table on every toolchain (agbcc `mov pc` inline table; IDO/KMC
   // `jr` + `.rodata`; mwcc `bctr` + `.data`); MIPS/PPC recovery needs the AsmData side-table.
   {

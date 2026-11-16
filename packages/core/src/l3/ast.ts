@@ -331,8 +331,9 @@ export type BinOp =
 
 export type Stmt =
   // `compound` is SPELLING, like `const.hex`: print `x += e` / `x++` for a value that is the
-  // target plus or minus `e`. Set only by the readability polish (l3/polish/compound.ts), on a
-  // local the compilers spell the same either way.
+  // target plus or minus `e`. Set by the readability polish (l3/polish/compound.ts), on a local the
+  // compilers spell the same either way, and by the `/compound-expr` variation (l3/compoundexpr.ts),
+  // a ranked candidate where they do not.
   | { k: 'assign'; name: string; value: Expr; compound?: true }
   // A memory write to an lvalue expression (`index` → `base[idx] = value` / `*base = value`;
   // `field` → `base->name = value`). Carrying the lvalue as an Expr keeps stores symmetric with

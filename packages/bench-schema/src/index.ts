@@ -77,6 +77,16 @@ export interface QualityHabits {
   /** loop tests (`while (…)`, a `for`'s condition) that read a `vN` local, where a counter reads as
    *  `i` */
   genericCounters: number;
+  /** `if (c) { v = a; } else { v = b; } return v;`, where a reader returns from each arm */
+  joinedReturn: number;
+  /** a truth test of a shifted-out byte (`x << 24 != 0`) or a sign/zero extension spelled as two
+   *  shifts (`(x << 16) >> 16`), where a reader writes the narrowing cast */
+  shiftTruth: number;
+  /** `v = K; do { …; v = …v…; } while (v OP L);` whose first test already holds, where a reader
+   *  writes `for`: the loops `/for-read` takes (its counter a parameter or local whose type holds
+   *  `K`, its last statement the step, no `continue` bound to it), so the count is what a reading
+   *  can remove */
+  doWhileForable: number;
 }
 
 /** objdiff difference-kind tally (structurally mirrors @match-kit/scoring's DiffBreakdown — spelled

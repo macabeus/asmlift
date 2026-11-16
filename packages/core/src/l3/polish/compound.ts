@@ -42,10 +42,10 @@ export function compoundSum(target: Expr, value: Expr): { op: '+' | '-'; rhs: Ex
 
 const wordOrPointer = (t: IrType): boolean => (t.kind === 'int' && t.width === 32) || t.kind === 'ptr';
 
-export function compoundAssignments(fn: SFn, facts: PolishFacts): SFn {
-  if (facts.literal) {
-    return fn;
-  }
+/** `fn` with every statement `valueOk` admits marked compound, over the targets the header admits.
+ *  Shared with the `/compound-expr` variation (l3/compoundexpr.ts), which marks the non-literal
+ *  values this polish leaves alone. */
+export function markCompound(fn: SFn, valueOk: (rhs: Expr) => boolean): { fn: SFn; marked: number } {
   const names = new Set([
     ...fn.params.filter((p) => wordOrPointer(p.type)).map((p) => p.name),
     ...fn.locals.filter((l) => !l.volatile && wordOrPointer(l.type)).map((l) => l.name),
@@ -55,16 +55,26 @@ export function compoundAssignments(fn: SFn, facts: PolishFacts): SFn {
       names.delete(l.name);
     }
   }
-  const valueOk = (rhs: Expr): boolean => rhs.k === 'const' && Number.isInteger(rhs.value);
+  let marked = 0;
   const one = (s: Stmt): Stmt => {
-    if (s.k === 'assign' && names.has(s.name)) {
+    if (s.k === 'assign' && names.has(s.name) && s.compound !== true) {
       const sum = compoundSum({ k: 'var', name: s.name }, s.value);
-      return sum && valueOk(sum.rhs) ? { ...s, compound: true } : s;
+      if (sum && valueOk(sum.rhs)) {
+        marked++;
+        return { ...s, compound: true };
+      }
+      return s;
     }
     if (s.k === 'for') {
       return { ...s, init: one(s.init), inc: one(s.inc), body: s.body.map(one) };
     }
     return mapStmtLists(s, (list) => list.map(one));
   };
-  return { ...fn, body: fn.body.map(one) };
+  return { fn: { ...fn, body: fn.body.map(one) }, marked };
+}
+
+export const literal = (rhs: Expr): boolean => rhs.k === 'const' && Number.isInteger(rhs.value);
+
+export function compoundAssignments(fn: SFn, facts: PolishFacts): SFn {
+  return facts.literal ? fn : markCompound(fn, literal).fn;
 }

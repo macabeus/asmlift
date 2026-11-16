@@ -9,6 +9,7 @@
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
+import { pascalBackend } from '../src/backend/pascal';
 import type { LanguageBackend } from '../src/l3/ast';
 import { NoScorableCandidateError, NoSpellableCandidateError, enumerateCandidates, rankBy } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
@@ -277,4 +278,40 @@ test('a refusal of a RESPELL VARIATION on a pre-respell tree carries the pre-res
   expect(seen.length).toBeGreaterThan(0);
   // every report lists `unmerge` ahead of the respell variation that failed
   expect(seen.every((v) => hasVariation(v.slice(0, -1), 'unmerge'))).toBe(true);
+});
+
+// A SHAPE READING THE BACKEND CANNOT SPELL IS NOT OFFERED. `/ret-split` always leaves a `return`
+// the other arm follows, which Pascal (`spellsEarlyReturn: false`) refuses on every input, so on
+// that backend each of its candidates would only be a reported throw.
+// `if (a1 < 0) v = a0 + 200; else v = g(a1); return v;`
+const MERGED = [
+  'f:',
+  '\tpush\t{r4, lr}',
+  '\tadd\tr4, r0, #0',
+  '\tcmp\tr1, #0',
+  '\tbge\t.L2',
+  '\tadd\tr4, #0xc8',
+  '\tb\t.L3',
+  '.L2:',
+  '\tadd\tr0, r1, #0',
+  '\tbl\tg',
+  '\tadd\tr4, r0, #0',
+  '.L3:',
+  '\tadd\tr0, r4, #0',
+  '\tpop\t{r4}',
+  '\tpop\t{r1}',
+  '\tbx\tr1',
+].join('\n');
+
+test('a shape reading the backend has no spelling for is not offered on it', () => {
+  expect(enumerateCandidates('f', MERGED, ARMV4T_AGBCC).some((c) => hasVariation(c.variations, 'ret-split'))).toBe(
+    true,
+  );
+  const seen: string[] = [];
+  const cands = enumerateCandidates('f', MERGED, ARMV4T_AGBCC, {
+    backend: pascalBackend,
+    onEnumerationError: (variations, error) => seen.push(`${variations.join('/')}: ${error}`),
+  });
+  expect(cands.length).toBeGreaterThan(0);
+  expect(seen.filter((s) => s.includes('ret-split'))).toEqual([]);
 });
