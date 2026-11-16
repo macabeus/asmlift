@@ -102,6 +102,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -135,6 +138,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -261,6 +267,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -294,6 +303,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -419,6 +431,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -452,6 +467,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -587,6 +605,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -620,6 +641,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -754,6 +778,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -787,6 +814,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -915,6 +945,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -955,6 +988,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -1093,6 +1129,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -1126,6 +1165,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -1254,6 +1296,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -1287,6 +1332,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -1420,6 +1468,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -1456,6 +1507,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -1584,7 +1638,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.19,
+        "rankSeconds": 0.13,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "s32 countAKeys__8AnimInfoFv(s32 *a0) {\n    s32 *v0;\n    s32 result;\n    v0 = (s32 *)a0[17];\n    result = 0;\n    while (v0 != a0 + 14) {\n        v0 = (s32 *)v0[3];\n        result++;\n    }\n    return result;\n}\n",
@@ -1607,6 +1661,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -1637,6 +1694,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -1763,6 +1823,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -1797,6 +1860,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -1936,6 +2002,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -1976,6 +2045,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -2108,7 +2180,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.3,
+        "rankSeconds": 0.26,
         "symbolsUsed": [],
         "outcome": "nonmatch",
         "source": "s32 doDoAI__4PikiFv(void) {\n    switch (getState__4PikiFv()) {\n        case 0:\n        case 14:\n        case 18:\n        case 20:\n        case 21:\n            return 1;\n        case 1:\n        case 2:\n        case 3:\n        case 4:\n        case 5:\n        case 6:\n        case 7:\n        case 8:\n        case 9:\n        case 10:\n        case 11:\n        case 12:\n        case 13:\n        case 15:\n        case 16:\n        case 17:\n        case 19:\n            return 0;\n        default:\n            return 0;\n    }\n}\n",
@@ -2131,6 +2203,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -2168,6 +2243,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -2337,6 +2415,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -2370,6 +2451,9 @@
           "rawMem": 0,
           "addrDeref": 4,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -2498,6 +2582,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -2531,6 +2618,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -2683,6 +2773,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -2716,6 +2809,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 1,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -2850,6 +2946,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -2883,6 +2982,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 2,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -3084,7 +3186,7 @@
             "withheld": 424
           }
         },
-        "rankSeconds": 31,
+        "rankSeconds": 13.01,
         "withheldCandidates": [
           {
             "variations": [
@@ -8713,6 +8815,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -8750,6 +8855,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -8887,7 +8995,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.19,
+        "rankSeconds": 0.13,
         "symbolsUsed": [],
         "outcome": "nonmatch",
         "source": "s32 getFlag__11ResultFlagsFi(s32 *a0, u32 a1) {\n    s32 v0;\n    v0 = ((s32 *)a0[18])[a1];\n    return *(u8 *)(a0[2] + (v0 >> 2)) >> (v0 - (v0 >> 2 << 2) << 1) & 3;\n}\n",
@@ -8910,6 +9018,9 @@
           "rawMem": 1,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -8940,6 +9051,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -9084,6 +9198,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -9124,6 +9241,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -9257,6 +9377,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -9290,6 +9413,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -9421,6 +9547,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -9454,6 +9583,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -9582,6 +9714,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -9615,6 +9750,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -9750,6 +9888,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -9790,6 +9931,9 @@
           "rawMem": 0,
           "addrDeref": 1,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -9929,6 +10073,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -9962,6 +10109,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -10088,6 +10238,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -10128,6 +10281,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -10263,6 +10419,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -10296,6 +10455,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -10427,6 +10589,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -10460,6 +10625,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -10588,6 +10756,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -10628,6 +10799,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -10757,6 +10931,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -10790,6 +10967,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -10924,6 +11104,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -10957,6 +11140,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -11087,6 +11273,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -11120,6 +11309,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -11262,6 +11454,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -11295,6 +11490,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -11423,6 +11621,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -11463,6 +11664,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -11601,7 +11805,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 0.8,
+        "rankSeconds": 0.65,
         "symbolsUsed": [
           {
             "name": "kanji_convert_table"
@@ -11628,6 +11832,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -11658,6 +11865,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -11814,6 +12024,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -11847,6 +12060,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -11987,6 +12203,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -12027,6 +12246,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -12188,47 +12410,52 @@
         "decompiler": "asmlift",
         "symbolMap": true,
         "outcome": "noncompile",
-        "fanSize": 384,
+        "fanSize": 512,
         "fanVariations": {
           "signed": {
-            "candidates": 192,
-            "dropped": 9,
-            "notCompiled": 183
+            "candidates": 256,
+            "dropped": 10,
+            "notCompiled": 246
           },
           "unsigned": {
-            "candidates": 192,
-            "dropped": 9,
-            "notCompiled": 183
+            "candidates": 256,
+            "dropped": 10,
+            "notCompiled": 246
           },
           "addr-home": {
-            "candidates": 192,
+            "candidates": 256,
             "dropped": 2,
-            "notCompiled": 190
+            "notCompiled": 254
           },
           "defsite": {
-            "candidates": 192,
+            "candidates": 256,
             "dropped": 2,
-            "notCompiled": 190
+            "notCompiled": 254
           },
           "flip-join": {
-            "candidates": 192,
+            "candidates": 256,
             "dropped": 2,
-            "notCompiled": 190
+            "notCompiled": 254
           },
           "inplace": {
-            "candidates": 192,
+            "candidates": 256,
             "dropped": 2,
-            "notCompiled": 190
+            "notCompiled": 254
           },
           "loop-entry": {
-            "candidates": 192,
+            "candidates": 256,
             "dropped": 2,
-            "notCompiled": 190
+            "notCompiled": 254
           },
           "merge-names": {
-            "candidates": 192,
+            "candidates": 256,
             "dropped": 2,
-            "notCompiled": 190
+            "notCompiled": 254
+          },
+          "compound-expr": {
+            "candidates": 128,
+            "dropped": 2,
+            "notCompiled": 126
           },
           "mulfirst": {
             "candidates": 128,
@@ -12236,9 +12463,9 @@
             "notCompiled": 126
           },
           "unmerge": {
-            "candidates": 192,
+            "candidates": 256,
             "dropped": 2,
-            "notCompiled": 190
+            "notCompiled": 254
           },
           "unreduce": {
             "candidates": 128,
@@ -12246,9 +12473,9 @@
             "notCompiled": 126
           }
         },
-        "fanNotCompiled": 366,
-        "fanNotCompiledDigest": "1d6b596eb72f9591",
-        "rankSeconds": 29,
+        "fanNotCompiled": 492,
+        "fanNotCompiledDigest": "8892d6c5757b46e1",
+        "rankSeconds": 16.81,
         "source": "u8 * setMatMatrices__11DGXGraphicsFP8Materiali(s32 *a0, s32 *a1, s32 a2) {\n    s32 v4;\n    s32 v6;\n    u8 *v9;\n    u8 *v7;\n    u32 i;\n    s32 v1;\n    s32 v3;\n    s32 v2;\n    u8 *result;\n    s32 v0;\n    s32 v5;\n    s32 v8;\n    if (a1[32] != 0) {\n        v0 = 1;\n    } else {\n        v0 = 0;\n    }\n    a0[201] = v0 & 0xff;\n    result = GXSetNumTexGens(a1[30] & 0xff);\n    v1 = 0;\n    v2 = 0;\n    v3 = 30;\n    for (i = 0; i < a1[30]; i++) {\n        v4 = a1[34];\n        if (((u8 *)(v4 + v1))[3] != 10) {\n            v5 = v3;\n        } else {\n            v5 = 60;\n        }\n        GXSetTexCoordGen2(*(u8 *)(v4 + v1), ((u8 *)(v4 + v1))[1], ((u8 *)(v4 + v1))[2], v5, 0, 125);\n        if (*(u8 *)(a1[34] + (v1 + 1)) == 1) {\n            v6 = a1[33];\n            v7 = (u8 *)(v6 + v2);\n            switch (((u8 *)(v6 + v2))[20]) {\n                case 10:\n                    v8 = 60;\n                    v9 = GXLoadTexMtxImm(v6 + v2 + 92, v8, 1);\n                    if (a0[201] != 0) {\n                        v7 = (u8 *)a1[34];\n                        if (*(v7 + (v1 + 2)) == 1) {\n                            a0[247] = v3;\n                            v3 = v3 + a1[32] * a2 * 3;\n                        } else {\n                            v9 = v7;\n                            v7 = v9;\n                            v3 += 3;\n                        }\n                    } else {\n                        v7 = v9;\n                        v3 += 3;\n                    }\n                    break;\n                case 255:\n                    break;\n                default:\n                    v8 = v3;\n                    v9 = GXLoadTexMtxImm(v6 + v2 + 92, v8, 1);\n                    if (a0[201] != 0) {\n                        v7 = (u8 *)a1[34];\n                        if (*(v7 + (v1 + 2)) == 1) {\n                            a0[247] = v3;\n                            v3 = v3 + a1[32] * a2 * 3;\n                        } else {\n                            v9 = v7;\n                            v7 = v9;\n                            v3 += 3;\n                        }\n                    } else {\n                        v7 = v9;\n                        v3 += 3;\n                    }\n            }\n            v2 += 156;\n        } else {\n            v7 = (u8 *)a1[34];\n        }\n        result = v7;\n        v1 += 4;\n    }\n    return result;\n}\n",
         "score": null,
         "maxScore": null,
@@ -12262,6 +12489,9 @@
           "rawMem": 2,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -12299,6 +12529,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -12427,7 +12660,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.42,
+        "rankSeconds": 0.32,
         "symbolsUsed": [],
         "outcome": "nonmatch",
         "source": "s32 stringDup__9StdSystemFPc(u32 a0) {\n    s32 v0;\n    s32 result;\n    v0 = strlen((const char *)a0);\n    result = alloc__6SystemFUl(v0 + 1);\n    memcpy((void *)result, (const void *)a0, v0 + 1);\n    return result;\n}\n",
@@ -12450,6 +12683,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -12480,6 +12716,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -12620,7 +12859,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.11,
+        "rankSeconds": 0.08,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "u8 * updateID__4ID32Fv(u8 *a0) {\n    a0[0] = a0[4];\n    a0[1] = a0[5];\n    a0[2] = a0[6];\n    a0[3] = a0[7];\n    return a0;\n}\n",
@@ -12643,6 +12882,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -12680,6 +12922,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -12812,6 +13057,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -12845,6 +13093,9 @@
           "rawMem": 0,
           "addrDeref": 2,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -12979,7 +13230,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.47,
+        "rankSeconds": 0.35,
         "symbolsUsed": [
           {
             "name": "CARDGetResultCode",
@@ -13007,6 +13258,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -13044,6 +13298,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,

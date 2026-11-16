@@ -65,6 +65,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -105,6 +108,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -200,7 +206,7 @@
             "candidates": 16
           }
         },
-        "rankSeconds": 5.15,
+        "rankSeconds": 2.49,
         "symbolsUsed": [
           {
             "name": "D_800C9520_CA120",
@@ -256,6 +262,9 @@
           "rawMem": 14,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 6,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 28,
             "incrStmts": 0,
@@ -293,6 +302,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -409,21 +421,25 @@
         "decompiler": "asmlift",
         "symbolMap": true,
         "winnerVariations": [
-          "unsigned"
+          "unsigned",
+          "switch-break"
         ],
-        "fanSize": 2,
+        "fanSize": 4,
         "fanVariations": {
           "signed": {
-            "candidates": 1
+            "candidates": 2
           },
           "unsigned": {
-            "candidates": 1
+            "candidates": 2
+          },
+          "switch-break": {
+            "candidates": 2
           }
         },
-        "rankSeconds": 0.45,
+        "rankSeconds": 0.46,
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "void DecodeData(u32 src, u32 dest, u32 len, u32 decodeType) {\n    u8 sp16[16];\n    s32 *p0;\n    p0 = (s32 *)sp16;\n    p0[1] = src;\n    p0[2] = dest;\n    p0[3] = len;\n    *(u16 *)sp16 = 1024;\n    switch (decodeType) {\n        case 0:\n            HuDecodeNone(sp16);\n            return;\n        case 1:\n            HuDecodeLZ(sp16);\n            return;\n        case 2:\n            HuDecodeSlide(sp16);\n            return;\n        case 3:\n        case 4:\n            HuDecodeFslide(sp16);\n            return;\n        case 5:\n            HuDecodeRLE(sp16);\n            return;\n        default:\n            return;\n    }\n}\n",
+        "source": "void DecodeData(u32 src, u32 dest, u32 len, u32 decodeType) {\n    u8 sp16[16];\n    s32 *p0;\n    p0 = (s32 *)sp16;\n    p0[1] = src;\n    p0[2] = dest;\n    p0[3] = len;\n    *(u16 *)sp16 = 1024;\n    switch (decodeType) {\n        case 0:\n            HuDecodeNone(sp16);\n            break;\n        case 1:\n            HuDecodeLZ(sp16);\n            break;\n        case 2:\n            HuDecodeSlide(sp16);\n            break;\n        case 3:\n        case 4:\n            HuDecodeFslide(sp16);\n            break;\n        case 5:\n            HuDecodeRLE(sp16);\n            break;\n    }\n}\n",
         "score": 6,
         "maxScore": 37,
         "compileErrors": null,
@@ -435,14 +451,17 @@
           "argMismatch": 0
         },
         "quality": {
-          "score": 96,
-          "lines": 29,
+          "score": 100,
+          "lines": 27,
           "gotos": 0,
           "casts": 2,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -480,6 +499,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -565,7 +587,8 @@
         "symbolMap": true,
         "winnerVariations": [
           "signed",
-          "shared-ret"
+          "shared-ret",
+          "flip-branch"
         ],
         "fanSize": 336,
         "fanVariations": {
@@ -597,10 +620,10 @@
             "candidates": 48
           }
         },
-        "rankSeconds": 18.08,
+        "rankSeconds": 10.4,
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "struct Struct0 { u8 _pad0[4]; s32 field_4; u8 _pad1[4]; u16 field_12; s16 field_14; s32 field_16; s32 field_20; };\nvoid FileSeek(struct Struct0 *a0, s32 a1, s32 a2) {\n    s32 v3;\n    s32 v4;\n    s32 v1;\n    s32 v2;\n    u32 v0;\n    s32 v5;\n    if (a2 != 1) {\n        if (a2 < 2) {\n            if (a2 != 0) {\n                return;\n            } else {\n                v0 = a1 + a0->field_16;\n            }\n        } else {\n            if (a2 != 2) {\n                return;\n            } else {\n                v1 = a0->field_16;\n                v2 = a0->field_4;\n                v0 = v1 + v2 + a1;\n            }\n        }\n    } else {\n        v1 = a0->field_14;\n        v2 = a0->field_20;\n        v0 = v1 + v2 + a1;\n    }\n    if (v0 < a0->field_16) v0 = a0->field_16;\n    v3 = a0->field_16;\n    v4 = a0->field_4;\n    if (v0 >= v3 + v4) v0 = v3 + v4 + -1;\n    if (v0 >= a0->field_20) {\n        if (v0 >= a0->field_20 + 1024) {\n            v5 = 1;\n        } else {\n            a0->field_14 = v0 - (u16)a0->field_20;\n            return;\n        }\n    } else {\n        v5 = 1;\n    }\n    a0->field_12 = v5;\n    a0->field_14 = v0 & 1;\n    a0->field_20 = v0 - (v0 & 1);\n    return;\n}\n",
+        "source": "struct Struct0 { u8 _pad0[4]; s32 field_4; u8 _pad1[4]; u16 field_12; s16 field_14; s32 field_16; s32 field_20; };\nvoid FileSeek(struct Struct0 *a0, s32 a1, s32 a2) {\n    s32 v3;\n    s32 v4;\n    s32 v1;\n    s32 v2;\n    u32 v0;\n    s32 v5;\n    if (a2 != 1) {\n        if (a2 < 2) {\n            if (a2 == 0) {\n                v0 = a1 + a0->field_16;\n            } else {\n                return;\n            }\n        } else {\n            if (a2 == 2) {\n                v1 = a0->field_16;\n                v2 = a0->field_4;\n                v0 = v1 + v2 + a1;\n            } else {\n                return;\n            }\n        }\n    } else {\n        v1 = a0->field_14;\n        v2 = a0->field_20;\n        v0 = v1 + v2 + a1;\n    }\n    if (v0 < a0->field_16) v0 = a0->field_16;\n    v3 = a0->field_16;\n    v4 = a0->field_4;\n    if (v0 >= v3 + v4) v0 = v3 + v4 + -1;\n    if (v0 >= a0->field_20) {\n        if (v0 < a0->field_20 + 1024) {\n            a0->field_14 = v0 - (u16)a0->field_20;\n            return;\n        } else {\n            v5 = 1;\n        }\n    } else {\n        v5 = 1;\n    }\n    a0->field_12 = v5;\n    a0->field_14 = v0 & 1;\n    a0->field_20 = v0 - (v0 & 1);\n    return;\n}\n",
         "score": 27,
         "maxScore": 62,
         "compileErrors": null,
@@ -620,12 +643,15 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
             "compoundStmts": 0,
             "voidTail": 1,
-            "elseAfterReturn": 2,
+            "elseAfterReturn": 1,
             "callNeZero": 0,
             "localGaps": 0,
             "unusedLocals": 0,
@@ -650,6 +676,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -747,7 +776,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.39,
+        "rankSeconds": 0.17,
         "symbolsUsed": [
           {
             "name": "frameBufferCount"
@@ -780,6 +809,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -817,6 +849,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -898,7 +933,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.51,
+        "rankSeconds": 0.21,
         "symbolsUsed": [
           {
             "name": "gThread3Stack"
@@ -934,6 +969,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -964,6 +1002,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -1060,7 +1101,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.4,
+        "rankSeconds": 0.14,
         "symbolsUsed": [
           {
             "name": "gUCodeAddresses"
@@ -1087,6 +1128,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -1124,6 +1168,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -1189,42 +1236,46 @@
           "unsigned",
           "narrow-read"
         ],
-        "fanSize": 40,
+        "fanSize": 56,
         "fanVariations": {
           "unsigned": {
-            "candidates": 40,
-            "withheld": 20
+            "candidates": 56,
+            "withheld": 28
           },
           "defsite": {
-            "candidates": 20,
-            "withheld": 10
+            "candidates": 28,
+            "withheld": 14
           },
           "inplace": {
-            "candidates": 24,
-            "withheld": 12
+            "candidates": 32,
+            "withheld": 16
           },
           "loop-entry": {
-            "candidates": 20,
-            "withheld": 10
+            "candidates": 28,
+            "withheld": 14
           },
           "signed-cmp": {
-            "candidates": 20,
-            "withheld": 20
+            "candidates": 28,
+            "withheld": 28
+          },
+          "compound-expr": {
+            "candidates": 16,
+            "withheld": 8
           },
           "mulfirst": {
             "candidates": 16,
             "withheld": 8
           },
           "narrow-read": {
-            "candidates": 20,
-            "withheld": 10
+            "candidates": 28,
+            "withheld": 14
           },
           "parkfirst": {
             "candidates": 8,
             "withheld": 4
           }
         },
-        "rankSeconds": 4.04,
+        "rankSeconds": 3.69,
         "withheldCandidates": [
           {
             "variations": [
@@ -1239,6 +1290,27 @@
             "variations": [
               "unsigned",
               "signed-cmp",
+              "narrow-read"
+            ],
+            "score": 9,
+            "rows": 24,
+            "why": "this spelling rests on the compiler having proved every unsigned compare's operands non-negative; only a byte-exact score proves it"
+          },
+          {
+            "variations": [
+              "unsigned",
+              "signed-cmp",
+              "compound-expr"
+            ],
+            "score": 11,
+            "rows": 24,
+            "why": "this spelling rests on the compiler having proved every unsigned compare's operands non-negative; only a byte-exact score proves it"
+          },
+          {
+            "variations": [
+              "unsigned",
+              "signed-cmp",
+              "compound-expr",
               "narrow-read"
             ],
             "score": 9,
@@ -1283,6 +1355,31 @@
               "defsite",
               "loop-entry",
               "signed-cmp",
+              "narrow-read"
+            ],
+            "score": 9,
+            "rows": 24,
+            "why": "this spelling rests on the compiler having proved every unsigned compare's operands non-negative; only a byte-exact score proves it"
+          },
+          {
+            "variations": [
+              "unsigned",
+              "defsite",
+              "loop-entry",
+              "signed-cmp",
+              "compound-expr"
+            ],
+            "score": 11,
+            "rows": 24,
+            "why": "this spelling rests on the compiler having proved every unsigned compare's operands non-negative; only a byte-exact score proves it"
+          },
+          {
+            "variations": [
+              "unsigned",
+              "defsite",
+              "loop-entry",
+              "signed-cmp",
+              "compound-expr",
               "narrow-read"
             ],
             "score": 9,
@@ -1329,6 +1426,29 @@
               "unsigned",
               "inplace",
               "signed-cmp",
+              "narrow-read"
+            ],
+            "score": 12,
+            "rows": 26,
+            "why": "this spelling rests on the compiler having proved every unsigned compare's operands non-negative; only a byte-exact score proves it"
+          },
+          {
+            "variations": [
+              "unsigned",
+              "inplace",
+              "signed-cmp",
+              "compound-expr"
+            ],
+            "score": 14,
+            "rows": 26,
+            "why": "this spelling rests on the compiler having proved every unsigned compare's operands non-negative; only a byte-exact score proves it"
+          },
+          {
+            "variations": [
+              "unsigned",
+              "inplace",
+              "signed-cmp",
+              "compound-expr",
               "narrow-read"
             ],
             "score": 12,
@@ -1400,6 +1520,33 @@
               "loop-entry",
               "inplace",
               "signed-cmp",
+              "narrow-read"
+            ],
+            "score": 10,
+            "rows": 25,
+            "why": "this spelling rests on the compiler having proved every unsigned compare's operands non-negative; only a byte-exact score proves it"
+          },
+          {
+            "variations": [
+              "unsigned",
+              "defsite",
+              "loop-entry",
+              "inplace",
+              "signed-cmp",
+              "compound-expr"
+            ],
+            "score": 12,
+            "rows": 25,
+            "why": "this spelling rests on the compiler having proved every unsigned compare's operands non-negative; only a byte-exact score proves it"
+          },
+          {
+            "variations": [
+              "unsigned",
+              "defsite",
+              "loop-entry",
+              "inplace",
+              "signed-cmp",
+              "compound-expr",
               "narrow-read"
             ],
             "score": 10,
@@ -1483,6 +1630,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 1,
@@ -1520,6 +1670,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -1605,7 +1758,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.24,
+        "rankSeconds": 0.13,
         "symbolsUsed": [
           {
             "name": "D_800D2008_D2C08"
@@ -1635,6 +1788,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -1672,6 +1828,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -1782,6 +1941,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -1815,6 +1977,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -1898,7 +2063,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.41,
+        "rankSeconds": 0.16,
         "symbolsUsed": [
           {
             "name": "D_800A0A78_A1678"
@@ -1925,6 +2090,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -1962,6 +2130,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -2047,7 +2218,7 @@
             "candidates": 4
           }
         },
-        "rankSeconds": 1.91,
+        "rankSeconds": 0.99,
         "symbolsUsed": [
           {
             "name": "HmfModelData",
@@ -2075,6 +2246,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -2112,6 +2286,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -2201,6 +2378,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -2234,6 +2414,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -2315,7 +2498,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.17,
+        "rankSeconds": 0.1,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "void func_8002FD48_30948(s32 *a0) {\n    a0[40] = 0;\n}\n",
@@ -2338,6 +2521,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -2368,6 +2554,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -2435,47 +2624,53 @@
         "symbolMap": true,
         "winnerVariations": [
           "unsigned",
-          "flip-join"
+          "ret-split"
         ],
-        "fanSize": 4,
+        "fanSize": 6,
         "fanVariations": {
           "unsigned": {
-            "candidates": 4
+            "candidates": 6
           },
           "defsite": {
             "candidates": 2
           },
           "flip-join": {
+            "candidates": 3
+          },
+          "ret-split": {
             "candidates": 2
           }
         },
-        "rankSeconds": 0.72,
+        "rankSeconds": 1.02,
         "symbolsUsed": [
           {
             "name": "omovl"
           }
         ],
         "outcome": "nonmatch",
-        "source": "s32 func_80045314_45F14(void) {\n    s32 result;\n    if (omovl == 2) {\n        result = 20;\n    } else {\n        if (omovl == 3) {\n            result = -20;\n        } else {\n            result = 0;\n        }\n    }\n    return result;\n}\n",
-        "score": 11,
-        "maxScore": 18,
+        "source": "s32 func_80045314_45F14(void) {\n    if (omovl != 2) {\n        if (omovl != 3) return 0;\n        return -20;\n    }\n    return 20;\n}\n",
+        "score": 5,
+        "maxScore": 13,
         "compileErrors": null,
         "breakdown": {
-          "insert": 6,
-          "delete": 3,
-          "replace": 1,
+          "insert": 1,
+          "delete": 0,
+          "replace": 3,
           "opMismatch": 0,
           "argMismatch": 1
         },
         "quality": {
           "score": 100,
-          "lines": 13,
+          "lines": 7,
           "gotos": 0,
           "casts": 1,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -2513,6 +2708,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -2528,7 +2726,7 @@
         }
       },
       "gapSize": {
-        "decompiler": "m2c",
+        "decompiler": "asmlift",
         "score": 5,
         "maxScore": 13,
         "ratio": 0.38461538461538464,
@@ -2606,7 +2804,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 1.46,
+        "rankSeconds": 1.51,
         "symbolsUsed": [
           {
             "name": "D_800A6D44_A7944",
@@ -2642,6 +2840,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -2672,6 +2873,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -2764,7 +2968,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 1.02,
+        "rankSeconds": 1.4,
         "symbolsUsed": [
           {
             "name": "D_800A1590_A2190"
@@ -2791,6 +2995,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -2828,6 +3035,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -2926,7 +3136,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.58,
+        "rankSeconds": 0.15,
         "symbolsUsed": [
           {
             "name": "omgroup"
@@ -2953,6 +3163,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -2990,6 +3203,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -3069,7 +3285,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.29,
+        "rankSeconds": 0.14,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "void func_80047E90_48A90(s32 *a0, u32 a1) {\n    a0[4] = a1 | a0[4];\n}\n",
@@ -3092,6 +3308,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -3122,6 +3341,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -3202,7 +3424,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.4,
+        "rankSeconds": 0.22,
         "symbolsUsed": [
           {
             "name": "D_800A1780_A2380"
@@ -3235,6 +3457,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -3272,6 +3497,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -3348,7 +3576,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.43,
+        "rankSeconds": 0.17,
         "symbolsUsed": [
           {
             "name": "D_800A1780_A2380"
@@ -3387,6 +3615,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -3424,6 +3655,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -3503,6 +3737,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -3536,6 +3773,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -3616,7 +3856,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.56,
+        "rankSeconds": 0.17,
         "symbolsUsed": [
           {
             "name": "D_800C9530_CA130"
@@ -3643,6 +3883,9 @@
           "rawMem": 1,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 1,
             "incrStmts": 0,
@@ -3673,6 +3916,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -3769,7 +4015,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 1.02,
+        "rankSeconds": 0.19,
         "symbolsUsed": [
           {
             "name": "D_800C9530_CA130"
@@ -3796,6 +4042,9 @@
           "rawMem": 1,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 1,
             "incrStmts": 0,
@@ -3826,6 +4075,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -3915,7 +4167,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.25,
+        "rankSeconds": 0.12,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "s32 func_80056254_56E54(s32 *a0) {\n    return ((s32 *)*a0)[3];\n}\n",
@@ -3938,6 +4190,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -3968,6 +4223,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -4049,7 +4307,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.6,
+        "rankSeconds": 0.17,
         "symbolsUsed": [
           {
             "name": "D_800C9530_CA130"
@@ -4076,6 +4334,9 @@
           "rawMem": 1,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 1,
             "incrStmts": 0,
@@ -4106,6 +4367,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -4181,7 +4445,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.27,
+        "rankSeconds": 0.15,
         "symbolsUsed": [],
         "outcome": "nonmatch",
         "source": "s32 func_80056C98_57898(s32 *a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    v0 = *(u8 *)*a0;\n    v1 = ((u8 *)*a0)[1];\n    v2 = ((u8 *)*a0)[2];\n    v3 = ((u8 *)*a0)[3];\n    *a0 = *a0 + 4;\n    return (v0 << 24) + (v1 << 16) + (v2 << 8) + v3;\n}\n",
@@ -4204,6 +4468,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -4234,6 +4501,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -4337,6 +4607,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -4370,6 +4643,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 1,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -4464,7 +4740,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 1.44,
+        "rankSeconds": 1.16,
         "symbolsUsed": [
           {
             "name": "D_800A232C_A2F2C"
@@ -4494,6 +4770,9 @@
           "rawMem": 1,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 6,
+            "doWhileForable": 1,
             "ptrDeref0": 0,
             "decimalMasks": 6,
             "incrStmts": 1,
@@ -4524,6 +4803,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -4639,7 +4921,7 @@
             "candidates": 8
           }
         },
-        "rankSeconds": 4.3,
+        "rankSeconds": 2.69,
         "symbolsUsed": [
           {
             "name": "D_800CC69C_CD29C",
@@ -4667,6 +4949,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -4704,6 +4989,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -4790,7 +5078,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 1.03,
+        "rankSeconds": 0.24,
         "symbolsUsed": [
           {
             "name": "D_800CC69C_CD29C",
@@ -4818,6 +5106,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -4855,6 +5146,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -4932,7 +5226,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.29,
+        "rankSeconds": 0.14,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "void func_80071B40_72740(u16 *a0, u32 a1) {\n    a0[11] = a1;\n}\n",
@@ -4955,6 +5249,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -4985,6 +5282,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -5065,7 +5365,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.84,
+        "rankSeconds": 0.95,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "void func_8008A0D0_8ACD0(s32 *a0) {\n    a0[5] = 65536;\n    a0[0] = 65536;\n    a0[15] = 0;\n    a0[14] = 0;\n    a0[13] = 0;\n    a0[12] = 0;\n    a0[11] = 0;\n    a0[10] = 0;\n    a0[9] = 0;\n    a0[8] = 0;\n    a0[6] = 0;\n    a0[4] = 0;\n    a0[3] = 0;\n    a0[1] = 0;\n    a0[7] = 1;\n    a0[2] = 1;\n}\n",
@@ -5088,6 +5388,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -5118,6 +5421,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -5213,7 +5519,7 @@
             "candidates": 12
           }
         },
-        "rankSeconds": 5.46,
+        "rankSeconds": 2.78,
         "symbolsUsed": [
           {
             "name": "GwCommon",
@@ -5245,6 +5551,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -5275,6 +5584,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -5372,7 +5684,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 0.94,
+        "rankSeconds": 0.18,
         "symbolsUsed": [
           {
             "name": "GwSystem",
@@ -5400,6 +5712,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -5437,6 +5752,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -5551,6 +5869,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -5584,6 +5905,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -5678,6 +6002,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -5718,6 +6045,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -5799,38 +6129,52 @@
           "signed-cmp",
           "narrow-load"
         ],
-        "fanSize": 16,
+        "fanSize": 24,
         "fanVariations": {
           "unsigned": {
-            "candidates": 16,
-            "withheld": 4
+            "candidates": 24,
+            "withheld": 6
           },
           "defsite": {
-            "candidates": 8,
-            "withheld": 2
+            "candidates": 12,
+            "withheld": 3
           },
           "loop-entry": {
+            "candidates": 12,
+            "withheld": 3
+          },
+          "signed-cmp": {
+            "candidates": 12,
+            "withheld": 6
+          },
+          "compound-expr": {
             "candidates": 8,
             "withheld": 2
           },
-          "signed-cmp": {
-            "candidates": 8,
-            "withheld": 4
-          },
           "narrow-load": {
-            "candidates": 8
+            "candidates": 12
           },
           "ptr-field": {
             "candidates": 8,
             "withheld": 2
           }
         },
-        "rankSeconds": 3.49,
+        "rankSeconds": 3.42,
         "withheldCandidates": [
           {
             "variations": [
               "unsigned",
               "signed-cmp"
+            ],
+            "score": 3,
+            "rows": 11,
+            "why": "this spelling rests on the compiler having proved every unsigned compare's operands non-negative; only a byte-exact score proves it"
+          },
+          {
+            "variations": [
+              "unsigned",
+              "signed-cmp",
+              "compound-expr"
             ],
             "score": 3,
             "rows": 11,
@@ -5852,6 +6196,18 @@
               "defsite",
               "loop-entry",
               "signed-cmp"
+            ],
+            "score": 5,
+            "rows": 11,
+            "why": "this spelling rests on the compiler having proved every unsigned compare's operands non-negative; only a byte-exact score proves it"
+          },
+          {
+            "variations": [
+              "unsigned",
+              "defsite",
+              "loop-entry",
+              "signed-cmp",
+              "compound-expr"
             ],
             "score": 5,
             "rows": 11,
@@ -5892,6 +6248,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -5922,6 +6281,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -6006,25 +6368,28 @@
         "winnerVariations": [
           "unsigned"
         ],
-        "fanSize": 8,
+        "fanSize": 12,
         "fanVariations": {
           "unsigned": {
-            "candidates": 8
+            "candidates": 12
           },
           "defsite": {
-            "candidates": 4
+            "candidates": 6
           },
           "inplace": {
-            "candidates": 4
+            "candidates": 6
           },
           "loop-entry": {
+            "candidates": 6
+          },
+          "compound-expr": {
             "candidates": 4
           },
           "ptr-field": {
             "candidates": 4
           }
         },
-        "rankSeconds": 1.28,
+        "rankSeconds": 0.69,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "struct Struct0 { s32 field_0; u8 _pad0[1]; u8 field_5; u8 _pad1[6]; s32 field_12; };\ns32 HuMemUsedMemorySizeGet(struct Struct0 *a0) {\n    struct Struct0 *v0;\n    s32 result;\n    v0 = a0;\n    result = 0;\n    do {\n        if (v0->field_5 == 1) result = result + v0->field_0;\n        v0 = (struct Struct0 *)v0->field_12;\n    } while (v0 != a0);\n    return result;\n}\n",
@@ -6047,6 +6412,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -6077,6 +6445,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -6174,7 +6545,7 @@
             "candidates": 4
           }
         },
-        "rankSeconds": 0.69,
+        "rankSeconds": 0.17,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "void HuPrcChildUnlink(s32 *process) {\n    if (process[3] != 0) {\n        if (process[4] != 0) ((s32 *)process[4])[5] = process[5];\n        if (process[5] != 0) {\n            ((s32 *)process[5])[4] = process[4];\n        } else {\n            ((s32 *)process[3])[2] = process[4];\n        }\n        process[3] = 0;\n    }\n}\n",
@@ -6197,6 +6568,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -6234,6 +6608,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -6366,7 +6743,7 @@
             "candidates": 16
           }
         },
-        "rankSeconds": 5.49,
+        "rankSeconds": 3.02,
         "symbolsUsed": [
           {
             "name": "HuMemAlloc",
@@ -6398,6 +6775,9 @@
           "rawMem": 2,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 2,
             "incrStmts": 1,
@@ -6435,6 +6815,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -6526,7 +6909,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.25,
+        "rankSeconds": 0.15,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "void UnlinkProcess(s32 *a0, s32 *a1) {\n    if (a1[0] != 0) ((s32 *)a1[0])[1] = a1[1];\n    if (a1[1] != 0) {\n        *(s32 *)a1[1] = a1[0];\n    } else {\n        *a0 = a1[0];\n    }\n}\n",
@@ -6549,6 +6932,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
@@ -6579,6 +6965,9 @@
           "rawMem": 0,
           "addrDeref": 0,
           "habits": {
+            "joinedReturn": 0,
+            "shiftTruth": 0,
+            "doWhileForable": 0,
             "ptrDeref0": 0,
             "decimalMasks": 0,
             "incrStmts": 0,
