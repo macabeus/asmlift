@@ -1289,6 +1289,18 @@ export function enumerateCandidates(
     // The PRE-RESPELL loop below has `fn` in scope and no such invariant, so it runs it there.
     // A respell variation returns its tree, or `{ sfn, needsProof }` when it cannot establish its own
     // semantics from inside the pass (Candidate.matchOnly carries the argument).
+    let onlyRespelled: typeof SHAPE_READINGS | undefined;
+    const readsOnlyRespelled = (): typeof SHAPE_READINGS =>
+      (onlyRespelled ??= SHAPE_READINGS.filter((r) => {
+        if (!offeredOn(target, [r.name])) {
+          return false;
+        }
+        try {
+          return r.apply(sfn) === null;
+        } catch {
+          return false; // its own `respell` below reports the throw
+        }
+      }));
     const respell = (variations: readonly Variation[], make: () => RespellResult, alreadyShaped = false): void => {
       if (!offeredOn(target, variations)) {
         return;
@@ -1324,9 +1336,13 @@ export function enumerateCandidates(
         // The SHAPE READINGS composed onto this respell variation's source, each alone
         // (rank-variations.ts SHAPE_READINGS carries the admission argument). Not onto a reading's
         // own source, nor a stacked one: the readings are offered on the un-respelled tree, and on
-        // the stacked sources derived from it, by their own `respell` below.
+        // the stacked sources derived from it, by their own `respell` below. And only a reading
+        // that finds no site on the un-respelled tree (`readsOnlyRespelled`): there the shape
+        // exists only because a respell variation built it, which is the reach the composition is
+        // for, while a reading the tree already has its own candidate for would be crossed with
+        // every respell source and, on the dearest rows, run the ranker out of heap.
         if (!alreadyShaped && !variations.some(isShapeReading)) {
-          for (const reading of SHAPE_READINGS.filter((r) => offeredOn(target, [r.name]))) {
+          for (const reading of readsOnlyRespelled()) {
             try {
               const read = reading.apply(alt);
               if (read === null) {

@@ -522,7 +522,10 @@ export const STACKED_VARIATIONS = [...STACKED_SHAPES, ...STACKED_WIDTHS];
  *  shape sits in, and the reading changes only how that shape is spelled, so the two are orthogonal
  *  the way the STACKED ones are. Not crossed with the stacked subsets or with one another: a
  *  reading composed onto a respell costs one candidate per respell source it fires on, where a
- *  stacked member would cost one per subset of every source. `pnpm bench fan synthetic:mixwalk:agbcc`
+ *  stacked member would cost one per subset of every source. And composed only where it finds no
+ *  site on the un-respelled tree, so only onto a shape a respell variation BUILT: crossed with
+ *  every respell source wherever it fired, the composition ran the ranker out of heap on
+ *  `kleod:PauseMenuScreenHandler:agbcc` (fan 32160 before it) in a full bench. `pnpm bench fan synthetic:mixwalk:agbcc`
  *  is the row that demanded it: its winner `/unreduce` keeps a `do`/`while` whose `for` spelling
  *  compiles alike, and before this no candidate held both. */
 export const SHAPE_READINGS: { name: VariationName; apply: (sfn: SFn) => SFn | null }[] = [
