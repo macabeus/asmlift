@@ -87,8 +87,9 @@ function fnParts(src: string): FnParts {
 
 /** The parameter names a signature line declares, in order. The list is split at its top-level
  *  commas only, so a function-pointer parameter's own list stays whole, and each name is read
- *  past an array suffix (`u8 a0[4]`) or out of a function pointer's declarator
- *  (`void (*a1)(s32)`). An unnamed parameter and `(void)` give no name. */
+ *  past an array suffix (`u8 a0[4]`) or out of a parenthesized pointer declarator, a function
+ *  pointer's (`void (*a1)(s32)`) or a pointer to an array's (`s32 (*a1)[4]`). An unnamed
+ *  parameter and `(void)` give no name. */
 function paramNames(signature: string): string[] {
   const params = /\((.*)\)\s*\{\s*$/.exec(signature)?.[1] ?? '';
   const pieces: string[] = [];
@@ -109,7 +110,7 @@ function paramNames(signature: string): string[] {
   const out: string[] = [];
   for (const p of pieces) {
     const m =
-      /\(\s*\*+\s*([A-Za-z_]\w*)\s*(?:\[[^\]]*\])*\s*\)\s*\(/.exec(p) ??
+      /\(\s*\*+\s*([A-Za-z_]\w*)\s*(?:\[[^\]]*\])*\s*\)\s*[([]/.exec(p) ??
       /([A-Za-z_]\w*)\s*(?:\[[^\]]*\])*\s*$/.exec(p.trim());
     if (m && m[1] !== 'void') {
       out.push(m[1]);

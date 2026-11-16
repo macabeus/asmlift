@@ -210,5 +210,7 @@ describe('assessQuality habit counters (counted, never score-penalized)', () => 
     );
     expect(habits('s32 f(u8 a0[4], s32 a1) {\n    return a0[a1];\n}\n').placeholderParams).toBe(2);
     expect(habits('s32 f(s32 (*cb)(s32 a0), s32 a1) {\n    return cb(a1);\n}\n').placeholderParams).toBe(1);
+    // a pointer to an array is read out of its parentheses too
+    expect(habits('s32 f(s32 a0, s32 (*a1)[4]) {\n    return a1[a0][0];\n}\n').placeholderParams).toBe(2);
   });
 });
