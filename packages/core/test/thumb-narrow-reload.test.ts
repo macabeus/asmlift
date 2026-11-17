@@ -436,7 +436,11 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
     };
     expect(() =>
       decompile('f', fr('\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n'), ARMV4T_AGBCC, { prototypes: P8 }),
-    ).toThrow('the object at [sp,#0) overlaps the SSA slot at [sp,#4] — one byte, two models');
+    ).toThrow(
+      // the word at [sp,#4] is the sized temp's (thumb.ts `returnStorage`), so no slot keys it for
+      // the narrow reload to read
+      "'ldrb r0, [r0]' reads the word slot [sp,#4], which the word-slot model does not key here",
+    );
   });
 
   // The word must be a slot: with no word store to it anywhere, the bytes are a sub-word local's and
