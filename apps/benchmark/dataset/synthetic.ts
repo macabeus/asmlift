@@ -20239,6 +20239,37 @@ export const SYNTHETIC: SynthSpec[] = [
       five: { params: ['s32', 's32', 's32', 's32', 's32'], returnsVoid: true },
     },
   },
+  //  40. dmafill_call (kl2dct sub_0802E340: "stack pointer used as data — the store to [sp,#0] is
+  //      never reloaded"). A DMA fill whose temp's address is stored to the device's source register,
+  //      then a call taking `&w`. agbcc loads the register's address into r0, the same register that
+  //      holds `&w` at the call, and the publish was read off the register's NAME: a register that
+  //      holds a frame address anywhere is a base into this frame, so the store published nothing
+  //      and the temp's word read as staged for `g`. The publish is now read per store where the
+  //      base holds a pool constant (thumb.ts `storesThroughAPoolConstant`). agbcc only, as item 26.
+  {
+    sym: 'dmafill_call',
+    src:
+      'typedef volatile unsigned int vu32;\n' +
+      '#define DmaFill32(v, dst, n) { vu32 tmp = (vu32)(v); *(vu32 *)0x040000D4 = (u32)&tmp; ((vu32 *)0x040000D4)[1] = (u32)(dst); ((vu32 *)0x040000D4)[2] = 0x85000000 | (n); ((vu32 *)0x040000D4)[2]; }\n' +
+      'extern u8 *gP;\n' +
+      'void g(void);\n' +
+      'void use(u32 *p);\n' +
+      'void dmafill_call(void)\n' +
+      '{\n' +
+      '    u32 w;\n' +
+      '    DmaFill32(0, gP, 0x1a);\n' +
+      '    g();\n' +
+      '    use(&w);\n' +
+      '}',
+    features: ['stack-addr', 'macro'],
+    toolchains: ['agbcc'],
+    ctx: 'extern u8 *gP;\nvoid g(void);\nvoid use(u32 *p);\nvoid dmafill_call(void);',
+    proto: {
+      dmafill_call: { returnsVoid: true },
+      g: { params: [], returnsVoid: true },
+      use: { params: ['u32 *'], returnsVoid: true },
+    },
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────
