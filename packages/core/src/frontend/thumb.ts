@@ -3743,8 +3743,9 @@ function measureThumbFrame({
   // this function asks about — `frameAddressReceivers` — so the three walks that ask differ only
   // in the kill rule, and `heldFrameWalk` says why that one differs.
   const mayHoldFrameAddress = registersThatMayHoldAFrameAddress(asmBlocks, entryReachable);
+  const constantBased = storesThroughAPoolConstant(asmBlocks, entryReachable);
   const handedOutRegs = (ins: Instr): readonly string[] =>
-    frameAddressReceivers(ins, target, calls, mayHoldFrameAddress);
+    frameAddressReceivers(ins, target, calls, mayHoldFrameAddress, constantBased);
   const frameBasePassedToCallee = heldFrameWalk(asmBlocks, entryReachable, mentionsReg, (ins, held) => {
     if (ins.mnemonic !== 'bl' && ins.mnemonic !== 'blx') {
       return false;
@@ -4868,12 +4869,19 @@ function frameAddressesAtCalls(
 // function): then the address is written INTO this frame, and nothing outside has been handed it.
 // A frame address the base reached through memory is the one this misses, and it counts as
 // leaving. A `strh`/`strb` hands over part of an address, which no reader can follow.
-
+//
+// …UNLESS THE BASE HOLDS A POOL CONSTANT AT THE STORE (`storesThroughAPoolConstant`): a register
+// that holds a frame address somewhere in the function holds a literal address here, which names no
+// byte of this frame. agbcc reuses one register for both inside a function: `DmaFill32(0, gP, n);
+// g(); use(&w);` publishes through `ldr r0, =0x040000D4 / mov r1, sp / str r1, [r0]` and later
+// passes `add r0, sp, #4` in the same r0. The audit's re-proof (`publishedOutward`) asks it per
+// VALUE, where a pool constant is never a frame address either.
 function frameAddressReceivers(
   ins: Instr,
   target: TargetDescription,
   calls: CallDeclarations,
   mayHoldFrameAddress: ReadonlySet<string>,
+  constantBased: ReadonlySet<Instr>,
 ): readonly string[] {
   if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
     const targetReg = calleeRegister(ins, target);
@@ -4885,7 +4893,51 @@ function frameAddressReceivers(
     return [];
   }
   const { base } = parseAddr(ins.ops[1] ?? '');
-  return isSpReg(base) || mayHoldFrameAddress.has(reg(base)) ? [] : [reg(ins.ops[0] ?? '')];
+  return isSpReg(base) || (mayHoldFrameAddress.has(reg(base)) && !constantBased.has(ins))
+    ? []
+    : [reg(ins.ops[0] ?? '')];
+}
+
+// THE STORES WHOSE BASE REGISTER HOLDS A LITERAL-POOL CONSTANT, plus constants added to it — `ldr
+// r1, .L3+0x4 / … / str r0, [r1] / add r1, r1, #4 / str r0, [r1]`, a device register block written
+// word by word. Block-local and killed at any other write of the register and at every call, so it
+// only ever names fewer stores than hold a constant base: an acceptance, never over-approximated.
+// A pool load is an `ldr` whose address operand is a label, not a bracketed register.
+function storesThroughAPoolConstant(asmBlocks: readonly AsmBlock[], entryReachable: ReadonlySet<number>): Set<Instr> {
+  const found = new Set<Instr>();
+  for (const b of entryReachable) {
+    const constant = new Set<string>();
+    for (const ins of asmBlocks[b].instrs) {
+      if (ins.mnemonic === 'str' && ins.ops[1] !== undefined && ins.ops[1].trim().startsWith('[')) {
+        const { base, regOff } = parseAddr(ins.ops[1]);
+        if (regOff === undefined && constant.has(reg(base))) {
+          found.add(ins);
+        }
+      }
+      if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
+        constant.clear();
+        continue;
+      }
+      const [d, s1, s2] = ins.ops;
+      const stays =
+        d !== undefined &&
+        ((ins.mnemonic === 'ldr' && s1 !== undefined && !s1.trim().startsWith('[') && s2 === undefined) ||
+          (/^adds?$/.test(ins.mnemonic) &&
+            (s2 === undefined
+              ? s1 !== undefined && IMM_LITERAL.test(s1) && constant.has(reg(d))
+              : s1 !== undefined && IMM_LITERAL.test(s2) && constant.has(reg(s1)))) ||
+          (/^movs?$/.test(ins.mnemonic) && s2 === undefined && s1 !== undefined && constant.has(reg(s1))));
+      for (const r of [...constant]) {
+        if (mayWriteReg(ins, r)) {
+          constant.delete(r);
+        }
+      }
+      if (stays) {
+        constant.add(reg(d));
+      }
+    }
+  }
+  return found;
 }
 
 // Is the word-slot model safe for THIS function? Every disqualifier below leaves every `[sp,#k]`

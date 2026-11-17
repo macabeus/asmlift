@@ -29,6 +29,11 @@
 //     stage [sp,#0] between two reads based above it, `bytes`/`members` add a byte array's and a
 //     struct member's offset after the index, and `ix` reads `a[k]` on one path of a loop only.
 //     Read by `packages/core/test/frame-indexed-probes.test.ts`.
+//   agbcc-dmafill.s — a DMA fill's source temp, its address stored to the device's source register:
+//     `dcall`/`dpaths` load that register's address into a register that holds a frame address
+//     elsewhere in the function, `dtwo` publishes the frame base in a frame wider than one word with a
+//     call after it, and `dfive` moves the temp above a fifth argument staged at [sp,#0].
+//     Read by `packages/core/test/frame-dmafill-probes.test.ts`.
 //
 //   ASMLIFT_AGBCC=… npx tsx scripts/regen-outgoing-area-probes.ts
 //
@@ -45,6 +50,7 @@ const PROBES = [
   { source: 'probe-agbcc-escape.c', out: 'agbcc-escape.s', readBy: 'frame-escape-probes.test.ts' },
   { source: 'probe-agbcc-entry-stack.c', out: 'agbcc-entry-stack.s', readBy: 'thumb-entry.test.ts' },
   { source: 'probe-agbcc-indexed.c', out: 'agbcc-indexed.s', readBy: 'frame-indexed-probes.test.ts' },
+  { source: 'probe-agbcc-dmafill.c', out: 'agbcc-dmafill.s', readBy: 'frame-dmafill-probes.test.ts' },
 ];
 
 const flags = TOOLCHAIN_TARGETS.agbcc.canonicalFlags;
