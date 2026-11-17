@@ -20233,6 +20233,69 @@ export const SYNTHETIC: SynthSpec[] = [
       h: { params: 2, returnsVoid: true },
     },
   },
+  //  39. stkidx_call / stkidx_five (kl2dct CommonWaitForNextFrame: "stack pointer used as data —
+  //      the store to [sp,#0] is never reloaded"). A frame array read only through a runtime index,
+  //      `a[i]` as `lsl r0, r4, #2 / add r0, r0, sp / ldr r0, [r0]`, on the loop trips a mask bit
+  //      selects, with a call after the loop. No word of the array is reloaded by its offset, so
+  //      the outgoing-argument analysis read [sp,#0] as a word staged for that call. The load
+  //      through the index is now its `indexed-read` event (frontend/stackargs.ts): the words from
+  //      its base up are a local's. stkidx_five is the control the base fact guards: `a[i - 1]`
+  //      with `u32 a[2]` at [sp,#4] and a fifth argument staged at [sp,#0], whose read agbcc bases
+  //      at 4, not 0 (`corpus/agbcc-indexed.s`), so `five` keeps its fifth argument. agbcc only:
+  //      the MIPS frontends refuse every address-taken frame local ("local stack frames not
+  //      supported") and the PPC one the stack pointer as data, before any argument analysis.
+  {
+    sym: 'stkidx_call',
+    src:
+      'extern u32 gA, gB;\n' +
+      'extern u8 gMask;\n' +
+      'void use(u32 x, s32 i);\n' +
+      'void rng(void);\n' +
+      'void stkidx_call(void)\n' +
+      '{\n' +
+      '    u32 a[2];\n' +
+      '    s32 i;\n' +
+      '    a[0] = gA;\n' +
+      '    a[1] = gB;\n' +
+      '    for (i = 0; i < 2; i++)\n' +
+      '        if ((gMask >> i) & 1)\n' +
+      '            use(a[i], i);\n' +
+      '    rng();\n' +
+      '}',
+    features: ['variable-index', 'guard-init'],
+    toolchains: ['agbcc'],
+    ctx:
+      'extern u32 gA, gB;\n' +
+      'extern u8 gMask;\n' +
+      'void use(u32 x, s32 i);\n' +
+      'void rng(void);\n' +
+      'void stkidx_call(void);',
+    proto: {
+      stkidx_call: { returnsVoid: true },
+      use: { params: ['u32', 's32'], returnsVoid: true },
+      rng: { params: [], returnsVoid: true },
+    },
+  },
+  {
+    sym: 'stkidx_five',
+    src:
+      'extern u32 gA, gB, gC;\n' +
+      'void five(s32 a, s32 b, s32 c, s32 d, s32 e);\n' +
+      'void stkidx_five(s32 i)\n' +
+      '{\n' +
+      '    u32 a[2];\n' +
+      '    a[0] = gA;\n' +
+      '    a[1] = gB;\n' +
+      '    five(1, 2, 3, a[i - 1], gC);\n' +
+      '}',
+    features: ['variable-index', 'multi-arg'],
+    toolchains: ['agbcc'],
+    ctx: 'extern u32 gA, gB, gC;\nvoid five(s32 a, s32 b, s32 c, s32 d, s32 e);\nvoid stkidx_five(s32 i);',
+    proto: {
+      stkidx_five: { params: ['s32'], returnsVoid: true },
+      five: { params: ['s32', 's32', 's32', 's32', 's32'], returnsVoid: true },
+    },
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────

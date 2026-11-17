@@ -20,6 +20,8 @@ const st = (off: number): Ev => ({ kind: 'store', off });
 const ld = (off: number): Ev => ({ kind: 'load', off });
 /** The frame address `sp + off` handed to a callee or stored to memory. */
 const esc = (off: number): Ev => ({ kind: 'escape', off });
+/** A load through a runtime index into the frame object based at `sp + off`. */
+const idx = (off: number): Ev => ({ kind: 'indexed-read', off });
 /** A call taking `n` stack words; `n` 0 means nothing declares it (indirect, or no prototype). */
 const call = (name: string, n: number): Ev => ({
   kind: 'call',
@@ -486,5 +488,58 @@ describe('an undeclared call whose callee’s body loads its incoming stack word
     const r = run(line([bodyCall('nine', 5)]), chain(1), 0);
     expect(r.blocker).toBeNull();
     expect(r.blocks.size).toBe(0);
+  });
+});
+
+describe('a load through a runtime index reads the object it is based in, from that base up', () => {
+  // kl2dct's `CommonWaitForNextFrame`: `u32 a[2]` at [sp,#0] and [sp,#4], filled, then read as
+  // `a[i]` (`lsl r0, r2, #2 / add r0, sp / ldr r5, [r0]`) inside a loop only when a mask bit is set,
+  // and a call after the loop. No word of the array is reloaded by its offset.
+  test('stores the index reads are no argument of a later call, on the path that skips the read too', () => {
+    const r = run(
+      [blk([st(0), st(4)]), blk([]), blk([idx(0)]), blk([]), blk([call('rng', 0)])],
+      [[], [0, 3], [1], [1, 2], [3]],
+      0x10,
+    );
+    expect(r).toEqual({ blocker: null, blocks: new Map(), area: 0 });
+  });
+
+  test('…which is the bound a load gives: the base and every word above it', () => {
+    const blocks = line([st(0), st(8), idx(4), call('g', 0)]);
+    expect(loadedWordBound(blocks, new Set([0]), 0)).toBe(4);
+    expect(run(blocks, chain(1), 0x10).blocker).toMatch(/the store to \[sp,#0\]/);
+  });
+
+  // agbcc's `six(a[i], 2, 3, 4, gC, a[j])` with `u32 a[3]` at [sp,#8]: the fifth word is staged at
+  // [sp,#0] BETWEEN the two reads, each based at 8 (`add r0, r0, sp / add r0, r0, #8`).
+  test('a read based above a staged word leaves it pending at the call', () => {
+    const r = run(line([st(8), st(0xc), idx(8), st(0), idx(8), st(4), call('six', 0)]), chain(1), 0x14);
+    expect(r.blocker).toMatch(/the store to \[sp,#0\]/);
+  });
+
+  test('…and licenses the declared block beneath it', () => {
+    const r = run(line([st(8), st(0xc), idx(8), st(0), idx(8), st(4), call('six', 2)]), chain(1), 0x14);
+    expect(r.blocker).toBeNull();
+    expect(r.blocks.get('six')).toEqual([0, 4]);
+  });
+
+  test('a declared block reaching the indexed base names one word twice, and refuses', () => {
+    const r = run(line([idx(0), st(0), call('five', 1)]), chain(1), 8);
+    expect(r.blocker).toMatch(
+      /so \[sp,#0\] is its outgoing stack argument — but the frame address \[sp,#0\] is read through a runtime index/,
+    );
+  });
+
+  test('a read in a dead block bounds nothing', () => {
+    const r = analyze({
+      blocks: [blk([st(0), call('five', 0)]), blk([idx(0)])],
+      preds: [[], [0]],
+      live: new Set([0]),
+      localArea: 8,
+      argRegs: 4,
+      capturedWholeFrame: false,
+      outgoingAreaNeverLoadedFrom: 0,
+    });
+    expect(r.blocker).toMatch(/the store to \[sp,#0\]/);
   });
 });
