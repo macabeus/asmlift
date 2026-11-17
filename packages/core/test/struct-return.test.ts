@@ -932,3 +932,30 @@ test('a struct with floating members copied whole as words reads those members a
     /p1 = \(s32 \*\)&gV3;\s+sp0 = mkv3\(a0\);\s+v0 = p0\[1\];[^]*p1\[1\] = v0;/,
   );
 });
+
+// agbcc reads a multi-word struct-return temp back with direct sp loads: `struct S8 s = mk8(x);
+// gW = s.a; gW2 = s.b;` is `mov r0, sp / bl mk8 / ldr r1, [sp] / ldr r2, [sp, #0x4]`. The callee
+// declared to return the struct through memory owns `[0, sizeof)` of the address it is handed, so
+// the word at [sp,#4] is the temp's member, not an SSA slot beside it.
+describe('the words of a sized struct-return temp are the temp’s', () => {
+  const SRET8 =
+    'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tbl\tmk8\n' +
+    '\tldr\tr1, [sp]\n\tldr\tr2, [sp, #0x4]\n\tldr\tr0, .L3\n\tstr\tr1, [r0]\n\tldr\tr0, .L3+0x4\n\tstr\tr2, [r0]\n' +
+    '\tadd\tsp, sp, #0x8\n\tpop\t{r0}\n\tbx\tr0\n.L3:\n\t.word\tgW\n\t.word\tgW2\n';
+  const members = [
+    { name: 'a', type: 'u32' },
+    { name: 'b', type: 'u32' },
+  ];
+  const mk8 = { params: ['s32'], returns: 'struct S8', returnLayout: { kind: 'struct' as const, members } };
+
+  test('a load at [sp,#4] inside the temp reads its second member', () => {
+    const out = decompile('f', SRET8, ARMV4T_AGBCC, { prototypes: { mk8, f: { returnsVoid: true } } }).source;
+    expect(out).toContain('struct S8 sp0;');
+    expect(out).toMatch(/sp0 = mk8\(a0\);\s+v0 = p0\[1\];[^]*gW2 = v0;/);
+  });
+
+  test('a struct nothing sizes leaves the word to the slot model, and declines as before', () => {
+    const unsized = { params: ['s32'], returns: 'struct S8' };
+    expect(() => decompile('f', SRET8, ARMV4T_AGBCC, { prototypes: { mk8: unsized } })).toThrow();
+  });
+});

@@ -3700,14 +3700,26 @@ function measureThumbFrame({
   const captureOffsetOf = new Map<Instr, number>();
   const escapedOffsetOf = new Map<Instr, number>();
   let frameBaseIsReturnStorage = false;
+  // …AND THE BYTES EACH SUCH CALL WRITES: a callee declared to return a struct through memory owns
+  // `[off, off + sizeof)` of the frame address it is handed, and the caller reads the members back
+  // with direct sp loads (`mov r0, sp / bl mk8 / ldr r1, [sp] / ldr r2, [sp, #4]`), so a word
+  // there is that temp's, not a slot (`isFrameObjectAccess`). Only where the struct's size is
+  // stated; one nothing sizes leaves its words to the slot model, and the audit's collision.
+  const returnStorage: FrameRange[] = [];
   heldFrameWalk(asmBlocks, entryReachable, mayWriteReg, (ins, held) => {
-    if (
-      ins.mnemonic === 'bl' &&
-      held.get(target.argRegs[0]) === 0 &&
-      calleeRegister(ins, target) === null &&
-      typeof calls.declaredCall(ins.ops[0] ?? '?')?.returned === 'object'
-    ) {
-      frameBaseIsReturnStorage = true;
+    const returned =
+      ins.mnemonic === 'bl' && calleeRegister(ins, target) === null
+        ? calls.declaredCall(ins.ops[0] ?? '?')?.returned
+        : undefined;
+    if (typeof returned === 'object') {
+      const at = held.get(target.argRegs[0]);
+      if (at === 0) {
+        frameBaseIsReturnStorage = true;
+      }
+      const size = returned.type.kind === 'struct' ? returned.type.size : undefined;
+      if (at !== undefined && Number.isFinite(at) && at >= 0 && size !== undefined && size > 0) {
+        returnStorage.push({ from: at, to: at + size });
+      }
     }
     const handed = handedOutRegs(ins);
     const offs = [...held].filter(([r, off]) => handed.includes(r) && off >= 0).map(([, off]) => off);
@@ -4116,6 +4128,10 @@ function measureThumbFrame({
     ((capturedObjectIsTheWholeFrame && off === 0) ||
       (constantCaptureOffsets.has(off) && off >= outgoingArgs.area && off + 4 <= localArea) ||
       (off === 0 && frameBasePublished && outgoingArgs.area === 0 && localArea >= 4) ||
+      (escapesHere &&
+        off >= outgoingArgs.area &&
+        off + 4 <= localArea &&
+        returnStorage.some((r) => off >= r.from && off + 4 <= r.to)) ||
       (inByValueBlock(off, 4) && off >= outgoingArgs.area && off + 4 <= localArea) ||
       (oneObject !== undefined && off >= oneObject.from && off + 4 <= oneObject.to));
 
