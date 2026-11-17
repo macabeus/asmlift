@@ -20270,6 +20270,34 @@ export const SYNTHETIC: SynthSpec[] = [
       use: { params: ['u32 *'], returnsVoid: true },
     },
   },
+  //  41. dmafill_two (kl2dct AgbMain: "the object at [sp,#0) overlaps the SSA slot at [sp,#0]").
+  //      Two DMA fills in a frame of two words, then a call nothing about the frame declares. The
+  //      first temp sits at [sp,#0] and its address is published; the [sp,#0] capture licence of item
+  //      26 holds only where no call may take a stack word, so its `str r2, [sp]` was keyed as an SSA
+  //      slot under the object, "one byte, two models". A frame base published to memory is now the
+  //      object at any frame size (thumb.ts `frameBasePublished`): agbcc puts such a temp at [sp,#0]
+  //      only where no call takes a stack word, and moves it above a fifth argument otherwise
+  //      (corpus/agbcc-dmafill.s `dfive`). `g` is declared K&R so that nothing says it takes no
+  //      stack word. agbcc only, as item 26.
+  {
+    sym: 'dmafill_two',
+    src:
+      'typedef volatile unsigned int vu32;\n' +
+      '#define DmaFill32(v, dst, n) { vu32 tmp = (vu32)(v); *(vu32 *)0x040000D4 = (u32)&tmp; ((vu32 *)0x040000D4)[1] = (u32)(dst); ((vu32 *)0x040000D4)[2] = 0x85000000 | (n); ((vu32 *)0x040000D4)[2]; }\n' +
+      'extern u8 *gP;\n' +
+      'extern u8 *gQ;\n' +
+      'void g();\n' +
+      'void dmafill_two(void)\n' +
+      '{\n' +
+      '    DmaFill32(0, gP, 0x1a);\n' +
+      '    DmaFill32(0, gQ, 0xa);\n' +
+      '    g();\n' +
+      '}',
+    features: ['macro'],
+    toolchains: ['agbcc'],
+    ctx: 'extern u8 *gP;\nextern u8 *gQ;\nvoid g();\nvoid dmafill_two(void);',
+    proto: { dmafill_two: { returnsVoid: true }, g: { returnsVoid: true } },
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────

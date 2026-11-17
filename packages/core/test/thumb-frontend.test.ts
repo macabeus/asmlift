@@ -642,8 +642,10 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '',
       );
       expect(bounded).not.toBe(unionAtBase);
+      // (the published frame base is the object's at any frame size, so the word store and the
+      // byte load are two widths through one object rather than an object over a slot)
       expect(() => decompile('g5', bounded, ARMV4T_AGBCC)).toThrow(
-        'the object at [sp,#0) overlaps the SSA slot at [sp,#0] — one byte, two models',
+        'the accesses through the captured address disagree on width (4 vs 1)',
       );
     });
 
