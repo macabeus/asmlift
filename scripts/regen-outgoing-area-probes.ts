@@ -23,6 +23,12 @@
 //     (frontend/thumb-entry.ts) and `br5` on one branch only; `call9`/`loop9`/`call_br` stage the
 //     block their callee reads, and `krmore`/`krfewer` stage more and fewer words than `kr` reads.
 //     Read by `packages/core/test/thumb-entry.test.ts` and `callee-stack-words.test.ts`.
+//   agbcc-indexed.s — a load through a runtime index into a frame array is read as the outgoing-
+//     argument analysis's `indexed-read` event, based where the index is added, which must be the
+//     array's start or above it: `im1`/`six3` keep `a[i - 1]`'s constant in the index, `six1`/`six2`
+//     stage [sp,#0] between two reads based above it, `bytes`/`members` add a byte array's and a
+//     struct member's offset after the index, and `ix` reads `a[k]` on one path of a loop only.
+//     Read by `packages/core/test/frame-indexed-probes.test.ts`.
 //
 //   ASMLIFT_AGBCC=… npx tsx scripts/regen-outgoing-area-probes.ts
 //
@@ -38,6 +44,7 @@ const PROBES = [
   { source: 'probe-agbcc-restage.c', out: 'agbcc-restage.s', readBy: 'outgoing-area-probes.test.ts' },
   { source: 'probe-agbcc-escape.c', out: 'agbcc-escape.s', readBy: 'frame-escape-probes.test.ts' },
   { source: 'probe-agbcc-entry-stack.c', out: 'agbcc-entry-stack.s', readBy: 'thumb-entry.test.ts' },
+  { source: 'probe-agbcc-indexed.c', out: 'agbcc-indexed.s', readBy: 'frame-indexed-probes.test.ts' },
 ];
 
 const flags = TOOLCHAIN_TARGETS.agbcc.canonicalFlags;

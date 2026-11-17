@@ -3969,11 +3969,18 @@ function measureThumbFrame({
     return escapesHere && off !== undefined ? [{ kind: 'escape', off }] : [];
   };
   const stagesOutgoing = target.compilerBehaviors.stagesOutgoingArgsInFrame === true;
+  // …AND A LOAD THROUGH A RUNTIME INDEX READS THE OBJECT IT IS BASED IN, under the same premise
+  // (`indexedFrameReads` says what it measured of the base)
+  const indexedReadOf = escapesHere ? indexedFrameReads(asmBlocks, entryReachable) : new Map<Instr, number>();
   const eventBlocks = asmBlocks.map((ab) => ({
     events: ab.instrs.flatMap((ins): StackArgsEvent<Instr>[] => {
       const escaped = escapeEvent(ins);
       if (escaped.length > 0 && ins.mnemonic === 'str') {
         return escaped;
+      }
+      const indexedAt = indexedReadOf.get(ins);
+      if (indexedAt !== undefined) {
+        return [{ kind: 'indexed-read', off: indexedAt }];
       }
       // …and a narrow reload of a word slot is that slot's reload, as its word reload would be,
       // one the lift keeps as a capture included (a held argument home's, or one inside the
@@ -4280,6 +4287,96 @@ function frameAddressDefined(ins: Instr, held: ReadonlyMap<string, number>): [st
   return null;
 }
 
+// THE LOADS THROUGH A RUNTIME INDEX INTO THE FRAME, each with the frame offset its address is based
+// at — what the outgoing-argument analysis reads as an `indexed-read` event. agbcc's `a[i]` over a
+// frame array is `lsl r0, r4, #2 / add r0, r0, sp / ldr r0, [r0]`, and for an array above [sp,#0]
+// it adds the array's offset AFTER the index (`add r0, r0, sp / add r0, r0, #8 / ldr r0, [r0]`), so
+// the base is sp's offset at the index add plus every constant added after it, plus the load's own
+// displacement. A register-offset load off a held capture (`mov r1, sp / ldr r0, [r1, r2]`) is the
+// same read, based at the capture.
+//
+// THE BASE IS THE OBJECT'S START OR ABOVE IT, measured rather than assumed: agbcc keeps the
+// index's own constant in the index (`a[i - 1]`, `a[i + 1]`, `a[j - 1]` are `sub r0, #1` / `add
+// r0, #1` before the shift, then `add r0, r0, sp / add r0, #<a's offset>`), and stages a fifth
+// argument at [sp,#0] between two such reads (`six(a[i], 2, 3, 4, gC, a[j])`) with each read's base
+// at the array's offset, never 0. A `sub` of a constant from an indexed address could put the base
+// below the object, so it ends the walk instead; so does any other write, a call, and the end of
+// the block — each only costs the read, which is the decline.
+function indexedFrameReads(asmBlocks: readonly AsmBlock[], entryReachable: ReadonlySet<number>): Map<Instr, number> {
+  const found = new Map<Instr, number>();
+  for (const b of entryReachable) {
+    const held = new Map<string, number>();
+    const indexed = new Map<string, number>();
+    const heldAt = (r: string): number | undefined => {
+      if (isSpReg(r)) {
+        return 0;
+      }
+      const o = held.get(reg(r));
+      return o !== undefined && Number.isFinite(o) ? o : undefined;
+    };
+    for (const ins of asmBlocks[b].instrs) {
+      if (SINGLE_LOAD.test(ins.mnemonic) && ins.ops[1] !== undefined) {
+        const { base, off, regOff } = parseAddr(ins.ops[1]);
+        const at =
+          regOff === undefined
+            ? isSpReg(base)
+              ? undefined
+              : indexed.get(reg(base))
+            : (heldAt(base) ?? (isSpReg(regOff) ? undefined : heldAt(regOff)));
+        if (at !== undefined && off >= 0) {
+          found.set(ins, at + off);
+        }
+      }
+      if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
+        held.clear();
+        indexed.clear();
+        continue;
+      }
+      const [d, s1, s2] = ins.ops;
+      let next: number | undefined;
+      if (d !== undefined && !isSpReg(d) && /^adds?$/.test(ins.mnemonic)) {
+        const [src, by] = s2 === undefined ? [d, s1] : [s1, s2];
+        if (src !== undefined && by !== undefined) {
+          if (IMM_LITERAL.test(by)) {
+            const from = indexed.get(reg(src));
+            next = from === undefined || imm(by) < 0 ? undefined : from + imm(by);
+          } else {
+            const [a, c] = [heldAt(src), heldAt(by)];
+            const [ia, ic] = [indexed.get(reg(src)), indexed.get(reg(by))];
+            // a frame address plus a register holding no frame address, or an indexed address plus
+            // a further plain index
+            if (a !== undefined && c === undefined && ic === undefined) {
+              next = a;
+            } else if (c !== undefined && a === undefined && ia === undefined) {
+              next = c;
+            } else if (ia !== undefined && c === undefined && ic === undefined && a === undefined) {
+              next = ia;
+            } else if (ic !== undefined && a === undefined && ia === undefined && c === undefined) {
+              next = ic;
+            }
+          }
+        }
+      } else if (d !== undefined && /^movs?$/.test(ins.mnemonic) && s2 === undefined && s1 !== undefined) {
+        next = indexed.get(reg(s1));
+      }
+      const carried = frameAddressDefined(ins, held);
+      for (const r of [...new Set([...held.keys(), ...indexed.keys()])]) {
+        if (mayWriteReg(ins, r)) {
+          held.delete(r);
+          indexed.delete(r);
+        }
+      }
+      if (carried !== null && Number.isFinite(carried[1])) {
+        held.set(carried[0], carried[1]);
+      }
+      if (next !== undefined && d !== undefined) {
+        indexed.set(reg(d), next);
+      }
+    }
+  }
+  return found;
+}
+
 // A NARROW RELOAD OF A WORD SLOT, read through a copy of sp. agbcc promotes a `u8`/`u16` local to
 // a word (thumb.h PROMOTE_MODE), spills it with `str`, and where a use is narrow it reloads only
 // the narrow part. Thumb has no sp-relative `ldrb`/`ldrh`, so that reload goes through a copy of
@@ -4483,6 +4580,7 @@ function frameAddressesAtCalls(
 // function): then the address is written INTO this frame, and nothing outside has been handed it.
 // A frame address the base reached through memory is the one this misses, and it counts as
 // leaving. A `strh`/`strb` hands over part of an address, which no reader can follow.
+
 function frameAddressReceivers(
   ins: Instr,
   target: TargetDescription,

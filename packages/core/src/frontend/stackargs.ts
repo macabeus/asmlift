@@ -15,7 +15,7 @@
  *  that matter — a sub-word or register-offset access is not a slot, and one anywhere turns the
  *  whole word-slot model off at the same gate this analysis's `blocker` feeds, so no access that
  *  could alias a licensed word is ever silently missing from the events. */
-export type StackArgsEvent<C> = StackArgsSlot | StackArgsCall<C> | StackArgsEscape;
+export type StackArgsEvent<C> = StackArgsSlot | StackArgsCall<C> | StackArgsEscape | StackArgsIndexedRead;
 
 /** A whole-word access to a reserved frame slot at `off`, which must lie inside `[0, localArea)`. */
 export interface StackArgsSlot {
@@ -33,6 +33,31 @@ export interface StackArgsSlot {
  *  reading of a whole-function layout fact (a block copy's base escapes too). */
 export interface StackArgsEscape {
   readonly kind: 'escape';
+  readonly off: number;
+}
+
+/** A LOAD THROUGH A RUNTIME INDEX into the frame object based at `sp + off` — `lsl r0, r4, #2 /
+ *  add r0, r0, sp / ldr r0, [r0]`, agbcc's `a[i]` — which reads SOME word from `off` up, and this
+ *  function cannot say which. It is read exactly as an `escape` is, for the same reason: the
+ *  receiver here is this function's own load, and the words from `off` up are an object's, so a
+ *  store there that nothing reloads by its offset has been read through the index.
+ *
+ *  `off` is where the address is based BEFORE the index is added, and the frontend owes that it is
+ *  the object's start or a byte inside it, never a byte below it — a constant folded out of the
+ *  index into the base (`&a[i - 1]` as `sp + 4*i` for an `a` at [sp,#4]) would name a word the
+ *  object does not own, possibly an outgoing argument's. Emitted, like the escape, only under
+ *  `compilerBehaviors.escapedFrameAddressNamesALocal`, the premise that a frame address names a
+ *  local's words from it up; the frontend states what it measured for the base.
+ *
+ *  AND IT BOUNDS THE AREA, as a load does (`loadedWordBound`), flow-insensitively: the read names
+ *  no one word, but its BASE is a layout fact — under that premise `sp + off` is inside a local,
+ *  the outgoing area sits beneath every local, so no word from `off` up is any call's argument,
+ *  whichever path runs. The frame-object audit already excuses every store at or above an indexed
+ *  object the same way (`storedNeverRead`'s `reachedFrom`). A loop that reads `a[i]` only when a
+ *  mask bit is set leaves `a[0]`'s store unread on the path with no bit set, and the per-point
+ *  reading alone would ask that store of the next call. */
+export interface StackArgsIndexedRead {
+  readonly kind: 'indexed-read';
   readonly off: number;
 }
 
@@ -104,6 +129,10 @@ export interface OutgoingArgs<C> {
 
 const isCallEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsCall<C> => ev.kind === 'call';
 const isSlotEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsSlot => ev.kind === 'store' || ev.kind === 'load';
+/** An event that hands the words from its offset up to a reader this analysis cannot see by
+ *  offset: an escaped address's receiver, or this function's own load through a runtime index. */
+const readsFromUp = <C>(ev: StackArgsEvent<C>): ev is StackArgsEscape | StackArgsIndexedRead =>
+  ev.kind === 'escape' || ev.kind === 'indexed-read';
 
 /** THE LOWEST FRAME WORD THIS FUNCTION LOADS AT OR ABOVE `from`, or `Infinity` when it loads none
  *  or nothing states `from`. The Thumb frontend calls it once per lift and hands the number to both
@@ -118,7 +147,8 @@ const isSlotEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsSlot => ev.kind =
  *
  *  Only a load in a live block counts: a load that cannot run proves nothing. An ESCAPE does not
  *  count: its receiver MAY read the words, and a bound is a proof, which a read that may not happen
- *  cannot supply. */
+ *  cannot supply. A load through a runtime index (`indexed-read`) does: it is this function's own
+ *  load, and its base is inside a local (the event says why). */
 export function loadedWordBound<C>(
   blocks: readonly StackArgsBlock<C>[],
   live: ReadonlySet<number>,
@@ -130,7 +160,7 @@ export function loadedWordBound<C>(
   let bound = Infinity;
   for (const b of live) {
     for (const ev of blocks[b].events) {
-      if (ev.kind === 'load' && ev.off >= from) {
+      if ((ev.kind === 'load' || ev.kind === 'indexed-read') && ev.off >= from) {
         bound = Math.min(bound, ev.off);
       }
     }
@@ -395,8 +425,9 @@ export function analyzeOutgoingArgs<C>({
           may.delete(ev.off);
           must.delete(ev.off);
         } else {
-          // the receiver of the escaped address reads what it was handed, so those words stop
-          // being pending exactly as a reload would end them
+          // the receiver of the escaped address reads what it was handed (an indexed load reads
+          // what its base addresses), so those words stop being pending exactly as a reload would
+          // end them
           for (const o of everySlot) {
             if (o >= ev.off) {
               may.delete(o);
@@ -481,15 +512,18 @@ export function analyzeOutgoingArgs<C>({
   // Under agbcc the two never meet (an address-taken local sits ABOVE the outgoing area, and at
   // [sp,#0] only when no call takes a stack word), so a function that has both is not agbcc's
   // layout and declines.
-  const escapes = [...live].flatMap((b) => asmBlocks[b].events.flatMap((ev) => (ev.kind === 'escape' ? [ev.off] : [])));
-  const lowestEscape = Math.min(Infinity, ...escapes);
+  const escapes = [...live].flatMap((b) => asmBlocks[b].events.filter(readsFromUp));
+  const lowestEscape = Math.min(Infinity, ...escapes.map((ev) => ev.off));
+  const lowestHow = escapes.some((ev) => ev.kind === 'escape' && ev.off === lowestEscape)
+    ? 'escapes this function'
+    : 'is read through a runtime index';
   for (const ev of calls) {
     const offs = blocks.get(ev.call) ?? [];
     const clash = offs.find((o) => o >= lowestEscape);
     if (clash !== undefined) {
       return refuse(
         `callee \`${ev.callee}\` ${ev.declared === null ? `loads ${offs.length} incoming stack words in its body` : `is declared with ${declaredAs(ev, offs)}`}, so [sp,#${clash}] is its outgoing stack argument — ` +
-          `but the frame address [sp,#${lowestEscape}] escapes this function, so the words from there up are an object's, and the two name the same word`,
+          `but the frame address [sp,#${lowestEscape}] ${lowestHow}, so the words from there up are an object's, and the two name the same word`,
       );
     }
   }
