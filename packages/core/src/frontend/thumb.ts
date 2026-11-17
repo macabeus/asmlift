@@ -4258,6 +4258,18 @@ function measureThumbFrame({
     return escapesHere && off !== undefined ? [{ kind: 'escape', off }] : [];
   };
   const stagesOutgoing = target.compilerBehaviors.stagesOutgoingArgsInFrame === true;
+  // THE FRAME BASE PUBLISHED TO MEMORY, at any frame size: a word store hands `sp + 0` to memory
+  // outside the frame (`escapedOffsetOf`, a `str`), under the premise that an escaped frame address
+  // names a local's words from it up. Then [sp,#0] is that local and the outgoing area is empty —
+  // agbcc puts the area beneath every local, and C gives an argument word no address to publish — so
+  // a word access there is the object's (`isFrameObjectAccess`). The DMA fill's source temp, `vu32 t
+  // = 0; *(vu32 *)REG_DMA3SAD = (u32)&t;`, in a frame wider than its one word with a call after it
+  // (corpus/agbcc-dmafill.s `dtwo`); beside a fifth argument agbcc moves the temp to [sp,#4] and
+  // stages [sp,#0] after it (`dfive`). Unlike a constant capture's offset it STAYS an outgoing-
+  // argument event: the publish ends what is pending where it fires, so a word staged at [sp,#0]
+  // for a call after it still reaches that call pending, and refuses there.
+  const frameBasePublished =
+    escapesHere && [...escapedOffsetOf].some(([ins, off]) => off === 0 && ins.mnemonic === 'str');
   // …AND A LOAD THROUGH A RUNTIME INDEX READS THE OBJECT IT IS BASED IN, under the same premise
   // (`indexedFrameReads` says what it measured of the base)
   const indexedReadOf = escapesHere ? indexedFrameReads(asmBlocks, entryReachable) : new Map<Instr, number>();
@@ -4391,6 +4403,7 @@ function measureThumbFrame({
     width === 4 &&
     ((capturedObjectIsTheWholeFrame && off === 0) ||
       (constantCaptureOffsets.has(off) && off >= outgoingArgs.area && off + 4 <= localArea) ||
+      (off === 0 && frameBasePublished && outgoingArgs.area === 0 && localArea >= 4) ||
       (inByValueBlock(off, 4) && off >= outgoingArgs.area && off + 4 <= localArea) ||
       (oneObject !== undefined && off >= oneObject.from && off + 4 <= oneObject.to));
 

@@ -73,3 +73,68 @@ describe('a publish through a register that holds a frame address elsewhere', ()
     );
   });
 });
+
+// The frame base published (`mov r0, sp / str r0, [r3]`) in a frame wider than one word, with a
+// call after it: [sp,#0] is the temp, so it is the object's and no SSA slot (thumb.ts
+// `frameBasePublished`). agbcc puts such a temp at [sp,#0] only where no call takes a stack word.
+describe('a published frame base is a local, at any frame size', () => {
+  test('dtwo: two fills, the first at [sp,#0], then a call nothing declares, lifts', () => {
+    expect(lines('dtwo').slice(0, 7)).toEqual([
+      'dtwo:',
+      'push\t{r4, lr}',
+      'add\tsp, sp, #-0x8',
+      'mov\tr2, #0x0',
+      'str\tr2, [sp]',
+      'ldr\tr3, .L14',
+      'mov\tr0, sp',
+    ]);
+    const out = lift('dtwo');
+    expect(out).toContain('    volatile u32 sp0;\n    volatile u32 sp4;\n    sp0 = 0;\n');
+    expect(out).toContain('= &sp0;');
+    expect(out).toContain('= &sp4;');
+  });
+
+  test('dfive: beside a fifth argument agbcc moves the temp above it, and stages [sp,#0] after', () => {
+    const dfive = lines('dfive');
+    expect(dfive).toContain('add\tr2, sp, #0x4');
+    expect(dfive).not.toContain('mov\tr0, sp');
+    expect(dfive.indexOf('str\tr0, [sp]')).toBeGreaterThan(dfive.indexOf('add\tr2, sp, #0x4'));
+    const five = { five: { params: ['s32', 's32', 's32', 's32', 's32'], returnsVoid: true } };
+    expect(lift('dfive', five)).toContain('    five(1, 2, 3, 4, a0);\n');
+    expect(() => lift('dfive')).toThrow(/the store to \[sp,#0\] is never reloaded/);
+  });
+
+  // the controls: a word staged at [sp,#0] after the frame base is published reaches its call
+  // pending, as it did before
+  const restaged = [
+    'push {r4, lr}',
+    'add sp, sp, #-0x8',
+    'mov r2, #0x0',
+    'str r2, [sp]',
+    'ldr r3, .L3',
+    'mov r0, sp',
+    'str r0, [r3]',
+    'str r1, [sp]',
+    'mov r0, #0x1',
+    'mov r1, #0x2',
+    'mov r2, #0x3',
+    'mov r3, #0x4',
+    'bl five',
+    'add sp, sp, #0x8',
+    'pop {r4}',
+    'pop {r0}',
+    'bx r0',
+    '.L3:',
+    '.word 0x40000d4',
+  ].join('\n');
+  test('a word staged at the published base after the publish declines, undeclared', () => {
+    expect(() => decompile('f', restaged, ARMV4T_AGBCC)).toThrow(/the store to \[sp,#0\] reaches `bl five` unread/);
+  });
+
+  test('…and declared, its argument word and the published object are the same word', () => {
+    const five = { five: { params: ['s32', 's32', 's32', 's32', 's32'], returnsVoid: true } };
+    expect(() => decompile('f', restaged, ARMV4T_AGBCC, { prototypes: five })).toThrow(
+      /the frame address \[sp,#0\] escapes this function/,
+    );
+  });
+});
