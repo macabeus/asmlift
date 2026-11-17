@@ -85,6 +85,21 @@ function compiledContextGlobals(
   };
 }
 
+/** An agbcc listing without its `@` comments (`SynthSpec.disassembled`). A line holding a string
+ *  literal refuses: an `@` inside one is not a comment, and no row needs one read. */
+export function withoutComments(asm: string, what: string): string {
+  return asm
+    .split('\n')
+    .map((line) => {
+      if (line.includes('"')) {
+        throw new Error(`${what}: the listing holds a string literal, which \`disassembled\` does not strip around`);
+      }
+      const at = line.indexOf('@');
+      return at === -1 ? line : line.slice(0, at).trimEnd();
+    })
+    .join('\n');
+}
+
 export interface SyntheticFilter {
   only?: string; // substring match on the symbol
   toolchain?: ToolchainId;
@@ -117,6 +132,11 @@ export function syntheticCases(filter: SyntheticFilter = {}): Case[] {
       const cflags = spec.cflags ?? canonicalFlagsOf(tcId);
       if (!cflags) {
         throw new Error(`${spec.sym}: ${tcId} has no canonical flags, so it can carry no synthetic row of its own`);
+      }
+      if (spec.disassembled && tcId !== 'agbcc') {
+        throw new Error(
+          `${spec.sym}: \`disassembled\` strips agbcc's \`@\` comments, so it is agbcc only, got ${tcId}`,
+        );
       }
       const tc = TOOLCHAINS[tcId];
       const codegen = codegenFor(tcId, cflags);
@@ -166,7 +186,12 @@ export function syntheticCases(filter: SyntheticFilter = {}): Case[] {
         note: spec.note,
         toolchain: tc,
         codegen,
-        build: () => cachedBuildTarget(tc, codegen.cflags, spec.src, spec.sym, spec.lang),
+        build: () => {
+          const built = cachedBuildTarget(tc, codegen.cflags, spec.src, spec.sym, spec.lang);
+          return spec.disassembled
+            ? { ...built, asm: withoutComments(built.asm, `synthetic:${spec.sym}:${tcId}`) }
+            : built;
+        },
       });
     }
   }

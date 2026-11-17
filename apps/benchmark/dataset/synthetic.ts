@@ -78,6 +78,13 @@ export interface SynthSpec {
    *  lift spells its signature from `proto`, which states no integer type. Absent on every other
    *  row, so the tier is unchanged by this field existing. */
   candidateContext?: string;
+  /** THE REFERENCE LISTING AS A DISASSEMBLER GIVES IT: both decompilers read the compiled `.s` with
+   *  every `@` comment removed — what a romlift, luvdis or pret listing of the same bytes carries,
+   *  since a comment is the compiler's text and not the object's. The object scored against is the
+   *  same one. agbcc only (`@` is ARM gas's comment character); absent on every other row, so the
+   *  tier is unchanged by this field existing. A row sets it when a comment is the only thing that
+   *  states a fact the bytes leave to proof — agbcc's `@far jump` on a relay (`farjump_*_bare`). */
+  disassembled?: true;
 }
 
 const ALL: ToolchainId[] = ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'mwcc_242_81'];
@@ -11187,6 +11194,11 @@ export const SYNTHETIC: SynthSpec[] = [
   //      (_pool), or, when an earlier pool already fixed the parity, a block that runs into the
   //      pool (_sealed). Lowering the relay to `b` in the probes' `.s` lifts and MATCHes them.
   //      Thumb only: no other synthetic toolchain has a branch this short.
+  //      farjump_cond_bare / farjump_pool_bare / farjump_sealed_bare are the same three read as a
+  //      disassembler lists them (`disassembled`: no `@far jump` comment, as romlift's kl2dct
+  //      listings and every pret-style split spell a relay). The relay is then a bare `bl` to a
+  //      label of the function, lowered to `b` only behind the proof that the lr it writes is never
+  //      read (frontend/thumb.ts `lowerFarJumpRelays`), which the mark never replaced.
   //   2. sret4two / sret4mem (3). A struct of four bytes or less returned by value comes back
   //      through a hidden pointer to a frame temp on agbcc. With one word of frame, the read of a
   //      member is what is not modelled (sret4mem); with two temps, the offset-0 capture is not an
@@ -11326,6 +11338,51 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'void f(s32 n); void farjump_sealed(s32 x, s32 y);',
     proto: { f: { params: 1, returnsVoid: true }, farjump_sealed: { returnsVoid: true } },
+  },
+  {
+    sym: 'farjump_cond_bare',
+    src:
+      'extern void h(void);\n' +
+      '#define H4 h(); h(); h(); h();\n' +
+      '#define H32 H4 H4 H4 H4 H4 H4 H4 H4\n' +
+      '#define H512 H32 H32 H32 H32 H32 H32 H32 H32 H32 H32 H32 H32 H32 H32 H32 H32\n' +
+      'void farjump_cond_bare(s32 a)\n{\n    if (a > 5)\n        return;\n    H512\n}',
+    features: ['branch', 'macro'],
+    toolchains: ['agbcc'],
+    disassembled: true,
+    ctx: 'void h(void); void farjump_cond_bare(s32 a);',
+    proto: { h: { params: 0, returnsVoid: true }, farjump_cond_bare: { returnsVoid: true } },
+  },
+  {
+    sym: 'farjump_pool_bare',
+    src:
+      'extern void f(s32 n);\n' +
+      '#define A(n) f(n); f(n + 0x10000); f(n + 0x20000); f(n + 0x30000);\n' +
+      '#define B(n) A(n) A(n + 1) A(n + 2) A(n + 3)\n' +
+      '#define C(n) B(n) B(n + 4) B(n + 8) B(n + 12)\n' +
+      'void farjump_pool_bare(s32 x)\n{\n    if (x) {\n        f(0x12345);\n    } else {\n' +
+      '        C(0x1000) C(0x1100) C(0x1200) C(0x1300) C(0x1400)\n    }\n    f(2);\n}',
+    features: ['branch', 'macro'],
+    toolchains: ['agbcc'],
+    disassembled: true,
+    ctx: 'void f(s32 n); void farjump_pool_bare(s32 x);',
+    proto: { f: { params: 1, returnsVoid: true }, farjump_pool_bare: { returnsVoid: true } },
+  },
+  {
+    sym: 'farjump_sealed_bare',
+    src:
+      'extern void f(s32 n);\n' +
+      '#define A(n) f(n); f(n + 0x10000); f(n + 0x20000); f(n + 0x30000);\n' +
+      '#define B(n) A(n) A(n + 1) A(n + 2) A(n + 3)\n' +
+      '#define C(n) B(n) B(n + 4) B(n + 8) B(n + 12)\n' +
+      'void farjump_sealed_bare(s32 x, s32 y)\n{\n    if (y) {\n        f(0x54321);\n    } else {\n        f(3);\n    }\n' +
+      '    if (x) {\n        f(0x12345);\n    } else {\n' +
+      '        C(0x1000) C(0x1100) C(0x1200) C(0x1300) C(0x1400)\n    }\n    f(2);\n}',
+    features: ['branch', 'macro'],
+    toolchains: ['agbcc'],
+    disassembled: true,
+    ctx: 'void f(s32 n); void farjump_sealed_bare(s32 x, s32 y);',
+    proto: { f: { params: 1, returnsVoid: true }, farjump_sealed_bare: { returnsVoid: true } },
   },
   {
     sym: 'sret4two',

@@ -115,6 +115,10 @@ describe("a proto's callee arity agrees with the row's own call sites", () => {
 // 0xa4600000 / 0xcc006000). That is the dataset's deliberate way of running one shape across four
 // toolchains, so the specs are folded by `sym` first and only distinct syms are compared.
 //
+// Nor is a row that hands the decompilers the same source's object through another listing
+// (`disassembled`: `farjump_cond_bare` is `farjump_cond` with the compiler's comments removed):
+// what the decompilers read differs, and that is the capability the pair separates.
+//
 // The canonical form renames every non-keyword identifier to its rank of first appearance, which
 // is exactly the class this catches and no wider: a different constant, a different member offset
 // or a different operator all survive it, so a CONTROL row that differs by one token is not a
@@ -148,7 +152,10 @@ describe('no synthetic row is another one alpha-renamed', () => {
     if (prev) {
       prev.toolchains.push(...s.toolchains);
     } else {
-      bySym.set(s.sym, { toolchains: [...s.toolchains], canon: canon(s.src) });
+      bySym.set(s.sym, {
+        toolchains: [...s.toolchains],
+        canon: `${s.disassembled ? 'disassembled ' : ''}${canon(s.src)}`,
+      });
     }
   }
 
