@@ -88,9 +88,9 @@ describe('readThumbText', () => {
     expect(() => readThumbText('f', SWITCH(DIRECT, '.Lp:\n\t.word\tgOther\n'))).toThrow(/indirect\/computed jump/);
   });
 
-  test('refuses a `bl` to a label inside the function', () => {
+  test('refuses a `bl` to a label inside the function whose lr it may not drop', () => {
     expect(() => readThumbText('f', 'f:\n\tbl\t.L2\n\tbx\tlr\n.L2:\n\tbx\tlr\n')).toThrow(
-      /'bl \.L2' targets a label inside this function/,
+      /'bl \.L2' \(a `bl` to a label inside this function, read as a long branch\) is in a function whose entry block does not save lr/,
     );
   });
 

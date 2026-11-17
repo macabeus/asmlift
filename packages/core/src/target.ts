@@ -52,7 +52,7 @@
 //     (raise/globalshape.ts, run on the LIFTED fn), `eightByteReturnScratch`
 //     (frontend/thumb.ts, which reads the epilogue), `callThunks` (frontend/thumb.ts, which
 //     lowers a `bl` to one as a call through its register), `farJumpRelay` (frontend/thumb.ts,
-//     which lowers a marked `bl` to the branch it stands for), `roundTripsDoubleLiterals`
+//     which reads a marked `bl` as the branch it stands for), `roundTripsDoubleLiterals`
 //     (raise/floathelpers.ts), `volatileReadsExtendInRegister` (frontend/device-pins.ts, and
 //     raise/declared-volatile.ts through liftStamped and the offset-name pass), and
 //     `keepsUnusedReads` and `discardsUnusedReadsInto` (frontend/dead-reads.ts, the second
@@ -476,13 +476,14 @@ export interface ControlFlowBehaviors {
   hoistsSingleSetArm?: boolean;
   // How this compiler marks a BRANCH it had to spell as a call: a `bl <label>` whose line carries
   // a comment matching `comment` (tested against the text from its `@` to the end of the line) is
-  // a relay to that label of the same function, not a call. Two of its facts are this compiler's,
-  // and the Thumb frontend's lowering rests on them (`lowerFarJumpRelays`): what the mark means,
-  // and that the compiler pushes lr in every function with one, so the lr the relay writes is
-  // never the one the function returns through.
+  // its relay to that label of the same function, not a call. The Thumb frontend lowers it to `b`
+  // behind a proof on the function's own text that the lr it writes is never read
+  // (`lowerFarJumpRelays`) — the compiler pushes lr in every function with one, so every compiled
+  // relay passes — and declines a marked `bl` that targets no code label of the function.
   //
-  // ABSENT ⇒ no comment makes a `bl` anything but a call: a `bl` to a label of the function keeps
-  // its decline, however its line is commented.
+  // The mark is not what makes the lowering sound: an unmarked `bl` to a code label of the
+  // function (a disassembly carries no comment) is lowered behind the same proof. ABSENT ⇒ every
+  // comment is dropped, and such a `bl` is read by that shape alone.
   farJumpRelay?: { readonly comment: RegExp };
   // Regime-A switch recovery: accept a RELATIONAL test as a case where the scrutinee values that
   // can reach it — narrowed by the tests above it — leave exactly one on a side this compiler's

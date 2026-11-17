@@ -70,17 +70,25 @@ test('a side-effect-only unmodelled instruction declines loud, never silently va
 test('a `bl` into this function’s own text declines loud rather than emitting a call', () => {
   // agbcc relays a conditional branch past Thumb's ±256-byte reach through `b .Lfar @long jump`,
   // and past that branch's own ±2 KB reach through `bl .Lfar @far jump`. Read as a call, the
-  // second form emits `.L2(…)` — a transfer turned into something that returns, and not C. With
-  // its mark the relay is lowered (thumb-far-jump.test.ts); without it — a splitter that dropped
-  // comments, or a call thunk — it is this shape, and declines.
+  // second form emits `.L2(…)` — a transfer turned into something that returns, and not C. Marked
+  // or not, it is lowered to `b` only where the lr it writes is provably never read
+  // (thumb-far-jump.test.ts); here the function returns through the live lr, so it declines.
   const farJump =
     '\t.code\t16\n\t.globl\tf\n\t.thumb_func\nf:\n\tcmp\tr0, #0\n\tbne\t.LCB0\n\tbl\t.L2\n' +
     '.LCB0:\n\tmov\tr0, #1\n\tbx\tlr\n.L2:\n\tmov\tr0, #2\n\tbx\tlr\n';
   expect(() => decompile('f', farJump, ARMV4T_AGBCC)).toThrow(FrontendUnsupportedError);
-  expect(() => decompile('f', farJump, ARMV4T_AGBCC)).toThrow(/targets a label inside this function/);
+  expect(() => decompile('f', farJump, ARMV4T_AGBCC)).toThrow(
+    /'bl \.L2' \(a `bl` to a label inside this function, read as a long branch\) is in a function whose entry block does not save lr/,
+  );
   const annotated = decompile('f', farJump, ARMV4T_AGBCC, { onGap: 'annotate' });
   expect(annotated.source).toContain('ASMLIFT_ERROR');
   expect(annotated.source).not.toContain('.L2(');
+  // A `blx` into the function's own text is no relay (it would switch to ARM state), so it keeps
+  // the call-shaped decline even where lr is provably dead.
+  const blx =
+    '\t.code\t16\n\t.globl\tf\n\t.thumb_func\nf:\n\tpush\t{lr}\n\tblx\t.L2\n\tpop\t{r0}\n\tbx\tr0\n' +
+    '.L2:\n\tmov\tr0, #1\n\tbx\tlr\n';
+  expect(() => decompile('f', blx, ARMV4T_AGBCC)).toThrow(/'blx \.L2' targets a label inside this function/);
 
   // A DECLARED function is a call however the slice came to hold it. Recursion:
   const rec =

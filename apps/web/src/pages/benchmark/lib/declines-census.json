@@ -11,7 +11,7 @@
         "cannot lift 'X': 'X X' calls through a register that holds no function's address — not modelled",
         "cannot lift 'X': 'X X' loads a word that is not X's own into X, which is then used as a value — a pop is read as restoring each register it names, so the copy it makes is not modelled",
         "cannot lift 'X': 'X X' loads a word that is not X's own save into callee-saved X, and X reaches a return so, unrestored — the caller sees the write, which no C statement spells",
-        "cannot lift 'X': 'X X' targets a label inside this function and not a declared function — an intra-function long branch and a locally-defined call thunk are the same shape here, so this declines rather than guessing which",
+        "cannot lift 'X': 'X X' targets a label inside this function and not a declared function, and is not a relay this frontend lowers to the branch it stands for — read as a call it would return into a block",
         "cannot lift 'X': 'X' emits fill into the code stream and fillits fill bytes are not a pad encoding this frontend models — they are real instructionsmakes item sizes unknowable",
         "cannot lift 'X': 'X' is a label here but not a function (the function is 'X')",
         "cannot lift 'X': ARM-mode function (arm_func_start) — this frontend lifts Thumb only",
