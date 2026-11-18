@@ -78,7 +78,7 @@ test('a `bl` into this function’s own text declines loud rather than emitting 
     '.LCB0:\n\tmov\tr0, #1\n\tbx\tlr\n.L2:\n\tmov\tr0, #2\n\tbx\tlr\n';
   expect(() => decompile('f', farJump, ARMV4T_AGBCC)).toThrow(FrontendUnsupportedError);
   expect(() => decompile('f', farJump, ARMV4T_AGBCC)).toThrow(
-    /'bl \.L2' \(a `bl` to a label inside this function, read as a long branch\) is in a function whose entry block does not save lr/,
+    /'bl \.L2' \(a `bl` to a label inside this function — a long branch or a call to a local thunk, read as a branch only where the lr it writes is never read\) is in a function whose entry block does not save lr/,
   );
   const annotated = decompile('f', farJump, ARMV4T_AGBCC, { onGap: 'annotate' });
   expect(annotated.source).toContain('ASMLIFT_ERROR');

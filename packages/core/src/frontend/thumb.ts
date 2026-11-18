@@ -3019,10 +3019,14 @@ function refuseReturnsNotThroughCallersLr(name: string, cfg: ThumbCfg): void {
 }
 
 /** How a relay candidate is named in a decline: a marked one by the compiler's word for it, an
- *  unmarked one by what it is, since nothing says it is a relay. */
+ *  unmarked one by what it is and the open question about it — nothing says whether it is a long
+ *  branch or a call to a local thunk, and a decline means the lowering could not settle that. */
 const sayRelay = (ins: Instr) =>
   `'${ins.asWritten ?? ins.mnemonic} ${ins.ops.join(', ')}' ` +
-  (ins.farJump === 'marked' ? '(a far-jump relay)' : '(a `bl` to a label inside this function, read as a long branch)');
+  (ins.farJump === 'marked'
+    ? '(a far-jump relay)'
+    : '(a `bl` to a label inside this function — a long branch or a call to a local thunk, ' +
+      'read as a branch only where the lr it writes is never read)');
 
 /** Lower every relay candidate (`Instr.farJump`) in the selected function to the `b .Lx` it stands
  *  for, in place, or decline. A candidate is a `bl` agbcc marked as its far jump (`bl .Lx @far jump`,

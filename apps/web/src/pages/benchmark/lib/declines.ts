@@ -765,7 +765,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // and code that runs into data are in the residue: counting them here would book a layout gap
     // as a far jump. No row reaches either refusal, so the class is in `NO_ROWS`.
     key: 'far-jump',
-    label: 'Thumb `bl` relays inside a function whose lr is not provably dead, or that leave it',
+    label: 'Thumb `bl` to a label inside its function whose lr is not provably dead, or a marked relay that leaves it',
     pattern: /would drop the lr write a|does not target a code label of this function/,
   },
   // The three control-transfer gaps, ABOVE `branch-form`, which would otherwise take all of them on

@@ -199,7 +199,7 @@ describe('what is not provably a relay declines loud', () => {
       '.L1:\n\tpop\t{r0}\n\tpop\t{r0}\n\tbx\tr0\n.L2:\n\tbx\tr3\n';
     declines(
       thunk,
-      /'bl \.L2' \(a `bl` to a label inside this function, read as a long branch\) is in a function whose entry block does not save lr with a `push`/,
+      /'bl \.L2' \(a `bl` to a label inside this function — a long branch or a call to a local thunk, read as a branch only where the lr it writes is never read\) is in a function whose entry block does not save lr with a `push`/,
     );
   });
 
@@ -207,7 +207,7 @@ describe('what is not provably a relay declines loud', () => {
   test('an unmarked `bl` to a thunk that returns with `bx lr` declines', () => {
     declines(
       `${H}\tpush\t{lr}\n\tbl\t.L2\n\tpop\t{r0}\n\tbx\tr0\n.L2:\n\tmov\tr0, #1\n\tbx\tlr\n`,
-      /a `bl` to a label inside this function, read as a long branch\) is in a function that names lr after saving it \('bx lr'\)/,
+      /a `bl` to a label inside this function — a long branch or a call to a local thunk, read as a branch only where the lr it writes is never read\) is in a function that names lr after saving it \('bx lr'\)/,
     );
   });
 
@@ -228,7 +228,7 @@ describe('what is not provably a relay declines loud', () => {
   test('an unmarked `bl` in a function that branches back to its entry declines', () => {
     declines(
       `${H}\tpush\t{lr}\n\tcmp\tr0, #5\n\tble\t.LCB0\n\tbl\t.L2\n.LCB0:\n\tsub\tr0, r0, #1\n\tb\tf\n.L2:\n\tpop\t{r0}\n\tbx\tr0\n`,
-      /\(a `bl` to a label inside this function, read as a long branch\) is in a function that branches back to its entry/,
+      /\(a `bl` to a label inside this function — a long branch or a call to a local thunk, read as a branch only where the lr it writes is never read\) is in a function that branches back to its entry/,
     );
   });
 
