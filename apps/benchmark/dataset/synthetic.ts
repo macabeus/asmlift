@@ -20327,6 +20327,38 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'extern u32 gA, gB, gC;\nint kr();\nint stkidx_below(s32 i);',
     proto: { stkidx_below: { params: ['s32'] }, kr: { returns: 'int' } },
   },
+  //  39c. stkidx_byval — the CONTROL of item 39's ceiling, a soundness pin that declines. A struct
+  //      passed by value through a pointer formed below its array, `struct S12 *p = (struct S12 *)(w
+  //      - 1)`: agbcc stages the K&R call's stack word at [sp,#0] FIRST and then loads `p[i]`'s three
+  //      words, based at [sp,#0], into r0..r2 (calls.c `move_block_to_reg`, after every stack store).
+  //      A read with no store between it and a call nothing sizes clears nothing (thumb.ts
+  //      `indexedReadBelow`), so `kr` keeps [sp,#0] as a word it may take and the lift declines (it
+  //      lifted as `kr(p[i].a, p[i].b, p[i].c, 3)`, the stack word dropped, while the read cleared
+  //      everything from its base up).
+  {
+    sym: 'stkidx_byval',
+    src:
+      'struct S12 { u32 a, b, c; };\n' +
+      'extern u32 gA, gB, gC, gD;\n' +
+      'extern s32 gI;\n' +
+      'int kr();\n' +
+      'int stkidx_byval(s32 i)\n' +
+      '{\n' +
+      '    u32 w[6];\n' +
+      '    struct S12 *p = (struct S12 *)(w - 1);\n' +
+      '    w[0] = gA;\n' +
+      '    w[1] = gB;\n' +
+      '    w[2] = gC;\n' +
+      '    w[3] = gD;\n' +
+      '    w[4] = gA;\n' +
+      '    w[5] = gB;\n' +
+      '    return kr(p[i], 3, gI);\n' +
+      '}',
+    features: ['variable-index', 'multi-arg'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'struct S12 { u32 a, b, c; };\nextern u32 gA, gB, gC, gD;\nextern s32 gI;\nint kr();\nint stkidx_byval(s32 i);',
+    proto: { stkidx_byval: { params: ['s32'] }, kr: { returns: 'int' } },
+  },
   //  40. dmafill_call (kl2dct sub_0802E340: "stack pointer used as data — the store to [sp,#0] is
   //      never reloaded"). A DMA fill whose temp's address is stored to the device's source register,
   //      then a call taking `&w`. agbcc loads the register's address into r0, the same register that
