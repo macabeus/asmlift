@@ -20244,10 +20244,11 @@ export const SYNTHETIC: SynthSpec[] = [
   //      at 4, not 0 (`corpus/agbcc-indexed.s`), so `five` keeps its fifth argument. The [sp,#0]
   //      question is Thumb's (O32 stages from [sp,#16] and PPC from 8, beneath locals their
   //      frontends route through memory once an address is taken), but the shape is every
-  //      compiler's, so the rows pin it on each: a frame array read through a runtime index lifts
-  //      on the MIPS compilers, and mwcc 2.4.2 strength-reduces stkidx_call's `a[i]` into a pointer
-  //      stepped through the frame (`the captured address at [sp,#8) reaches a phi and is then
-  //      moved by a constant`), a different family's decline.
+  //      compiler's, so the rows pin it on each. stkidx_call lifts on ido7.1 and gcc2.7.2; kmc and
+  //      mwcc 2.4.2 strength-reduce its `a[i]` into a pointer stepped through the frame (`the
+  //      captured address at [sp,#N) reaches a phi and is then moved by a constant`), a different
+  //      family's decline. The MIPS compilers and mwcc fold stkidx_five's `- 1` into the base, below
+  //      the array (`the captured address at [sp,#N) is below the reserved local area`), and decline.
   {
     sym: 'stkidx_call',
     src:
@@ -20306,6 +20307,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //      proves no local there, so `kr`, which nothing sizes, keeps [sp,#0] as a word it may take,
   //      and the lift declines (it lifted as `kr(1, 2, 3, 4)`, the fifth argument dropped, before
   //      frontend/stackargs.ts `loadedWordBound` asked that every store it clears reach the read).
+  //      The MIPS compilers and mwcc decline it on their own stack-argument and frame-layout gates.
   {
     sym: 'stkidx_below',
     src:
