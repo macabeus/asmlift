@@ -20239,6 +20239,31 @@ export const SYNTHETIC: SynthSpec[] = [
       five: { params: ['s32', 's32', 's32', 's32', 's32'], returnsVoid: true },
     },
   },
+  //  39b. stkidx_below — the CONTROL of item 39's bound, a soundness pin that declines. `u32 *p = a
+  //      - 1` (the 1-based table idiom) with `u32 a[3]` at [sp,#4] bases `p[i]` at [sp,#0], beneath the
+  //      array, and a K&R call takes a fifth argument staged there after the read. The read's base
+  //      proves no local there, so `kr`, which nothing sizes, keeps [sp,#0] as a word it may take,
+  //      and the lift declines (it lifted as `kr(1, 2, 3, 4)`, the fifth argument dropped, before
+  //      frontend/stackargs.ts `loadedWordBound` asked that every store it clears reach the read).
+  {
+    sym: 'stkidx_below',
+    src:
+      'extern u32 gA, gB, gC;\n' +
+      'int kr();\n' +
+      'int stkidx_below(s32 i)\n' +
+      '{\n' +
+      '    u32 a[3];\n' +
+      '    u32 *p = a - 1;\n' +
+      '    a[0] = gA;\n' +
+      '    a[1] = gB;\n' +
+      '    a[2] = gC;\n' +
+      '    return kr(1, 2, 3, 4, p[i]);\n' +
+      '}',
+    features: ['variable-index', 'multi-arg'],
+    toolchains: ['agbcc'],
+    ctx: 'extern u32 gA, gB, gC;\nint kr();\nint stkidx_below(s32 i);',
+    proto: { stkidx_below: { params: ['s32'] } },
+  },
   //  40. dmafill_call (kl2dct sub_0802E340: "stack pointer used as data — the store to [sp,#0] is
   //      never reloaded"). A DMA fill whose temp's address is stored to the device's source register,
   //      then a call taking `&w`. agbcc loads the register's address into r0, the same register that

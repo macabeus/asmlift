@@ -13,3 +13,10 @@ void six2(int i, int j) { u32 a[3]; a[0] = gA; a[1] = gB; a[2] = gC; six(gI, 2, 
 void six3(int i, int j) { u32 a[3]; a[0] = gA; a[1] = gB; a[2] = gC; six(gI, a[i + 1], 3, a[j - 1], gB, gA); }
 void bytes(int i) { u8 b[8]; b[0] = gA; b[5] = gB; five(1, 2, 3, b[i], b[i + 2]); }
 void members(int i) { struct P p[2]; p[0].x = gA; p[0].y = gB; p[1].x = gC; p[1].y = gD; five(1, 2, 3, p[i].y, gI); }
+int kr();
+int below1(int i) { u32 a[3]; u32 *p = a - 1; a[0] = gA; a[1] = gB; a[2] = gC; return kr(1, 2, 3, 4, p[i]); }
+int below2(int i) { u32 a[3]; u32 *p = &a[-1]; a[0] = gA; a[1] = gB; a[2] = gC; gI = p[i]; return kr(1, 2, 3, 4, gC); }
+int below3(int i) { u32 a[3]; u32 *p = a - 1; a[0] = gA; a[1] = gB; a[2] = gC; return kr(1, 2, 3, p[i], gI); }
+int below4(int i, int c) { u32 a[3]; u32 *p = a - 1; a[0] = gA; a[1] = gB; a[2] = gC; return kr(1, 2, 3, c ? p[i] : 7, gI); }
+int below5(int i) { u32 a[3]; u32 *p = a - 2; a[0] = gA; a[1] = gB; a[2] = gC; return kr(1, 2, 3, 4, gI, p[i]); }
+int below6(int i) { u32 a[3]; u32 *p = a - 1; a[0] = gA; a[1] = gB; a[2] = gC; kr(1, 2, 3, 4, gI); return p[i]; }

@@ -4039,7 +4039,7 @@ function measureThumbFrame({
   // THE LOADED-WORD BOUND, read once (`outgoingAreaNeverLoadedFrom`, 0 on agbcc): the outgoing
   // argument analysis and the frame-object audit both take this number.
   const loadedFrom = target.compilerBehaviors.outgoingAreaNeverLoadedFrom;
-  const loadedBound = loadedWordBound(eventBlocks, entryReachable, loadedFrom);
+  const loadedBound = loadedWordBound(eventBlocks, preds, entryReachable, loadedFrom);
   const outgoingArgsOver = (blocks: readonly StackArgsBlock<Instr>[]): OutgoingArgs<Instr> =>
     analyzeOutgoingArgs<Instr>({
       blocks,
@@ -4325,13 +4325,13 @@ function frameAddressDefined(ins: Instr, held: ReadonlyMap<string, number>): [st
 // displacement. A register-offset load off a held capture (`mov r1, sp / ldr r0, [r1, r2]`) is the
 // same read, based at the capture.
 //
-// THE BASE IS THE OBJECT'S START OR ABOVE IT, measured rather than assumed: agbcc keeps the
-// index's own constant in the index (`a[i - 1]`, `a[i + 1]`, `a[j - 1]` are `sub r0, #1` / `add
-// r0, #1` before the shift, then `add r0, r0, sp / add r0, #<a's offset>`), and stages a fifth
-// argument at [sp,#0] between two such reads (`six(a[i], 2, 3, 4, gC, a[j])`) with each read's base
-// at the array's offset, never 0. A `sub` of a constant from an indexed address could put the base
-// below the object, so it ends the walk instead; so does any other write, a call, and the end of
-// the block — each only costs the read, which is the decline.
+// THE BASE IS WHERE THE ADDRESS IS FORMED, which is the object's start or above it where the source
+// indexes the object: agbcc keeps the index's own constant in the index (`a[i - 1]`, `a[i + 1]` are
+// `sub r0, #1` / `add r0, #1` before the shift, then `add r0, r0, sp / add r0, #<a's offset>`). A
+// pointer the source forms below its array (`a - 1`) is based beneath it, and nothing here can tell;
+// what that costs is `loadedWordBound`'s question (frontend/stackargs.ts). A `sub` of a constant
+// from an indexed address ends the walk; so does any other write, a call, and the end of the block
+// — each only costs the read, which is the decline.
 function indexedFrameReads(asmBlocks: readonly AsmBlock[], entryReachable: ReadonlySet<number>): Map<Instr, number> {
   const found = new Map<Instr, number>();
   for (const b of entryReachable) {

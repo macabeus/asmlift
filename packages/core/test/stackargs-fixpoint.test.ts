@@ -36,7 +36,10 @@ const analyze = ({
   outgoingAreaNeverLoadedFrom: from,
   ...input
 }: Omit<StackArgsInput<string>, 'loadedWordBound'> & { outgoingAreaNeverLoadedFrom: number | undefined }) =>
-  analyzeOutgoingArgs<string>({ ...input, loadedWordBound: loadedWordBound(input.blocks, input.live, from) });
+  analyzeOutgoingArgs<string>({
+    ...input,
+    loadedWordBound: loadedWordBound(input.blocks, input.preds, input.live, from),
+  });
 
 const run = (
   blocks: StackArgsBlock<string>[],
@@ -506,7 +509,7 @@ describe('a load through a runtime index reads the object it is based in, from t
 
   test('…which is the bound a load gives: the base and every word above it', () => {
     const blocks = line([st(0), st(8), idx(4), call('g', 0)]);
-    expect(loadedWordBound(blocks, new Set([0]), 0)).toBe(4);
+    expect(loadedWordBound(blocks, chain(1), new Set([0]), 0)).toBe(4);
     expect(run(blocks, chain(1), 0x10).blocker).toMatch(/the store to \[sp,#0\]/);
   });
 
@@ -528,6 +531,39 @@ describe('a load through a runtime index reads the object it is based in, from t
     expect(r.blocker).toMatch(
       /so \[sp,#0\] is its outgoing stack argument — but the frame address \[sp,#0\] is read through a runtime index/,
     );
+  });
+
+  // `u32 *p = a - 1` with `u32 a[3]` at [sp,#4]: `p[i]` is based at [sp,#0], beneath the array,
+  // where a K&R call's fifth argument is staged (corpus/agbcc-indexed.s `below*`)
+  test('a read based beneath its array bounds nothing where a store it never reaches is staged', () => {
+    const below1 = line([st(4), st(8), st(0xc), idx(0), st(0), call('kr', 0)]);
+    expect(loadedWordBound(below1, chain(1), new Set([0]), 0)).toBe(Infinity);
+    expect(run(below1, chain(1), 0x10).blocker).toMatch(/the store to \[sp,#0\] reaches `bl kr` unread/);
+  });
+
+  test('…whether the staged word follows the read, a call does, or it is on another path', () => {
+    // below5: the fifth word staged before the read of the sixth, which follows it
+    const below5 = line([st(8), st(0xc), st(0x10), st(0), idx(0), st(4), call('kr', 0)]);
+    expect(run(below5, chain(1), 0x14).blocker).toMatch(/the store to \[sp,#4\] reaches `bl kr` unread/);
+    // below6: the call and its staged word before the read
+    const below6 = line([st(4), st(8), st(0xc), st(0), call('kr', 0), idx(0)]);
+    expect(loadedWordBound(below6, chain(1), new Set([0]), 0)).toBe(Infinity);
+    expect(run(below6, chain(1), 0x10).blocker).toMatch(/the store to \[sp,#0\]/);
+    // the read on one arm, the staged word on the other
+    const arms = [blk([st(4), st(8)]), blk([idx(0)]), blk([st(0), call('kr', 0)])];
+    expect(loadedWordBound(arms, [[], [0], [0]], new Set([0, 1, 2]), 0)).toBe(Infinity);
+    expect(run(arms, [[], [0], [0]], 0x10).blocker).toMatch(/the store to \[sp,#0\]/);
+  });
+
+  test('a read the stores reach only through a call bounds nothing', () => {
+    const r = run([blk([st(0), st(4)]), blk([call('g', 0)]), blk([idx(0)])], [[], [0], [1]], 8);
+    expect(r.blocker).toMatch(/the store to \[sp,#0\]/);
+  });
+
+  test('the bound steps down base by base, and stops at the first a store defeats', () => {
+    // [8, ∞) is read back by the read based at 8; [0, 8) holds a store no read reaches
+    const blocks = line([st(8), st(0xc), idx(8), st(0), idx(0), st(4), call('g', 0)]);
+    expect(loadedWordBound(blocks, chain(1), new Set([0]), 0)).toBe(8);
   });
 
   test('a read in a dead block bounds nothing', () => {
