@@ -70,6 +70,16 @@ f:
     expect(() => d('f', asm)).toThrow(/raw data directive '\.byte'/);
   });
 
+  // `.inst.n 0x3001` is `adds r0, #1`; skipped, the lift would print `a0 + 2` for a function
+  // that returns a0 + 3.
+  test.each(['.inst.n 0x3001', '.inst 0x3001', '.inst.w 0xf000f800'])(
+    '`%s` in the code stream fails loud rather than being skipped',
+    (line) => {
+      const asm = `\tthumb_func_start f\nf:\n\tadds r0, #2\n\t${line}\n\tbx lr\n`;
+      expect(() => d('f', asm)).toThrow(/spells an instruction by its encoding/);
+    },
+  );
+
   test('an ARM-mode function (arm_func_start) declines loud; a Thumb sibling still lifts', () => {
     const mixed = `	arm_func_start ArmThing
 ArmThing:

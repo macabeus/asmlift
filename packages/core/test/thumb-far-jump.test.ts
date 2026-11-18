@@ -302,6 +302,18 @@ describe('what is not provably a relay declines loud', () => {
     );
   });
 
+  // `.inst.n 0x4770` is `bx lr`: the thunk returns to the `adds r4, #7` after the `bl`. The lr
+  // proof reads the function's text, so an instruction spelled by its encoding must not vanish
+  // from it — it declines before the proof is asked.
+  test('an unmarked `bl` to a thunk that returns with `.inst.n 0x4770` (`bx lr`) declines', () => {
+    declines(
+      `${H}\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tcmp\tr4, #0\n\tbeq\t.Lskip\n\tbl\t.Lthunk\n\tadd\tr4, #7\n` +
+        '.Lskip:\n\tadd\tr0, r4, #0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+        '.Lthunk:\n\tadd\tr4, #1\n\t.inst.n 0x4770\n\tadd\tr4, #3\n\tb\t.Lskip\n',
+      /'\.inst\.n' in the code stream spells an instruction by its encoding/,
+    );
+  });
+
   test('a marked `bl` to a symbol outside this function is not a relay', () => {
     declines(
       `${H}\tpush\t{lr}\n\tbl\th\t@far jump\n\tpop\t{r0}\n\tbx\tr0\n`,

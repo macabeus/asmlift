@@ -1261,14 +1261,21 @@ function decode(
         flat.push({ data: { halfwords: true, values, inCode: dataLabels.length === 0 } });
         continue;
       }
+      // `.inst` / `.inst.n` / `.inst.w` is gas's way to spell an instruction by its encoding
+      // (`.inst.n 0x4770` is `bx lr`). It is refused with the raw data directives rather than
+      // decoded: skipping it, as an unknown directive is skipped below, deletes the instruction —
+      // its effect, its bytes in the layout, and any lr it names from the far-jump proof.
       const raw = rest.match(
-        /^\.(byte|ascii|asciz|string|space|skip|quad|8byte|octa|double|float|single|incbin|fill|zero)\b/,
+        /^\.(byte|ascii|asciz|string|space|skip|quad|8byte|octa|double|float|single|incbin|fill|zero|inst)\b/,
       );
       if (raw) {
         if (dataLabels.length === 0) {
           throw new FrontendUnsupportedError(
-            `cannot lift '${name}': raw data directive '.${raw[1]}' in the code stream — ` +
-              `it may encode an instruction the disassembler left undecoded (skipping it would silently delete its effect)`,
+            raw[1] === 'inst'
+              ? `cannot lift '${name}': '${rest.split(/\s/)[0]}' in the code stream spells an instruction by its ` +
+                  `encoding, which this frontend does not decode (skipping it would silently delete its effect)`
+              : `cannot lift '${name}': raw data directive '.${raw[1]}' in the code stream — ` +
+                  `it may encode an instruction the disassembler left undecoded (skipping it would silently delete its effect)`,
           );
         }
         for (const l of dataLabels) {
