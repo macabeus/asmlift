@@ -3706,7 +3706,36 @@ function measureThumbFrame({
   // there is that temp's, not a slot (`isFrameObjectAccess`). Only where the struct's size is
   // stated; one nothing sizes leaves its words to the slot model, and the audit's collision.
   const returnStorage: FrameRange[] = [];
-  heldFrameWalk(asmBlocks, entryReachable, mayWriteReg, (ins, held) => {
+  // …AND EVERY LOAD THROUGH A RUNTIME INDEX INTO THE FRAME, with the frame offset its address is
+  // based at — what the outgoing-argument analysis reads as an `indexed-read` event. agbcc's `a[i]`
+  // over a frame array is `lsl r0, r4, #2 / add r0, r0, sp / ldr r0, [r0]`, and for an array above
+  // [sp,#0] it adds the array's offset AFTER the index (`add r0, r0, sp / add r0, r0, #8 / ldr r0,
+  // [r0]`): the base `frameAddressDefined` carries, plus the load's own displacement. A
+  // register-offset load off a held constant capture (`mov r1, sp / ldr r0, [r1, r2]`) is the same
+  // read, based at the capture, where the other register holds no frame address.
+  const indexedReadOf = new Map<Instr, number>();
+  heldFrameWalk(asmBlocks, entryReachable, mayWriteReg, (ins, held, indexedAt) => {
+    if (SINGLE_LOAD.test(ins.mnemonic) && ins.ops[1] !== undefined) {
+      const { base, off, regOff } = parseAddr(ins.ops[1]);
+      const captured = (r: string): number | undefined => {
+        const o = isSpReg(r) ? 0 : held.get(reg(r));
+        return o !== undefined && Number.isFinite(o) ? o : undefined;
+      };
+      const plain = (r: string): boolean => !isSpReg(r) && !held.has(reg(r));
+      const at =
+        regOff === undefined
+          ? isSpReg(base)
+            ? undefined
+            : indexedAt.get(reg(base))
+          : plain(regOff)
+            ? captured(base)
+            : plain(base)
+              ? captured(regOff)
+              : undefined;
+      if (at !== undefined && off >= 0) {
+        indexedReadOf.set(ins, at + off);
+      }
+    }
     const returned =
       ins.mnemonic === 'bl' && calleeRegister(ins, target) === null
         ? calls.declaredCall(ins.ops[0] ?? '?')?.returned
@@ -3994,16 +4023,15 @@ function measureThumbFrame({
   // for a call after it still reaches that call pending, and refuses there.
   const frameBasePublished =
     escapesHere && [...escapedOffsetOf].some(([ins, off]) => off === 0 && ins.mnemonic === 'str');
-  // …AND A LOAD THROUGH A RUNTIME INDEX READS THE OBJECT IT IS BASED IN, under the same premise
-  // (`indexedFrameReads` says what it measured of the base)
-  const indexedReadOf = escapesHere ? indexedFrameReads(asmBlocks, entryReachable) : new Map<Instr, number>();
   const eventBlocks = asmBlocks.map((ab) => ({
     events: ab.instrs.flatMap((ins): StackArgsEvent<Instr>[] => {
       const escaped = escapeEvent(ins);
       if (escaped.length > 0 && ins.mnemonic === 'str') {
         return escaped;
       }
-      const indexedAt = indexedReadOf.get(ins);
+      // …and a load through a runtime index reads the object it is based in, under the same premise
+      // (`indexedReadOf`, and the event's doc for what its base does and does not prove)
+      const indexedAt = escapesHere ? indexedReadOf.get(ins) : undefined;
       if (indexedAt !== undefined) {
         return [{ kind: 'indexed-read', off: indexedAt }];
       }
@@ -4250,31 +4278,45 @@ function measureThumbFrame({
 // r4-r7, which AAPCS says the callee PRESERVES, so there the clear is not an ISA fact but a
 // deliberate blunt over-kill in the direction that costs a decline; a test pins the decline so
 // the over-approximation is a decision on the record rather than a regression found later.
+//
+// `indexedAt` is the second half of what a register holding an INDEXED frame address (offset NaN in
+// `held`) is known to hold: the frame offset the address was based at before the index was added,
+// where `frameAddressDefined` can say. It is killed with `held`, by the same rule, so the one walk
+// that reads it (a load through an index, the outgoing-argument `indexed-read` event) and the ones
+// that ask what a register holds cannot disagree about which register holds a frame address.
 function heldFrameWalk(
   asmBlocks: readonly AsmBlock[],
   entryReachable: ReadonlySet<number>,
   ends: (ins: Instr, r: string) => boolean,
-  consumes: (ins: Instr, held: ReadonlyMap<string, number>) => boolean,
+  consumes: (ins: Instr, held: ReadonlyMap<string, number>, indexedAt: ReadonlyMap<string, number>) => boolean,
 ): boolean {
   for (const b of entryReachable) {
     const ab = asmBlocks[b];
     const held = new Map<string, number>();
+    const indexedAt = new Map<string, number>();
     for (const ins of ab.instrs) {
-      if (consumes(ins, held)) {
+      if (consumes(ins, held, indexedAt)) {
         return true;
       }
       if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
         held.clear();
+        indexedAt.clear();
         continue;
       }
-      const carried = frameAddressDefined(ins, held);
+      const carried = frameAddressDefined(ins, held, indexedAt);
       for (const r of [...held.keys()]) {
         if (ends(ins, r)) {
           held.delete(r);
+          indexedAt.delete(r);
         }
       }
       if (carried !== null) {
         held.set(carried[0], carried[1]);
+        if (carried[2] === undefined) {
+          indexedAt.delete(carried[0]);
+        } else {
+          indexedAt.set(carried[0], carried[2]);
+        }
       }
     }
   }
@@ -4291,7 +4333,20 @@ function heldFrameWalk(
 // none, and an escape at NaN is no escape); what it is carried for is the "may hold a frame
 // address" questions: without it an undeclared call's guessed arity drops `&buf[i]` with no
 // refusal (`g3(a, b, &buf[i])` as `g3()`).
-function frameAddressDefined(ins: Instr, held: ReadonlyMap<string, number>): [string, number] | null {
+//
+// …WITH THE OFFSET IT WAS BASED AT, the third element, where that is known (`indexedAt` holds the
+// sources'): sp or a held constant capture plus a register that holds no frame address, an indexed
+// address plus a further plain index, a copy, or a constant moved UP — agbcc adds an array's offset
+// after the index (`add r0, r0, sp / add r0, #8`), so the base is sp's offset at the index add plus
+// every constant added after it. A constant moved down, or two frame addresses summed, leaves it
+// unknown. The base is where the address was formed, not proof of an object there: a pointer the
+// source forms below its array (`a - 1`) is based beneath it (frontend/stackargs.ts
+// `loadedWordBound` says what that costs).
+function frameAddressDefined(
+  ins: Instr,
+  held: ReadonlyMap<string, number>,
+  indexedAt: ReadonlyMap<string, number> = new Map(),
+): [string, number, number?] | null {
   const [d, s1, s2] = ins.ops;
   if (d === undefined || isSpReg(d)) {
     return null;
@@ -4300,7 +4355,8 @@ function frameAddressDefined(ins: Instr, held: ReadonlyMap<string, number>): [st
     return [reg(d), 0];
   }
   if (/^movs?$/.test(ins.mnemonic) && s2 === undefined && s1 !== undefined && held.has(reg(s1))) {
-    return [reg(d), held.get(reg(s1))!];
+    const base = indexedAt.get(reg(s1));
+    return base === undefined ? [reg(d), held.get(reg(s1))!] : [reg(d), held.get(reg(s1))!, base];
   }
   if (/^adds?$/.test(ins.mnemonic)) {
     const [src, by] = s2 === undefined ? [d, s1] : [s1, s2];
@@ -4308,103 +4364,27 @@ function frameAddressDefined(ins: Instr, held: ReadonlyMap<string, number>): [st
       return null;
     }
     const at = (r: string): number | undefined => (isSpReg(r) ? 0 : held.get(reg(r)));
+    // where the frame address in `r` was based: its own offset, or its index's base
+    const basedAt = (r: string): number | undefined => {
+      const o = at(r);
+      return o !== undefined && Number.isFinite(o) ? o : isSpReg(r) ? undefined : indexedAt.get(reg(r));
+    };
     if (!IMM_LITERAL.test(by)) {
-      return at(src) !== undefined || at(by) !== undefined ? [reg(d), NaN] : null;
+      const [a, c] = [at(src), at(by)];
+      if (a === undefined && c === undefined) {
+        return null;
+      }
+      const base = a !== undefined && c !== undefined ? undefined : basedAt(a !== undefined ? src : by);
+      return base === undefined ? [reg(d), NaN] : [reg(d), NaN, base];
     }
     const from = at(src);
-    return from === undefined ? null : [reg(d), from + imm(by)];
+    if (from === undefined) {
+      return null;
+    }
+    const moved = Number.isFinite(from) ? undefined : indexedAt.get(reg(src));
+    return moved === undefined || imm(by) < 0 ? [reg(d), from + imm(by)] : [reg(d), NaN, moved + imm(by)];
   }
   return null;
-}
-
-// THE LOADS THROUGH A RUNTIME INDEX INTO THE FRAME, each with the frame offset its address is based
-// at — what the outgoing-argument analysis reads as an `indexed-read` event. agbcc's `a[i]` over a
-// frame array is `lsl r0, r4, #2 / add r0, r0, sp / ldr r0, [r0]`, and for an array above [sp,#0]
-// it adds the array's offset AFTER the index (`add r0, r0, sp / add r0, r0, #8 / ldr r0, [r0]`), so
-// the base is sp's offset at the index add plus every constant added after it, plus the load's own
-// displacement. A register-offset load off a held capture (`mov r1, sp / ldr r0, [r1, r2]`) is the
-// same read, based at the capture.
-//
-// THE BASE IS WHERE THE ADDRESS IS FORMED, which is the object's start or above it where the source
-// indexes the object: agbcc keeps the index's own constant in the index (`a[i - 1]`, `a[i + 1]` are
-// `sub r0, #1` / `add r0, #1` before the shift, then `add r0, r0, sp / add r0, #<a's offset>`). A
-// pointer the source forms below its array (`a - 1`) is based beneath it, and nothing here can tell;
-// what that costs is `loadedWordBound`'s question (frontend/stackargs.ts). A `sub` of a constant
-// from an indexed address ends the walk; so does any other write, a call, and the end of the block
-// — each only costs the read, which is the decline.
-function indexedFrameReads(asmBlocks: readonly AsmBlock[], entryReachable: ReadonlySet<number>): Map<Instr, number> {
-  const found = new Map<Instr, number>();
-  for (const b of entryReachable) {
-    const held = new Map<string, number>();
-    const indexed = new Map<string, number>();
-    const heldAt = (r: string): number | undefined => {
-      if (isSpReg(r)) {
-        return 0;
-      }
-      const o = held.get(reg(r));
-      return o !== undefined && Number.isFinite(o) ? o : undefined;
-    };
-    for (const ins of asmBlocks[b].instrs) {
-      if (SINGLE_LOAD.test(ins.mnemonic) && ins.ops[1] !== undefined) {
-        const { base, off, regOff } = parseAddr(ins.ops[1]);
-        const at =
-          regOff === undefined
-            ? isSpReg(base)
-              ? undefined
-              : indexed.get(reg(base))
-            : (heldAt(base) ?? (isSpReg(regOff) ? undefined : heldAt(regOff)));
-        if (at !== undefined && off >= 0) {
-          found.set(ins, at + off);
-        }
-      }
-      if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
-        held.clear();
-        indexed.clear();
-        continue;
-      }
-      const [d, s1, s2] = ins.ops;
-      let next: number | undefined;
-      if (d !== undefined && !isSpReg(d) && /^adds?$/.test(ins.mnemonic)) {
-        const [src, by] = s2 === undefined ? [d, s1] : [s1, s2];
-        if (src !== undefined && by !== undefined) {
-          if (IMM_LITERAL.test(by)) {
-            const from = indexed.get(reg(src));
-            next = from === undefined || imm(by) < 0 ? undefined : from + imm(by);
-          } else {
-            const [a, c] = [heldAt(src), heldAt(by)];
-            const [ia, ic] = [indexed.get(reg(src)), indexed.get(reg(by))];
-            // a frame address plus a register holding no frame address, or an indexed address plus
-            // a further plain index
-            if (a !== undefined && c === undefined && ic === undefined) {
-              next = a;
-            } else if (c !== undefined && a === undefined && ia === undefined) {
-              next = c;
-            } else if (ia !== undefined && c === undefined && ic === undefined && a === undefined) {
-              next = ia;
-            } else if (ic !== undefined && a === undefined && ia === undefined && c === undefined) {
-              next = ic;
-            }
-          }
-        }
-      } else if (d !== undefined && /^movs?$/.test(ins.mnemonic) && s2 === undefined && s1 !== undefined) {
-        next = indexed.get(reg(s1));
-      }
-      const carried = frameAddressDefined(ins, held);
-      for (const r of [...new Set([...held.keys(), ...indexed.keys()])]) {
-        if (mayWriteReg(ins, r)) {
-          held.delete(r);
-          indexed.delete(r);
-        }
-      }
-      if (carried !== null && Number.isFinite(carried[1])) {
-        held.set(carried[0], carried[1]);
-      }
-      if (next !== undefined && d !== undefined) {
-        indexed.set(reg(d), next);
-      }
-    }
-  }
-  return found;
 }
 
 // A NARROW RELOAD OF A WORD SLOT, read through a copy of sp. agbcc promotes a `u8`/`u16` local to
