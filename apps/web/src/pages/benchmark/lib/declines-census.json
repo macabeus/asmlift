@@ -1,11 +1,11 @@
 {
   "generatedBy": "pnpm regen:declines-census (scripts/regen-decline-census.ts) — do not hand-edit",
-  "distinctMessages": 311,
-  "residueTotal": 115,
+  "distinctMessages": 314,
+  "residueTotal": 118,
   "residueByFile": [
     {
       "file": "frontend/thumb.ts",
-      "count": 32,
+      "count": 35,
       "messages": [
         "cannot lift 'X': 'X X' branches to 'X', which this asm defines as a data label — not modelled",
         "cannot lift 'X': 'X X' calls through a register that holds no function's address — not modelled",
@@ -14,6 +14,8 @@
         "cannot lift 'X': 'X X' targets a label inside this function and not a declared function, and is not a relay this frontend lowers to the branch it stands for — read as a call it would return into a block",
         "cannot lift 'X': 'X' emits fill into the code stream and fillits fill bytes are not a pad encoding this frontend models — they are real instructionsmakes item sizes unknowable",
         "cannot lift 'X': 'X' in the code stream spells an instruction by its encoding, which this frontend does not decode (skipping it would silently delete its effect)",
+        "cannot lift 'X': 'X' inside the function changes which lines are assembled, and this frontend reads every line as written",
+        "cannot lift 'X': 'X' is a directive this frontend does not read, where control can reach its bytes — it may emit an instruction (skipping it would silently delete its effect)",
         "cannot lift 'X': 'X' is a label here but not a function (the function is 'X')",
         "cannot lift 'X': ARM-mode function (arm_func_start) — this frontend lifts Thumb only",
         "cannot lift 'X': alignment padding depends on the function's base alignment, which this input does not determine — base X and base X both decode consistently but disagree: base X has X, base X has X",
@@ -36,6 +38,7 @@
         "cannot lift 'X': raw data directive '.X' in the code stream — it may encode an instruction the disassembler left undecoded (skipping it would silently delete its effect)",
         "cannot lift 'X': raw halfword 'X' in the code stream is not a decodable branch — skipping it would silently delete its effect",
         "cannot lift 'X': raw-encoded input needs byte-accurate layout, but 'X' fillfills with bytes this frontend does not model, so it contributes no size to the layoutmakes item sizes unknowable",
+        "cannot lift 'X': raw-encoded input needs byte-accurate layout, but 'X' is a directive this frontend does not read, so it contributes no size to the layout",
         "cannot lift 'X': reachable code in block 'X' falls through into data bytes",
         "cannot lift 'X': register 'X' in 'X X' is spelled in upper case — this frontend identifies registers by spelling and models the lower-case forms only",
         "cannot lift 'X': stm with the base register in its own list, not as the lowest entry — the value stored for that register is UNPREDICTABLE and differs between ARMv4 (new base) and ARMv5 (old base)"

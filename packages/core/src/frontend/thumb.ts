@@ -1099,6 +1099,96 @@ const sayFact = (f: LayoutFact): string => {
   return `raw branch at item ${f.at} → ${to}`;
 };
 
+/** The directives decode may SKIP: each one emits no byte into the section it sits in and leaves
+ *  which source lines are assembled unchanged. That is a claim about the assembler, so it is a
+ *  closed list. The directives decode reads (the word, halfword and alignment families and the
+ *  raw-data refusals) are matched before this list is consulted. Any other directive inside the
+ *  selected function declines where it can matter (`unreadDirectives` in decode says where).
+ *
+ *  It is an allowlist because the far-jump lowering's lr proof and the layout walk are sound only
+ *  if decode sees every instruction in the code stream. A denylist of byte-emitting spellings
+ *  missed `.inst.n 0x4770`. When that was closed, gas's other data spellings still got through
+ *  (`.dc.w`, `.dc.b`, `.dc.l`, `.dc.a`, `.dc`, `.dcb.w`, `.int`, and upper-case forms such as
+ *  `.DC.W`). Each one hid a `bx lr` from the proof, so a local call thunk lifted as a branch. The
+ *  list also leaves out the directives that change which lines are assembled (`.if`, `.rept`,
+ *  `.irp`, `.macro`; {@link LINE_DIRECTIVES}). Skipping one of those reads a disabled, repeated or
+ *  macro-body line as ordinary code.
+ *
+ *  `.include` is not on the list, because the bytes it includes are ones this frontend cannot see.
+ *  A pret unit includes its macros before the first function, which is outside every slice. An
+ *  INCLUDE_ASM body (`.include "asm/nonmatchings/…"`) follows the previous function's return,
+ *  where control cannot reach it. Neither one declines. Names are matched lower-case (gas
+ *  directives are case-insensitive); `.cfi_*` is matched by its prefix. */
+const ZERO_BYTE_DIRECTIVES: ReadonlySet<string> = new Set([
+  // symbols and their bookkeeping
+  'global',
+  'globl',
+  'type',
+  'size',
+  'thumb_func',
+  'thumb_set',
+  'weak',
+  'weakref',
+  'local',
+  'hidden',
+  'protected',
+  'internal',
+  'extern',
+  'equ',
+  'set',
+  'equiv',
+  'eqv',
+  'comm',
+  'lcomm',
+  // instruction set and assembler mode
+  'code',
+  'thumb',
+  'arm',
+  'force_thumb',
+  'syntax',
+  'cpu',
+  'arch',
+  'arch_extension',
+  'fpu',
+  'object_arch',
+  'eabi_attribute',
+  // sections (the bytes of a section switched to are read as that section's own items)
+  'text',
+  'data',
+  'bss',
+  'section',
+  'pushsection',
+  'popsection',
+  'previous',
+  // debug and listing output: nothing in `.text`
+  'file',
+  'ident',
+  'loc',
+  'loc_mark_labels',
+  'stabs',
+  'stabn',
+  'stabd',
+  'def',
+  'endef',
+  'scl',
+  'val',
+  'tag',
+  'dim',
+  'ln',
+  'list',
+  'nolist',
+  'title',
+  'sbttl',
+  'eject',
+  'psize',
+  'end',
+]);
+
+/** The directives that decide which source lines gas assembles: conditional assembly, repetition
+ *  and macro definition. One of them inside a function declines whether or not control reaches
+ *  it, because what it changes is the text decode reads, not bytes at its own position. */
+const LINE_DIRECTIVES = /^(if\w*|else\w*|endif|rept|irpc?|endr|macro|endm|exitm)$/;
+
 function decode(
   name: string,
   asm: string,
@@ -1141,6 +1231,13 @@ function decode(
   // actually tested: 'size' (how many fill bytes) or 'fill' (which bytes they are). A data
   // directive leaves only the first open.
   const hazards: { at: number; what: string; code: boolean; why?: 'size' | 'fill' }[] = [];
+  // Directives outside ZERO_BYTE_DIRECTIVES that decode does not read, by the same allFlat
+  // position as `hazards`. Inside the selected slice, one that changes which lines are assembled
+  // (`lines`: `.if`, `.rept`, `.macro`) declines wherever it sits. Any other one declines where
+  // control can reach its bytes (`.dc.w 0x4770` is `bx lr`) or where the slice needs byte-accurate
+  // layout. That reach test is the one an unreadable `.align` gets. It keeps an INCLUDE_ASM
+  // `.include` after a function's sealed return out of that function's lift.
+  const unreadDirectives: { at: number; what: string; lines: boolean }[] = [];
   // The labels naming the CURRENT data run's base address, and there can be several: two
   // labels with nothing between them name the same bytes, so a directive under the second is
   // equally a directive under the first. Keying by the most recent label alone hid an aliased
@@ -1356,8 +1453,13 @@ function decode(
       const alignish = rest.match(/^\.([\w.$]*align[\w.$]*)\b/i);
       if (alignish) {
         hazards.push({ at: flat.length - 1, what: `.${alignish[1]}`, code: true, why: 'size' });
+        continue;
       }
-      continue; // other directives skipped
+      const dname = rest.match(/^\.([\w.$]+)/)?.[1].toLowerCase() ?? '';
+      if (!ZERO_BYTE_DIRECTIVES.has(dname) && !dname.startsWith('cfi_')) {
+        unreadDirectives.push({ at: flat.length - 1, what: rest.split(/\s/)[0], lines: LINE_DIRECTIVES.test(dname) });
+      }
+      continue; // a directive that emits nothing here
     }
     // pret function macros (asm/macros.inc): pure bookkeeping except the declared mode.
     const macro = rest.match(/^(non_word_aligned_thumb_func_start|thumb_func_start|arm_func_start)\s+\S+$/);
@@ -1536,6 +1638,21 @@ function decode(
     // i.e. its fill is emitted at addresses BELOW this function and belongs to the sibling.
     // Admitting it declined every function that merely FOLLOWED an unsizable alignment, which is
     // the poisoning the allFlat-position bookkeeping exists to prevent (see `hazards` above).
+    const inSlice = (at: number) => at >= sliceStart && at < boundaries[boundaryIdx];
+    const unreadLines = unreadDirectives.find((u) => u.lines && inSlice(u.at));
+    if (unreadLines) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${unreadLines.what}' inside the function changes which lines are assembled, ` +
+          `and this frontend reads every line as written`,
+      );
+    }
+    const liveUnread = unreadDirectives.find((u) => inSlice(u.at) && fillIsReachable(u.at - sliceStart + 1));
+    if (liveUnread) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${liveUnread.what}' is a directive this frontend does not read, where control can reach ` +
+          `its bytes — it may emit an instruction (skipping it would silently delete its effect)`,
+      );
+    }
     const liveHazard = hazards.find(
       (h) => h.code && h.at >= sliceStart && h.at < boundaries[boundaryIdx] && fillIsReachable(h.at - sliceStart + 1),
     );
@@ -1559,6 +1676,13 @@ function decode(
     // sits behind a dead `.L` label that the rule above seals. So a clean `bench diff` says NOTHING about any code inside this branch —
     // `thumb-pad-directives.test.ts` is its only gate, and a change here has to be argued there.
     if (needsLayout) {
+      const sizedNothing = unreadDirectives.find((u) => inSlice(u.at));
+      if (sizedNothing) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': raw-encoded input needs byte-accurate layout, but '${sizedNothing.what}' is a ` +
+            `directive this frontend does not read, so it contributes no size to the layout`,
+        );
+      }
       // Only a hazard WITHIN this function's slice makes its layout unknowable. A fill this pass
       // cannot model keeps the directive out of the item stream entirely, so it contributes no
       // size here even though its count is arithmetic — a different fact from an unknown count,

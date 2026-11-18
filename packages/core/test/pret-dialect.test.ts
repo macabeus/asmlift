@@ -80,6 +80,40 @@ f:
     },
   );
 
+  // Decode skips only the directives on its zero-byte list. `.dc.w 0x3001` is `adds r0, #1`, and
+  // skipped it lifted `return a0 + 2;` for a function that returns a0 + 3.
+  test.each(['.dc.w 0x3001', '.dc 0x3001', '.dcb.w 1, 0x3001', '.int 0x3001', '.DC.W 0x3001', '.Short 0x3001'])(
+    '`%s` where control reaches it fails loud rather than being skipped',
+    (line) => {
+      const asm = `\tthumb_func_start f\nf:\n\tadds r0, #2\n\t${line}\n\tbx lr\n`;
+      expect(() => d('f', asm)).toThrow(/is a directive this frontend does not read, where control can reach/);
+    },
+  );
+
+  test.each(['.if 0', '.ifdef X', '.rept 2', '.macro m'])(
+    '`%s` inside a function fails loud even after its return',
+    (line) => {
+      const asm = `\tthumb_func_start f\nf:\n\tadds r0, #2\n\tbx lr\n${line}\n\tadds r0, #1\n.endif\n`;
+      expect(() => d('f', asm)).toThrow(/changes which lines are assembled/);
+    },
+  );
+
+  // INCLUDE_ASM: agbcc writes the included body's `.include` after the previous function's `.size`,
+  // inside that function's slice. Control cannot reach it past the return, so the function lifts.
+  test('an `.include` after the return, as INCLUDE_ASM writes it, leaves the function liftable', () => {
+    const asm =
+      '\t.code\t16\n\t.globl\tf\n\t.type\t f,function\n\t.thumb_func\nf:\n\tadd\tr0, #2\n\tbx\tlr\n' +
+      '.Lfe1:\n\t.size\t f,.Lfe1-f\n\t.syntax unified\n.include "asm/nonmatchings/g.s"\n.syntax divided\n';
+    expect(d('f', asm).source).toBe('s32 f(s32 a0) {\n    return a0 + 2;\n}\n');
+  });
+
+  test('zero-byte bookkeeping directives inside a function are skipped', () => {
+    const asm =
+      '\t.code\t16\n\t.globl\tf\n\t.thumb_func\nf:\n\t.cfi_startproc\n\t.loc 1 2 0\n\tadd\tr0, #2\n' +
+      '\t.set\tK, 3\n\t.cfi_endproc\n\tbx\tlr\n\t.size\tf, .-f\n\t.ident\t"x"\n';
+    expect(d('f', asm).source).toBe('s32 f(s32 a0) {\n    return a0 + 2;\n}\n');
+  });
+
   test('an ARM-mode function (arm_func_start) declines loud; a Thumb sibling still lifts', () => {
     const mixed = `	arm_func_start ArmThing
 ArmThing:

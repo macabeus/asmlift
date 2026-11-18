@@ -314,6 +314,29 @@ describe('what is not provably a relay declines loud', () => {
     );
   });
 
+  // gas's other spellings of the same `bx lr` bytes (each assembled with arm-none-eabi-as
+  // -mthumb -mcpu=arm7tdmi and read back with objdump: 0x4770 at .Lthunk+2). Skipped as unknown
+  // directives, every one lifted the thunk as a branch: `a0 + 1 + 3` for a machine that returns
+  // a0 + 8.
+  test.each([
+    '.dc.w 0x4770',
+    '.dc 0x4770',
+    '.dc.b 0x70, 0x47',
+    '.dc.l 0x47704770',
+    '.dc.a 0x47704770',
+    '.int 0x47704770',
+    '.dcb.w 1, 0x4770',
+    '.DC.W 0x4770',
+    '.BYTE 0x70, 0x47',
+  ])('an unmarked `bl` to a thunk that returns with `%s` (`bx lr`) declines', (line) => {
+    declines(
+      `${H}\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tcmp\tr4, #0\n\tbeq\t.Lskip\n\tbl\t.Lthunk\n\tadd\tr4, #7\n` +
+        '.Lskip:\n\tadd\tr0, r4, #0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+        `.Lthunk:\n\tadd\tr4, #1\n\t${line}\n\tadd\tr4, #3\n\tb\t.Lskip\n`,
+      /is a directive this frontend does not read, where control can reach its bytes/,
+    );
+  });
+
   test('a marked `bl` to a symbol outside this function is not a relay', () => {
     declines(
       `${H}\tpush\t{lr}\n\tbl\th\t@far jump\n\tpop\t{r0}\n\tbx\tr0\n`,
