@@ -20237,9 +20237,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //      the store to [sp,#0] is never reloaded"). A frame array read only through a runtime index,
   //      `a[i]` as `lsl r0, r4, #2 / add r0, r0, sp / ldr r0, [r0]`, on the loop trips a mask bit
   //      selects, with a call after the loop. No word of the array is reloaded by its offset, so
-  //      the outgoing-argument analysis read [sp,#0] as a word staged for that call. The load
-  //      through the index is now its `indexed-read` event (frontend/stackargs.ts): the words from
-  //      its base up are a local's. stkidx_five is the control the base fact guards: `a[i - 1]`
+  //      only the load through the index, its `indexed-read` event (frontend/stackargs.ts), says
+  //      [sp,#0] is the array's and not a word staged for that call. stkidx_five is the control the base fact guards: `a[i - 1]`
   //      with `u32 a[2]` at [sp,#4] and a fifth argument staged at [sp,#0], whose read agbcc bases
   //      at 4, not 0 (`corpus/agbcc-indexed.s`), so `five` keeps its fifth argument. The [sp,#0]
   //      question is Thumb's (O32 stages from [sp,#16] and PPC from 8, beneath locals their
@@ -20305,8 +20304,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //      - 1` (the 1-based table idiom) with `u32 a[3]` at [sp,#4] bases `p[i]` at [sp,#0], beneath the
   //      array, and a K&R call takes a fifth argument staged there after the read. The read's base
   //      proves no local there, so `kr`, which nothing sizes, keeps [sp,#0] as a word it may take,
-  //      and the lift declines (it lifted as `kr(1, 2, 3, 4)`, the fifth argument dropped, before
-  //      frontend/stackargs.ts `loadedWordBound` asked that every store it clears reach the read).
+  //      and the lift declines rather than drop the fifth argument (frontend/stackargs.ts
+  //      `loadedWordBound` steps down only where every store it clears reaches the read).
   //      The MIPS compilers and mwcc decline it on their own stack-argument and frame-layout gates.
   {
     sym: 'stkidx_below',
@@ -20332,9 +20331,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //      - 1)`: agbcc stages the K&R call's stack word at [sp,#0] FIRST and then loads `p[i]`'s three
   //      words, based at [sp,#0], into r0..r2 (calls.c `move_block_to_reg`, after every stack store).
   //      A read with no store between it and a call nothing sizes clears nothing (thumb.ts
-  //      `indexedReadBelow`), so `kr` keeps [sp,#0] as a word it may take and the lift declines (it
-  //      lifted as `kr(p[i].a, p[i].b, p[i].c, 3)`, the stack word dropped, while the read cleared
-  //      everything from its base up).
+  //      `indexedReadBelow`), so `kr` keeps [sp,#0] as a word it may take and the lift declines
+  //      rather than drop that stack word.
   {
     sym: 'stkidx_byval',
     src:
@@ -20362,10 +20360,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //  40. dmafill_call (kl2dct sub_0802E340: "stack pointer used as data — the store to [sp,#0] is
   //      never reloaded"). A DMA fill whose temp's address is stored to the device's source register,
   //      then a call taking `&w`. agbcc loads the register's address into r0, the same register that
-  //      holds `&w` at the call, and the publish was read off the register's NAME: a register that
-  //      holds a frame address anywhere is a base into this frame, so the store published nothing
-  //      and the temp's word read as staged for `g`. The publish is now read per store: a base that
-  //      holds no frame address AT the store, on any path, publishes what it stores (thumb.ts
+  //      holds `&w` at the call. Read off the register's NAME the store would publish nothing and
+  //      the temp's word would read as staged for `g`; read per store, a base that holds no frame
+  //      address AT the store, on any path, publishes what it stores (thumb.ts
   //      `frameAddressReceivers` over `frameAddressesAt`). agbcc only, as item 26.
   {
     sym: 'dmafill_call',
@@ -20393,10 +20390,11 @@ export const SYNTHETIC: SynthSpec[] = [
   },
   //  41. dmafill_two (kl2dct AgbMain: "the object at [sp,#0) overlaps the SSA slot at [sp,#0]").
   //      Two DMA fills in a frame of two words, then a call nothing about the frame declares. The
-  //      first temp sits at [sp,#0] and its address is published; the [sp,#0] capture licence of item
-  //      26 holds only where no call may take a stack word, so its `str r2, [sp]` was keyed as an SSA
-  //      slot under the object, "one byte, two models". A frame base published to memory is now the
-  //      object at any frame size (thumb.ts `frameBasePublished`): agbcc puts such a temp at [sp,#0]
+  //      first temp sits at [sp,#0] and its address is published. Item 26's [sp,#0] capture licence
+  //      reads "no call takes a stack word" off the declarations, which `g()` does not give, so
+  //      its `str r2, [sp]` would be keyed as an SSA slot under the object. A frame base published
+  //      to memory is the object wherever the measured outgoing area is empty (thumb.ts
+  //      `frameBaseIsTheObject`): agbcc puts such a temp at [sp,#0]
   //      only where no call takes a stack word, and moves it above a fifth argument otherwise
   //      (corpus/agbcc-dmafill.s `dfive`). `g` is declared K&R so that nothing says it takes no
   //      stack word. agbcc only, as item 26.

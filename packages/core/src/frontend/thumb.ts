@@ -4305,20 +4305,16 @@ function measureThumbFrame({
   };
   const stagesOutgoing = target.compilerBehaviors.stagesOutgoingArgsInFrame === true;
   const indexedReadsHere = target.compilerBehaviors.stagedStackWordReachesOnlyItsCall === true;
-  // …AND HOW HIGH WHAT IT READS MAY CLEAR. The read's base proves no local (the event's doc), so
-  // what it may clear rests on the staging premise (`stagedStackWordReachesOnlyItsCall`): every
-  // path from a staged word's store reaches its call with no other call on the way, a block copy
-  // into the area aside, and a word the call stages after a read lies above the ones it staged
-  // before. A read may run between a word's store and its call — agbcc loads a by-value struct's
-  // register words there (`struct S12 *p = (struct S12 *)(w - 1); kr(p[i], 3, gI)` stores gI at
-  // [sp,#0], then loads `p[i]` from [sp,#0] up into r0..r2) — so its ceiling (`below`) is the
-  // lowest, over the paths from it to a call whose stack words nothing states exactly, of the
-  // highest word stored on the way, or that call's stated words where a count states more. A call
-  // a typed parameter list declares ends a path unbounded: a word it takes that the read clears is
-  // missing at the call and refuses there, and a word above its block is no word of it. A call
-  // handed a frame address does not end one: it may be that block copy (`add r0, sp, #4 / … / bl
-  // memcpy`). `Infinity` where no such call follows the read; `-Infinity` where a path stores
-  // nothing before one, and the read is no event.
+  // …AND HOW HIGH WHAT IT READS MAY CLEAR, under `stagedStackWordReachesOnlyItsCall` (`target.ts`
+  // says why). A read may run between a staged word's store and its call — agbcc loads a by-value
+  // struct's register words there (`kr(p[i], 3, gI)` stores gI at [sp,#0], then loads `p[i]` from
+  // [sp,#0] up into r0..r2) — so its ceiling (`below`) is the lowest, over the paths from it to a
+  // call whose stack words nothing states exactly, of the highest word stored on the way, or that
+  // call's stated words where a count states more. A call a typed parameter list declares ends a
+  // path unbounded: a word it takes that the read clears is missing at the call and refuses there.
+  // A call handed a frame address does not end one: it may be a block copy into the area (`add r0,
+  // sp, #4 / … / bl memcpy`). `Infinity` where no such call follows the read; `-Infinity` where a
+  // path stores nothing before one, and the read is no event.
   const isCall = (ins: Instr): boolean => ins.mnemonic === 'bl' || ins.mnemonic === 'blx';
   const storedWord = (ins: Instr): number | null => (/^str/.test(ins.mnemonic) ? slotAcc(ins) : null);
   // the words a call's declaration states it takes, `Infinity` where a typed parameter list states
@@ -4465,10 +4461,8 @@ function measureThumbFrame({
   // of the call while its stores stay excused. The one-word licence has this re-check
   // (`recheckWholeFramePremise`); this is the same one at any frame size. Only where the analysis
   // would refuse WITHOUT the escapes, so an escape that excused nothing asks nothing of the IR.
-  // The ablation removes escapes only: an `indexed-read` also ends pending words, but it rests on
-  // the order of the asm's own stores, loads and calls, which the lift does not decide again, so it
-  // is no premise of the IR to re-ask (the event's doc, frontend/stackargs.ts); a word it covers
-  // stays covered whatever the lift does to the call an escape fed.
+  // The ablation removes escapes only: an `indexed-read` rests on nothing the lift decides again
+  // (`StackArgsIndexedRead`, frontend/stackargs.ts).
   const escapeOffsets = new Set(
     [...entryReachable].flatMap((b) => eventBlocks[b].events.flatMap((ev) => (ev.kind === 'escape' ? [ev.off] : []))),
   );
@@ -4863,10 +4857,9 @@ function narrowSlotReloads(
 // writes INTO this frame?) does not, and a register holding only an index sum is then no frame
 // address there: measured, klonoa's `DmaControllerInit` sums a frame address into the register it
 // later loads its DMA register's address into, and its publish stopped counting as one. A store
-// through `&buf[i]` stays the counted-as-leaving imprecision `frameAddressReceivers` states.
-// …where the index sum is the INSTRUCTION, not the offset: an address two paths left at different
-// offsets is NaN too, and it is still a frame address (a loop's `add r2, #4` over a capture), so
-// what is not carried is only the `add rD, rS, rT` that moves one by a register.
+// through `&buf[i]` stays the counted-as-leaving imprecision `frameAddressReceivers` states. The
+// index sum is the INSTRUCTION, not the NaN offset: an address two paths left at different offsets
+// is NaN too and still a frame address (a loop's `add r2, #4` over a capture).
 function movedByARegister(ins: Instr): boolean {
   const [d, s1, s2] = ins.ops;
   const by = s2 === undefined ? s1 : s2;
