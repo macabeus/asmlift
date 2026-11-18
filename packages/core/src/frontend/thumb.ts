@@ -1475,7 +1475,7 @@ function decode(
         const rest = st.text.slice(labels.length);
         const md = rest.match(/^\.macro\b\s*([^\s,]*)/i);
         if (md) {
-          const names = labels === '' ? [md[1]] : labels.split(':');
+          const names = labels === '' ? [md[1]] : [...labels.matchAll(/([^\s:]+)\s*:/g)].map((l) => l[1]);
           for (const l of names.map((s) => s.trim().toLowerCase())) {
             if (l !== '') {
               defined.add(l);
