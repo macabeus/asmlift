@@ -645,9 +645,13 @@ function regListOf(ops: string[]): string[] | null {
   );
 }
 
-/** Split a comment-free source line into the statements gas assembles from it: `;` separates
- *  statements in gas for ARM, except inside a string (`"a;b"`, with `\"` escapes) or as a character
- *  constant (`';`). */
+/** Split a source line, its `@` comment already cut, into the statements gas assembles from it:
+ *  `;` separates statements in gas for ARM, except inside a string (`"a;b"`, with `\"` escapes), as
+ *  a character constant (`';`), or inside a `/* … *\/` comment. Two comment forms are read the way
+ *  gas reads them (arm-none-eabi-as checked): a `/* … *\/` closed on the line is blank space, and a
+ *  `#` that starts a statement (at the line's start, after its labels, or after a `;`) comments out
+ *  the rest of the line, `;`s included. A `/*` left open is kept as written to the line's end, as
+ *  it was before statements were split: a comment spanning lines is not read here. */
 function splitStatements(line: string): string[] {
   const out: string[] = [];
   let cur = '';
@@ -666,6 +670,16 @@ function splitStatements(line: string): string[] {
       cur += c;
     } else if (c === "'" && i + 1 < line.length) {
       cur += c + line[++i];
+    } else if (c === '/' && line[i + 1] === '*') {
+      const end = line.indexOf('*/', i + 2);
+      if (end === -1) {
+        cur += line.slice(i);
+        break;
+      }
+      cur += ' ';
+      i = end + 1;
+    } else if (c === '#' && /^\s*(?:[A-Za-z_.$][\w.$]*:\s*)*$/.test(cur)) {
+      break;
     } else if (c === ';') {
       out.push(cur);
       cur = '';
@@ -1145,7 +1159,7 @@ const sayFact = (f: LayoutFact): string => {
  *  `.include` is not on the list, because the bytes it includes are ones this frontend cannot see.
  *  A pret unit includes its macros before the first function, which is outside every slice. What
  *  that leaves unread is a macro the included file defines under an instruction's name (`.macro
- *  nop`): a macro the input itself defines declines where the slice names it (`macroNames` in
+ *  nop`): a macro the input itself defines declines where the slice names it (`macroUses` in
  *  decode), but an included one is invisible here. No GBA code unit in the benchmark's checkouts or
  *  in kl2dct defines one. An
  *  INCLUDE_ASM body (`.include "asm/nonmatchings/…"`) follows the previous function's return,
@@ -1317,17 +1331,31 @@ function decode(
       codeLines.push(st);
     }
   }
-  // Every macro the input defines, by name (gas matches macro names case-insensitively). A macro
-  // wins over an instruction of the same name, so `.macro nop` / `bx lr` / `.endm` above the
-  // function makes a `nop` line inside it a `bx lr`. Its definition can sit outside every slice, so
+  // Every statement that names a macro the input has defined ABOVE it (gas matches macro names
+  // case-insensitively, and expands a macro only after its definition). A macro wins over an
+  // instruction of the same name, so `.macro nop` / `bx lr` / `.endm` above the function makes a
+  // `nop` line inside it a `bx lr`. Its definition can sit outside every slice, so
   // {@link LINE_DIRECTIVES} never sees it: a statement in the slice that names one declines below,
-  // as a line this frontend does not read as written. A macro the input only `.include`s is not
-  // visible here (the residue named on {@link ZERO_BYTE_DIRECTIVES}).
-  const macroNames = new Set<string>();
-  for (const line of codeLines) {
-    const md = line.match(/^\.macro\s+([^\s,]+)/i);
-    if (md) {
-      macroNames.add(md[1].toLowerCase());
+  // as a line this frontend does not read as written. A `nop` above the definition is the
+  // instruction, and reads as one. `.purgem` is not honoured (a purge inside a skipped `.if` would
+  // un-define a macro gas still expands), so a name stays a macro once defined. A macro the input
+  // only `.include`s is not visible here (the residue named on {@link ZERO_BYTE_DIRECTIVES}).
+  const macroUses = new Set<number>();
+  {
+    const defined = new Set<string>();
+    for (const [k, line] of codeLines.entries()) {
+      const md = line.match(/^\.macro\s+([^\s,]+)/i);
+      if (md) {
+        defined.add(md[1].toLowerCase());
+        continue;
+      }
+      const head = line
+        .replace(/^(?:[A-Za-z_.$][\w.$]*:\s*)+/, '')
+        .match(/^[\w.$]+/)?.[0]
+        .toLowerCase();
+      if (head !== undefined && defined.has(head)) {
+        macroUses.add(k);
+      }
     }
   }
   const DEBUG_MARKER = /(?<![\w.$])\.L(?:FB|FE|M|BB|BE|etext)\d+\b/g;
@@ -1365,9 +1393,8 @@ function decode(
         continue;
       }
     }
-    const head = rest.match(/^[\w.$]+/)?.[0].toLowerCase();
-    if (head !== undefined && macroNames.has(head)) {
-      unreadDirectives.push({ at: flat.length - 1, what: head, lines: true });
+    if (macroUses.has(lineNo)) {
+      unreadDirectives.push({ at: flat.length - 1, what: rest.match(/^[\w.$]+/)![0].toLowerCase(), lines: true });
       continue;
     }
     if (rest.startsWith('.')) {

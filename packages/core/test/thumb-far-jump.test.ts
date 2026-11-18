@@ -363,13 +363,31 @@ describe('what is not provably a relay declines loud', () => {
   // A macro wins over the instruction it is named after (gas matches macro names
   // case-insensitively): `.macro nop` / `bx lr` / `.endm` above the function makes its `NOP` the
   // thunk's return (objdump: 0x4770 at .Lthunk+2). The definition sits outside the slice.
-  test('a line naming a macro the input defines declines, wherever the macro is defined', () => {
+  test('a line naming a macro the input defines above it declines, even outside the slice', () => {
     declines(
       `\t.macro nop\n\tbx lr\n\t.endm\n${H}\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tcmp\tr4, #0\n\tbeq\t.Lskip\n` +
         '\tbl\t.Lthunk\n\tadd\tr4, #7\n.Lskip:\n\tadd\tr0, r4, #0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
         '.Lthunk:\n\tadd\tr4, #1\n\tNOP\n\tadd\tr4, #3\n\tb\t.Lskip\n',
       /'nop' inside the function changes which lines are assembled/,
     );
+  });
+
+  // gas expands a macro only after its definition: a `nop` above `.macro nop` is the instruction
+  // (objdump: 0x46c0), so a definition after the function leaves the function's lift as it was.
+  test('a line above the macro it names is the instruction, and lifts', () => {
+    const asm =
+      `${H}\tnop\n\tadd\tr0, #2\n\tbx\tlr\n` + '\t.thumb_func\ng:\n\tbx\tlr\n\t.macro nop\n\tbx lr\n\t.endm\n';
+    expect(lift(asm)).toContain('return a0 + 2;');
+  });
+
+  // Comments, as gas reads them (arm-none-eabi-as checked): a `;` inside `/* … */` separates
+  // nothing, and a `#` opening a statement comments out the rest of the line, `;`s included.
+  // Split blindly, `# x; add r0, #1` assembled an `add` the object does not have.
+  test('a `;` inside a comment is not a statement separator', () => {
+    expect(lift(`${H}\tadd\tr0, #2 /* x; y */\n\tbx\tlr\n`)).toContain('return a0 + 2;');
+    expect(lift(`${H}\tadd\tr0, #2\n# x; add r0, #1\n\tbx\tlr\n`)).toContain('return a0 + 2;');
+    expect(lift(`${H}\tadd\tr0, #1; # x; add r0, #4\n.Lb: # z; add r0, #8\n\tbx\tlr\n`)).toContain('return a0 + 1;');
+    expect(__testing.splitStatements('add r0, #3 /* a; b */; add r0, #1')).toEqual(['add r0, #3  ', ' add r0, #1']);
   });
 
   test('a marked `bl` to a symbol outside this function is not a relay', () => {
