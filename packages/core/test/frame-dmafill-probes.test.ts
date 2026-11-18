@@ -122,7 +122,7 @@ describe('a published frame base is a local, at any frame size', () => {
   });
 
   // the controls: a word staged at [sp,#0] after the frame base is published reaches its call
-  // pending, as it did before
+  // pending
   const restaged = [
     'push {r4, lr}',
     'add sp, sp, #-0x8',
