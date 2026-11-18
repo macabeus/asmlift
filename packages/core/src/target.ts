@@ -52,7 +52,8 @@
 //     (raise/globalshape.ts, run on the LIFTED fn), `eightByteReturnScratch`
 //     (frontend/thumb.ts, which reads the epilogue), `callThunks` (frontend/thumb.ts, which
 //     lowers a `bl` to one as a call through its register), `farJumpRelay` (frontend/thumb.ts,
-//     which reads a marked `bl` as the branch it stands for), `roundTripsDoubleLiterals`
+//     which declines a marked `bl` to a label outside the function's code; the far jump itself,
+//     marked or not, is lowered by a proof on the text), `roundTripsDoubleLiterals`
 //     (raise/floathelpers.ts), `volatileReadsExtendInRegister` (frontend/device-pins.ts, and
 //     raise/declared-volatile.ts through liftStamped and the offset-name pass), and
 //     `keepsUnusedReads` and `discardsUnusedReadsInto` (frontend/dead-reads.ts, the second
@@ -484,6 +485,11 @@ export interface ControlFlowBehaviors {
   // The mark is not what makes the lowering sound: an unmarked `bl` to a code label of the
   // function (a disassembly carries no comment) is lowered behind the same proof. ABSENT ⇒ every
   // comment is dropped, and such a `bl` is read by that shape alone.
+  //
+  // So this field decides ONE outcome, besides a decline's wording: a marked `bl` to a label that
+  // is not a code label of this function declines, where the same `bl` unmarked keeps the call
+  // reading (`bl _X` into another function's body lifts as `_X(...)`, as it does on a target with
+  // no mark). The mark is what says that `bl` is a branch, which the call reading would get wrong.
   farJumpRelay?: { readonly comment: RegExp };
   // Regime-A switch recovery: accept a RELATIONAL test as a case where the scrutinee values that
   // can reach it — narrowed by the tests above it — leave exactly one on a side this compiler's

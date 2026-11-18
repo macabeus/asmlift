@@ -757,8 +757,10 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // function, marked or not, whose lr is not provably dead (no `push` of lr in the entry block, a
     // branch or jump table back to the entry, or another instruction naming lr), or a marked one
     // whose target is not a code label of this function. A call thunk like m4a's `bl call_r3`
-    // reaches the first when it names lr, and otherwise declines on its own return (`bx r3` is not
-    // a return through the caller's lr), which is in the residue. A `blx` to a label of this
+    // reaches the first: the real MPlayMain / MP2KPlayerMain push lr only after an early `bx lr`,
+    // so their entry block saves none. Only a thunk whose function pushes lr in its entry block and
+    // names it nowhere else gets past the lowering, and then declines on its own return (`bx r3` is
+    // not a return through the caller's lr), which is in the residue. A `blx` to a label of this
     // function, alignment fill the input leaves open,
     // and code that runs into data are in the residue: counting them here would book a layout gap
     // as a far jump. No row reaches either refusal, so the class is in `NO_ROWS`.

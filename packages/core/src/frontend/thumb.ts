@@ -3041,12 +3041,18 @@ const sayRelay = (ins: Instr) =>
  *  reached, nor through a saved callee register — is the other half of the argument, and it is
  *  asked of every Thumb function once the CFG exists (`refuseReturnsNotThroughCallersLr`), where
  *  the frame walk says which word each `pop` reads. A thunk fails one half or the other: `bx lr`
- *  and `push {lr}` name lr, and m4a's `bx r3` is a return that does not go through the caller's lr.
- *  One that leaves the function (`b ext`) declines as any branch out of it does.
+ *  and `push {lr}` name lr, and a thunk's `bx r3` is a return that does not go through the
+ *  caller's lr. The real m4a functions (pokeemerald `MPlayMain`, sa3 `MP2KPlayerMain`) fail the
+ *  first half before the second is asked: their `push {r0, lr}` follows an early `bx lr`, so the
+ *  entry block saves no lr and the lowering declines; only a function that pushes lr in its entry
+ *  block reaches the `bx r3` refusal. One that leaves the function (`b ext`) declines as any branch
+ *  out of it does.
  *
  *  What the mark adds is the compiler's word that the `bl` is its relay, so a marked `bl` that does
  *  not target a code label of THIS function — agbcc only relays within one — is not its relay, and
- *  declines. */
+ *  declines. That is the one outcome the mark decides: an unmarked `bl` to such a label is not a
+ *  candidate (`withRelayCandidates` takes only this function's code labels), and keeps the call
+ *  reading every `bl` has. */
 function lowerFarJumpRelays(name: string, blocks: readonly AsmBlock[], funcLabels: ReadonlySet<string>): Instr | null {
   const instrs = blocks.flatMap((b) => b.instrs);
   const relays = instrs.filter((ins) => ins.farJump);

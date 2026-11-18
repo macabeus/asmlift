@@ -179,14 +179,28 @@ describe('what is not provably a relay declines loud', () => {
     expect(decompile('f', asm, ARMV4T_AGBCC, { onGap: 'annotate' }).source).not.toContain('.L2(');
   };
 
-  // pokeemerald m4a_1.s: `push {r0, lr}` … `bl call_r3` … `call_r3: bx r3`. The function saves lr
-  // like a relay's does and names it nowhere else, so the `bl` is lowered; what declines is the
-  // thunk's `bx r3`, which is not a return through the caller's lr.
+  // Reduced from pokeemerald m4a_1.s: `push {r0, lr}` … `bl call_r3` … `call_r3: bx r3`, with the
+  // push moved into the entry block. The function saves lr like a relay's does and names it nowhere
+  // else, so the `bl` is lowered; what declines is the thunk's `bx r3`, which is not a return
+  // through the caller's lr. The real MPlayMain pushes lr only after an early `bx lr`, so it
+  // declines earlier, on its entry block saving no lr (the next test).
   test('the call-thunk shape, unmarked, declines', () => {
     const thunk =
       `${H}\tpush\t{r0, lr}\n\tcmp\tr0, #0\n\tbeq\t.L1\n\tldr\tr3, [r0]\n\tbl\t.L2\n.L1:\n\tpop\t{r0}\n\tpop\t{r0}\n\tbx\tr0\n` +
       '.L2:\n\tbx\tr3\n';
     declines(thunk, /indirect\/computed jump 'bx r3' is not a return through the caller's lr/);
+  });
+
+  // The real m4a shape (pokeemerald MPlayMain, sa3 MP2KPlayerMain): an early `bx lr` in the entry
+  // block, and `push {r0, lr}` only in the block after it.
+  test('the call thunk as m4a writes it declines on its entry block saving no lr', () => {
+    const thunk =
+      `${H}\tcmp\tr0, #0\n\tbne\t.L0\n\tbx\tlr\n.L0:\n\tpush\t{r0, lr}\n\tldr\tr3, [r0]\n\tbl\t.L2\n` +
+      '.L1:\n\tpop\t{r0}\n\tpop\t{r0}\n\tbx\tr0\n.L2:\n\tbx\tr3\n';
+    declines(
+      thunk,
+      /'bl \.L2' \(a `bl` to a label inside this function, read as a long branch\) is in a function whose entry block does not save lr with a `push`/,
+    );
   });
 
   // A thunk that returns to its caller through lr names lr, which no relay's function may.
@@ -293,5 +307,17 @@ describe('what is not provably a relay declines loud', () => {
       `${H}\tpush\t{lr}\n\tbl\th\t@far jump\n\tpop\t{r0}\n\tbx\tr0\n`,
       /does not target a code label of this function/,
     );
+  });
+
+  // The one outcome `compilerBehaviors.farJumpRelay` decides: a `bl` into another function's body
+  // declines when marked (the mark says it is a branch) and keeps the call reading when not.
+  test('a `bl` to a label inside another function declines marked and lifts as a call unmarked', () => {
+    const rom = (mark: string) =>
+      '.thumb\n\tthumb_func_start f\nf:\n\tpush {lr}\n\tbl _08000022' +
+      mark +
+      '\n\tpop {r0}\n\tbx r0\n' +
+      '\tthumb_func_start h\nh:\n\tmov r0, #1\n_08000022:\n\tbx lr\n';
+    declines(rom('\t@ far jump'), /does not target a code label of this function/);
+    expect(decompile('f', rom(''), ARMV4T_AGBCC).source).toContain('_08000022(');
   });
 });
