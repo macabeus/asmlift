@@ -97,7 +97,7 @@ describe('basecse and scopebase disagree about a `for` init, and the disagreemen
       value: { k: 'bin', op: '+', l: ix({ k: 'const', value: 1 }), r: ix({ k: 'var', name: 'a0' }) },
     },
     cond: { k: 'const', value: 1 },
-    inc: { k: 'assign', name: 'i', value: { k: 'const', value: 0 } },
+    inc: [{ k: 'assign', name: 'i', value: { k: 'const', value: 0 } }],
     body: [{ k: 'exprstmt', value: { k: 'call', fn: 'sink', args: [] } }],
   };
   const fn: SFn = {

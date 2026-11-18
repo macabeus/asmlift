@@ -524,7 +524,7 @@ describe('`scope` descends through every construct that opens a list, not just `
       k: 'for',
       init: plain(),
       cond: c(1),
-      inc,
+      inc: [inc],
       body,
     });
     expect(inside(around(counted([read('p0', 1)])))).toEqual(['store', ['for', [['assign', 'store']]]]);
@@ -539,7 +539,7 @@ describe('`scope` descends through every construct that opens a list, not just `
     // kind whose children are not all in the lists it opens — so the mention its `init` makes
     // before the body runs is only seen if the opened lists are subtracted as a multiset.
     const shared = read('p0', 1);
-    const loop: Stmt = { k: 'for', init: shared, cond: c(1), inc: plain(), body: [shared] };
+    const loop: Stmt = { k: 'for', init: shared, cond: c(1), inc: [plain()], body: [shared] };
     const sfn = around(loop);
     expect(placeBaseLocals(sfn, [], 'scope').body).toEqual(placeBaseLocals(sfn, [], 'first-use').body);
   });

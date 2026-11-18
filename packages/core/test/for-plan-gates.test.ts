@@ -361,8 +361,12 @@ test('a param stepped beside the counter is read as G of the counter, and the `f
   expect(r.agreement.disagree).toBe(0);
 });
 
-test("a step that is not G's own stride keeps the param a copy, and the `for` refuses its two updates", () => {
-  expect(() => lift(srFor({ backDerived: '%38: s32 = add %6, %3' }))).toThrow(LOOP_EXIT);
+test("a step that is not G's own stride keeps the param a copy, which the `for` steps as its own", () => {
+  // `p = p + 3` of the param's old value: no stride of the counter, and a second counter of its own
+  const r = lift(srFor({ backDerived: '%38: s32 = add %6, %3' }));
+  expect(r.src).toMatch(/for \((\w+) = a0; a1 >= \1; \1 = \1 \+ 1, (\w+) = \2 \+ \w+\) \{/);
+  expect(r.agreement.judged).toBeGreaterThan(0);
+  expect(r.agreement.disagree).toBe(0);
 });
 
 test('a stride the test reads is no counted loop the `for` reads', () => {

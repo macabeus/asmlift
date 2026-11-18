@@ -153,7 +153,7 @@ describe('role names', () => {
             k: 'for',
             init: set('v1', c(0)),
             cond: lt('v1', 8),
-            inc: step('v1'),
+            inc: [step('v1')],
             body: [
               set('v2', c(0)),
               { k: 'while', cond: lt('v2', 2), body: [work(v('v0'), v('v1'), v('v2')), step('v2')] },
@@ -450,7 +450,7 @@ describe('role names', () => {
         k: 'for',
         init: set('v0', c(0)),
         cond: { k: 'bin', op: '<', l: v('v0'), r: v('a0') },
-        inc: step('v0'),
+        inc: [step('v0')],
         body: [set('v1', { k: 'bin', op: '+', l: v('v1'), r: { k: 'call', fn: 'ext', args: [v('v0')] } })],
       },
       { k: 'return', value: v('v1') },
@@ -480,7 +480,7 @@ describe('the rename walk', () => {
         k: 'for',
         init: { k: 'assign', name: 'v0', value: { k: 'const', value: 0 } },
         cond: { k: 'bin', op: '<', l: v0, r: { k: 'const', value: 3 } },
-        inc: { k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: v0, r: { k: 'const', value: 1 } } },
+        inc: [{ k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: v0, r: { k: 'const', value: 1 } } }],
         body: [
           { k: 'exprstmt', value: { k: 'call', fn: 'work', args: [{ k: 'addr', name: 'v0' }] } },
           { k: 'exprstmt', value: { k: 'postincr', name: 'v0', by: 1 } },

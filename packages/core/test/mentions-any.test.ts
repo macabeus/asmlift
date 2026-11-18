@@ -21,8 +21,8 @@ describe('every position a name can hide in', () => {
   test('a plain read', () => finds(asg('q', v('t'))));
   test('an ADDRESS', () => finds(asg('q', { k: 'addr', name: 't' })));
   test('nested inside an `if` arm', () => finds({ k: 'if', cond: c(1), then: [], else: [asg('q', v('t'))] }));
-  test("a `for`'s INIT", () => finds({ k: 'for', init: asg('t', c(0)), cond: c(1), inc: asg('q', c(0)), body: [] }));
-  test("a `for`'s INC", () => finds({ k: 'for', init: asg('q', c(0)), cond: c(1), inc: asg('t', c(0)), body: [] }));
+  test("a `for`'s INIT", () => finds({ k: 'for', init: asg('t', c(0)), cond: c(1), inc: [asg('q', c(0))], body: [] }));
+  test("a `for`'s INC", () => finds({ k: 'for', init: asg('q', c(0)), cond: c(1), inc: [asg('t', c(0))], body: [] }));
   test("a `switch`'s SCRUTINEE", () => finds({ k: 'switch', scrutinee: v('t'), cases: [], default: [] }));
   test("a `switch`'s CASE body", () =>
     finds({

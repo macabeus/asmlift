@@ -180,7 +180,10 @@ describe('the PER-KEY refusals, each priced by the spelling it keeps out of the 
     }
     const init: Stmt = { k: 'assign', name: 'i', value: where === 'for-init' ? read : zero };
     const inc: Stmt = { k: 'assign', name: 'i', value: where === 'for-inc' ? read : zero };
-    return fn([arms, { k: 'for', init, cond: { k: 'var', name: 'i' }, inc, body: [] }], [{ name: 'i', type: T.s(32) }]);
+    return fn(
+      [arms, { k: 'for', init, cond: { k: 'var', name: 'i' }, inc: [inc], body: [] }],
+      [{ name: 'i', type: T.s(32) }],
+    );
   };
 
   test('homesplit-drops-device-volatile: a device READ left inline is qualified by neither /volatile nor /vol-store', () => {

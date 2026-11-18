@@ -818,13 +818,14 @@ function* allStmts(stmts: readonly Stmt[]): Generator<Stmt> {
 
 // ── the pass ────────────────────────────────────────────────────────────────────────────────
 
-/** the loop's counter step statement (a `for`'s `inc`, or the body's last statement) */
+/** the loop's counter step statement (a `for`'s one `inc`, or the body's last statement); none for
+ *  a `for` that steps two names, whose second step may read the first */
 const counterStepStmt = (loop: Extract<Stmt, { k: 'while' | 'dowhile' | 'for' }>): Stmt | undefined =>
-  loop.k === 'for' ? loop.inc : loop.body[loop.body.length - 1];
+  loop.k === 'for' ? (loop.inc.length === 1 ? loop.inc[0] : undefined) : loop.body[loop.body.length - 1];
 
 /** the statements a loop evaluates outside its body — the parts a substitution must not touch */
 const controlStmts = (loop: Extract<Stmt, { k: 'while' | 'dowhile' | 'for' }>): Stmt[] =>
-  loop.k === 'for' ? [loop.init, loop.inc] : [];
+  loop.k === 'for' ? [loop.init, ...loop.inc] : [];
 
 /** The statements a DEVICE armed in could still be writing memory from while the moved reads run:
  *  the loop, and the WHOLE prefix above it — deliberately wider than the motion region below,
@@ -1020,7 +1021,7 @@ function mapStmts(s: Stmt, f: (e: Expr) => Expr, list: (l: readonly Stmt[]) => S
         ...s,
         cond: f(s.cond),
         init: mapStmts(s.init, f, list),
-        inc: mapStmts(s.inc, f, list),
+        inc: s.inc.map((x) => mapStmts(x, f, list)),
         body: list(s.body),
       };
     case 'switch':

@@ -190,7 +190,7 @@ describe('narrowDeclarations', () => {
           k: 'for' as const,
           init: write,
           cond: { k: 'var' as const, name: 'v0' },
-          inc: { k: 'break' as const },
+          inc: [{ k: 'break' as const }],
           body: [],
         },
         ...sfn.body.filter((st) => st !== write),
@@ -409,7 +409,7 @@ describe('narrowReadDeclarations', () => {
       k: 'for',
       init: { k: 'break' },
       cond: { k: 'var', name: 'a0' },
-      inc: { k: 'assign', name: 'v0', value: { k: 'const', value: 0 } },
+      inc: [{ k: 'assign', name: 'v0', value: { k: 'const', value: 0 } }],
       body: [],
     });
     expect(local(narrowReadDeclarations(looped)!, 'v0')?.type).toEqual({ kind: 'int', width: 8, signed: false });
@@ -578,7 +578,7 @@ describe('narrowReadDeclarations over a stepped counter', () => {
           k: 'for',
           init: sfn.body[1]!,
           cond: loop.cond,
-          inc: loop.body[1]!,
+          inc: [loop.body[1]!],
           body: [loop.body[0]!],
         },
         sfn.body[3]!,

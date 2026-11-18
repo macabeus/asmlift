@@ -66,7 +66,7 @@ export function markCompound(fn: SFn, valueOk: (rhs: Expr) => boolean): { fn: SF
       return s;
     }
     if (s.k === 'for') {
-      return { ...s, init: one(s.init), inc: one(s.inc), body: s.body.map(one) };
+      return { ...s, init: one(s.init), inc: s.inc.map(one), body: s.body.map(one) };
     }
     return mapStmtLists(s, (list) => list.map(one));
   };

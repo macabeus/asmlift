@@ -499,7 +499,7 @@ export function nameLocalStatics(sfn: SFn, objs: LocalObjects): SFn | { symbol: 
   const assigns = (s: Stmt): Stmt => {
     const r = mapStmtLists(s, (list) => list.map(assigns));
     if (r.k === 'for') {
-      return { ...r, init: assigns(r.init), inc: assigns(r.inc) };
+      return { ...r, init: assigns(r.init), inc: r.inc.map(assigns) };
     }
     return r.k === 'assign' && rename.has(r.name) ? { ...r, name: rename.get(r.name)! } : r;
   };

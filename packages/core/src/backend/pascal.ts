@@ -248,7 +248,7 @@ function makePrinter(vt: VarTypes) {
         // `for` spelling is future work.)
         return [
           ...ps(fnName, s.init, indent),
-          ...ps(fnName, { k: 'while', cond: s.cond, body: [...s.body, s.inc] }, indent),
+          ...ps(fnName, { k: 'while', cond: s.cond, body: [...s.body, ...s.inc] }, indent),
         ];
       // SGI/IDO Pascal has no loop `break`/`continue` — loud-fail rather than emit silently-wrong control
       // flow (mirrors the `field`/`cast`/`%` throws). A `goto`-lowered form is future work.

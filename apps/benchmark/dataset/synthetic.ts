@@ -16236,9 +16236,10 @@ export const SYNTHETIC: SynthSpec[] = [
   //      `recomputeDerivedParams`, A SIBLING'S LEAF): sw_gotocase2's loop with a second counter `j`
   //      that starts at `lo << 3` and is reset to `i << 2` after each update. gcc2.7.2 hands the
   //      header both, and the two edges' shifts differ, so `j` is no one function of `i` and the
-  //      fold must leave it. agbcc and gcc2.7.2 decline at the loop-exit refusal and gcc2.7.2kmc at
-  //      its likely-slot gap; ido7.1 lifts it as `while (1)` with the latch copied into the arms,
-  //      the way it lifts sw_forjt.
+  //      fold must leave it. It is the `for` with two updates (structure.ts `forPlanAt`, A SECOND
+  //      COUNTER): agbcc, gcc2.7.2 and ido7.1 lift it as `for (i = lo; i <= hi; i++, j = i << 2)`
+  //      with `j`'s init ahead of it. gcc2.7.2kmc still declines at its likely-slot gap: its arms
+  //      step a strength-reduced `&gA[i]` in the slots of the branches into the latch.
   {
     sym: 'sw_forjt_skew',
     src:

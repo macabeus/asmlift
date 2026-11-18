@@ -7391,7 +7391,7 @@ function structureRanked(
     inits: Stmt[];
     init: Stmt;
     cond: Expr;
-    inc: Stmt;
+    inc: Stmt[];
     /** the derived parameters' reads (A SIBLING'S STRIDE), and the names the `for` never writes */
     derived?: { reads: Map<Value, (e: (v: Value) => Expr) => Expr>; names: Set<string> };
   };
@@ -7509,22 +7509,62 @@ function structureRanked(
         strictGaps.length = gapMark;
       }
     }
-    // the update is ONE copy: not a rule of `FOR_PLAN_IV_GATES`, which every one of its fields reads
-    if (updateRecs.length !== 1) {
+    // A SECOND COUNTER: the update writes the counter and then, left to right, names whose new
+    // value each reads only the names already stepped (their new value), its own old value, and
+    // what the loop never writes — `for (i = lo, j = lo << 3; i <= hi; i++, j = i << 2)`, whose
+    // latch steps `i` and then recomputes `j` from the new `i`. C runs a comma update in that order,
+    // after the body and on every `continue`, as the latch does. The counter is the first record
+    // (the pred's write order) every later one can follow; a step that reads another name's OLD
+    // value after that name was stepped has no order, and the loop stays `while (1)`. Each step is
+    // spelled as `latchExpr` spells it, a latch op inline and anything else as `exprWith` does, and
+    // `stale` walks it the same way. Not a rule of `FOR_PLAN_IV_GATES`, which every one of its
+    // fields reads; a stride (A SIBLING'S STRIDE) beside a second counter is refused rather than
+    // combined.
+    const inlined = latch.ops.some((o) => materialize.has(o));
+    const stale = (v: Value, done: Map<Value, string>, seen = new Set<Value>()): boolean => {
+      const d = defs.get(v);
+      if (done.has(v) || d === undefined || opBlock.get(d) !== latch) {
+        return readsClobbered(v, done, new Set(done.values()));
+      }
+      if (seen.has(v)) {
+        return false;
+      }
+      seen.add(v);
+      return d.operands.some((o) => stale(o, done, seen));
+    };
+    const steps = (first: (typeof updateRecs)[number]): typeof updateRecs | null => {
+      const order = [first, ...updateRecs.filter((r) => r !== first)];
+      const done = new Map<Value, string>();
+      for (const r of order) {
+        if (stale(r.arg, done)) {
+          return null;
+        }
+        done.set(r.arg, r.name);
+      }
+      return order;
+    };
+    const stepOrder =
+      updateRecs.length === 1
+        ? updateRecs
+        : strides.length > 0
+          ? null
+          : (updateRecs.map(steps).find((o) => o !== null) ?? null);
+    if (stepOrder === null || stepOrder.length === 0) {
       return null;
     }
-    const iv = updateRecs[0].name;
+    const [ivRec, ...extraRecs] = stepOrder;
+    const iv = ivRec.name;
+    const updateNames = new Set(stepOrder.map((r) => r.name));
     const ivInit = initRecs.find((r) => r.name === iv);
     const sub = subFor(h.params, back.args as Value[]);
     // The plain reading renders the latch's copies and test as `argAssigns` and `exprWith` do. A
-    // latch may hold a materialized op its own reads alone use, which the `for` never
+    // latch may hold a materialized op its own reads alone use (`inlined`), which the `for` never
     // renders at its position, so its test and update spell every latch op inline, and the test is
-    // checked through them for a read of the name the update writes.
-    const inlined = latch.ops.some((o) => materialize.has(o));
+    // checked through them for a read of a name the update writes.
     const clobbered = (v: Value, seen = new Set<Value>()): boolean => {
       const d = defs.get(v);
       if (!inlined || sub.has(v) || d === undefined || opBlock.get(d) !== latch) {
-        return readsClobbered(v, sub, new Set([iv]));
+        return readsClobbered(v, sub, updateNames);
       }
       if (seen.has(v)) {
         return false;
@@ -7611,16 +7651,17 @@ function structureRanked(
     const exitFound = (what: string): boolean => {
       exitFindings ??= [
         ...(guardExit === null ? [] : exitSlots(guardExit.pred, guardExit.succ, initWrites)),
-        ...exitSlots(latch, latchExit, new Map([[iv, updateRecs[0].arg]])),
+        ...exitSlots(latch, latchExit, new Map(stepOrder.map((r) => [r.name, r.arg]))),
       ];
       return exitFindings.includes(what);
     };
     // Past a loop with no guard the header dominates the exit, so the code there may read the IV's
     // param itself, not through an exit param: the asm's value from before the update on the
     // latch's way out, which the `for`'s update has rewritten. A named value holds its own.
-    const ivParam = updateRecs[0].param;
+    const ivParam = ivRec.param;
+    const stepParams = new Set(stepOrder.map((r) => r.param));
     const readsIv = (v: Value, seen = new Set<Value>()): boolean => {
-      if (v === ivParam) {
+      if (stepParams.has(v)) {
         return true;
       }
       if (seen.has(v) || varName.has(v)) {
@@ -7763,9 +7804,18 @@ function structureRanked(
       };
       return e;
     };
+    // each later step reads the steps ahead of it by their names (A SECOND COUNTER)
+    const stepped = new Map<Value, string>([[ivRec.arg, iv]]);
+    const extraIncs: Stmt[] = extraRecs.map((r) => {
+      const value = intoDeclaredTemp(r.name, latchExpr(new Map(stepped))(r.arg));
+      stepped.set(r.arg, r.name);
+      return { k: 'assign', name: r.name, value };
+    });
     const [inc] = inlined
-      ? [{ k: 'assign' as const, name: iv, value: intoDeclaredTemp(iv, latchExpr(null)(updateRecs[0].arg)) }]
-      : argAssigns(latch, h, null, keep);
+      ? [{ k: 'assign' as const, name: iv, value: intoDeclaredTemp(iv, latchExpr(null)(ivRec.arg)) }]
+      : extraRecs.length > 0
+        ? [{ k: 'assign' as const, name: iv, value: ivRec.value }]
+        : argAssigns(latch, h, null, keep);
     const inits = [...(pre !== undefined ? sideEffects(pre) : []), ...argAssigns(entry, h, null, keep)];
     const init: Stmt | undefined =
       ivInit === undefined
@@ -7785,11 +7835,11 @@ function structureRanked(
       inits: inits.filter((st) => st !== init),
       init,
       cond: test.contIsTaken ? spelled : negateCond(spelled),
-      inc,
+      inc: [inc, ...extraIncs],
       ...(strides.length > 0
         ? {
             derived: {
-              reads: new Map(strides.map((sd) => [h.params[sd.j], strideRead(sd, updateRecs[0].param)])),
+              reads: new Map(strides.map((sd) => [h.params[sd.j], strideRead(sd, ivParam)])),
               names: new Set(strides.map((sd) => varName.get(h.params[sd.j])!)),
             },
           }

@@ -33,7 +33,7 @@ describe('polish: x++ and x += e for a statement that reads back what it writes'
         k: 'for',
         init: { k: 'assign', name: 'v0', value: c(0) },
         cond: bin('<', v('v0'), v('a1')),
-        inc: { k: 'assign', name: 'v0', value: bin('+', v('v0'), c(1)) },
+        inc: [{ k: 'assign', name: 'v0', value: bin('+', v('v0'), c(1)) }],
         body: [{ k: 'exprstmt', value: { k: 'call', fn: 'g', args: [] } }],
       },
     ]);

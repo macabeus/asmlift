@@ -925,7 +925,7 @@ export function reindexWalks(
       const s = stmts[i];
       // `for (p = base; p < base + n; p = p + 1)` — the self-contained shape
       if (s.k === 'for') {
-        const p = isUnitStep(s.inc, ptrVars);
+        const p = s.inc.length === 1 ? isUnitStep(s.inc[0], ptrVars) : null;
         const init = s.init;
         if (
           p &&
@@ -945,11 +945,13 @@ export function reindexWalks(
               k: 'for',
               init: { k: 'assign', name: iv, value: { k: 'const', value: 0 } },
               cond,
-              inc: {
-                k: 'assign',
-                name: iv,
-                value: { k: 'bin', op: '+', l: { k: 'var', name: iv }, r: { k: 'const', value: 1 } },
-              },
+              inc: [
+                {
+                  k: 'assign',
+                  name: iv,
+                  value: { k: 'bin', op: '+', l: { k: 'var', name: iv }, r: { k: 'const', value: 1 } },
+                },
+              ],
               body,
             });
             fired++;
@@ -1185,11 +1187,13 @@ export function reindexWalks(
         k: 'for',
         init: { k: 'assign', name: iv, value: { k: 'const', value: 0 } },
         cond: { k: 'bin', op: '<', l: { k: 'var', name: iv }, r: trip },
-        inc: {
-          k: 'assign',
-          name: iv,
-          value: { k: 'bin', op: '+', l: { k: 'var', name: iv }, r: { k: 'const', value: 1 } },
-        },
+        inc: [
+          {
+            k: 'assign',
+            name: iv,
+            value: { k: 'bin', op: '+', l: { k: 'var', name: iv }, r: { k: 'const', value: 1 } },
+          },
+        ],
         body,
       },
     };

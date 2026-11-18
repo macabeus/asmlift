@@ -105,7 +105,7 @@ test('a `for` loop reads its counter out of init and inc', () => {
       k: 'for',
       init: set('i', v('a0')),
       cond: { k: 'bin', op: '<=', l: v('i'), r: c(31) },
-      inc: set('i', plus(v('i'), c(1))),
+      inc: [set('i', plus(v('i'), c(1)))],
       body: [st(cell(0x040000d8), v('acc')), set('acc', plus(v('acc'), c(64)))],
     },
   ]);
@@ -498,7 +498,7 @@ test('an effect the loop evaluates OUTSIDE its body still bars a moved read', ()
         k: 'for',
         init: set('a0', v('a1')),
         cond,
-        inc,
+        inc: [inc],
         body: [st(cell(0x040000d8), v('acc')), set('acc', plus(v('acc'), c(64)))],
       },
     ]);
@@ -618,7 +618,7 @@ test('an init reading a name the region assigns declines, in every part of it', 
       k: 'for',
       init: set('a0', v('a1')),
       cond: { k: 'bin', op: '<=', l: v('a0'), r: plus(v('a1'), c(3)) },
-      inc: set('a0', plus(v('a0'), c(1))),
+      inc: [set('a0', plus(v('a0'), c(1)))],
       body: [st(cell(0x040000d8), v('acc')), set('acc', plus(v('acc'), c(64)))],
     },
   ]);

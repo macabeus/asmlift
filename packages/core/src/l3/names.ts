@@ -346,7 +346,7 @@ function roleNames(fn: SFn): { counters: Map<string, readonly string[]>; result?
         }
         loopsOrder.push({ loop: s, loops });
         steps(s.cond, inner);
-        visit([s.inc], inner);
+        visit(s.inc, inner);
         visit(s.body, inner);
         return;
       }
@@ -461,7 +461,7 @@ function resultOf(fn: SFn, eligible: ReadonlySet<string>, otherRole: (v: string)
     list.every(
       (s) =>
         (s.k !== 'return' || (s.value?.k === 'var' && s.value.name === r)) &&
-        (s.k !== 'for' || visit([s.init, s.inc])) &&
+        (s.k !== 'for' || visit([s.init, ...s.inc])) &&
         stmtLists(s).every(visit),
     );
   return visit(fn.body) && assignedBeforeEveryReturn(fn.body, r) && !readBeforeItsLastWrite(fn.body, r) ? r : undefined;
@@ -499,7 +499,7 @@ function assignedBeforeEveryReturn(body: readonly Stmt[], r: string): boolean {
         at = join(run(s.then, at), run(s.else, at));
       } else if (s.k === 'for') {
         at = run([s.init], at);
-        run([...s.body, s.inc], at);
+        run([...s.body, ...s.inc], at);
       } else if (s.k === 'dowhile') {
         const end = run(s.body, at);
         at = jumpsOut(s.body) ? at : end;
@@ -558,7 +558,7 @@ function readBeforeItsLastWrite(body: readonly Stmt[], r: string): boolean {
         visit([s.init], loops);
         const inner = [...loops, s];
         reads(s.cond, inner);
-        visit([...s.body, s.inc], inner);
+        visit([...s.body, ...s.inc], inner);
       } else if (s.k === 'dowhile') {
         // written `do { … } while (c);`: the condition comes after the body
         const inner = [...loops, s];
@@ -625,7 +625,7 @@ function mentionOrder(fn: SFn): string[] {
       case 'for':
         stmt(s.init);
         expr(s.cond);
-        stmt(s.inc);
+        s.inc.forEach(stmt);
         s.body.forEach(stmt);
         return;
       case 'switch': {

@@ -217,7 +217,7 @@ function mapIntegerSlots(sfn: SFn, cells: ReadonlySet<string>, rules: SlotRules)
       case 'dowhile':
         return { ...s, cond: expr(s.cond), body: s.body.map(stmt) };
       case 'for':
-        return { ...s, init: stmt(s.init), cond: expr(s.cond), inc: stmt(s.inc), body: s.body.map(stmt) };
+        return { ...s, init: stmt(s.init), cond: expr(s.cond), inc: s.inc.map(stmt), body: s.body.map(stmt) };
       case 'switch':
         return {
           ...s,
