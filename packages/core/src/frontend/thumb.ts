@@ -3964,9 +3964,13 @@ function measureThumbFrame({
   // `frameAddressReceivers` hands over, so such a base always escapes and the fourth licence
   // admits it everywhere else.
   //
-  // The FOURTH is the [sp,#0] capture where no call takes a stack word (`noCallTakesAStackWord &&
-  // frameBaseEscapes`, below): flow-insensitive at any frame size too, and sound for a block copy's
-  // base as well, because with no outgoing area no frame word is any call's argument at all.
+  // The FOURTH is the [sp,#0] capture where no call takes a stack word (`frameBaseIsTheObject`,
+  // below): flow-insensitive at any frame size too. It reads "no call takes a stack word" two ways.
+  // By DECLARATION (`noCallTakesAStackWord && frameBaseEscapes`), for any escape: sound for a block
+  // copy's base as well, because with no outgoing area no frame word is any call's argument at all.
+  // Or, for a base PUBLISHED to memory under `escapedFrameAddressNamesALocal`, by the outgoing-
+  // argument analysis's MEASURED area (`frameBasePublished && outgoingArgs.area === 0`), where a
+  // call nothing sizes is undeclared; why that half is a publish's only is at `frameBaseIsTheObject`.
   const capturedObjectIsTheWholeFrame =
     target.compilerBehaviors.oneWordFrameIsTheCapturedObject === true &&
     (frameBasePassedToCallee || frameBasePublishedToMemory) &&
@@ -3988,13 +3992,14 @@ function measureThumbFrame({
   // are `handedOutRegs`, the rule the two licences above read too.
   const captureOffsetOf = new Map<Instr, number>();
   const escapedOffsetOf = new Map<Instr, number>();
-  let frameBaseIsReturnStorage = false;
-  // …AND THE BYTES EACH SUCH CALL WRITES: a callee declared to return a struct through memory owns
-  // `[off, off + sizeof)` of the frame address it is handed, and the caller reads the members back
-  // with direct sp loads (`mov r0, sp / bl mk8 / ldr r1, [sp] / ldr r2, [sp, #4]`), so a word
-  // there is that temp's, not a slot (`isFrameObjectAccess`). Only where the struct's size is
-  // stated; one nothing sizes leaves its words to the slot model, and the audit's collision.
-  const returnStorage: FrameRange[] = [];
+  // …AND WHERE EACH DECLARED STRUCT-RETURN CALL'S TEMP LIVES: a callee declared to return a struct
+  // through memory owns `[off, off + sizeof)` of the frame address it is handed in r0, and the
+  // caller reads the members back with direct sp loads (`mov r0, sp / bl mk8 / ldr r1, [sp] / ldr
+  // r2, [sp, #4]`), so a word there is that temp's, not a slot (`isFrameObjectAccess`). `to` is
+  // undefined where nothing states the struct's size: then only the temp's START is known, which is
+  // all the [sp,#0] licence asks (`frameBaseIsReturnStorage`), and its other words are left to the
+  // slot model, and the audit's collision.
+  const returnStorage: { readonly from: number; readonly to: number | undefined }[] = [];
   // …AND EVERY LOAD THROUGH A RUNTIME INDEX INTO THE FRAME, with the frame offset its address is
   // based at — what the outgoing-argument analysis reads as an `indexed-read` event. agbcc's `a[i]`
   // over a frame array is `lsl r0, r4, #2 / add r0, r0, sp / ldr r0, [r0]`, and for an array above
@@ -4029,15 +4034,10 @@ function measureThumbFrame({
       ins.mnemonic === 'bl' && calleeRegister(ins, target) === null
         ? calls.declaredCall(ins.ops[0] ?? '?')?.returned
         : undefined;
-    if (typeof returned === 'object') {
-      const at = held.get(target.argRegs[0]);
-      if (at === 0) {
-        frameBaseIsReturnStorage = true;
-      }
+    const at = typeof returned === 'object' ? held.get(target.argRegs[0]) : undefined;
+    if (typeof returned === 'object' && at !== undefined && Number.isFinite(at) && at >= 0) {
       const size = returned.type.kind === 'struct' ? returned.type.size : undefined;
-      if (at !== undefined && Number.isFinite(at) && at >= 0 && size !== undefined && size > 0) {
-        returnStorage.push({ from: at, to: at + size });
-      }
+      returnStorage.push({ from: at, to: size !== undefined && size > 0 ? at + size : undefined });
     }
     const handed = handedOutRegs(ins);
     const offs = [...held].filter(([r, off]) => handed.includes(r) && off >= 0).map(([, off]) => off);
@@ -4050,6 +4050,7 @@ function measureThumbFrame({
     }
     return false;
   });
+  const frameBaseIsReturnStorage = returnStorage.some((r) => r.from === 0);
   // …and the offsets themselves. A word whose address is taken is not an outgoing argument —
   // C gives an argument no address — so the outgoing-argument analysis below does not see these
   // offsets either: a store there reaching a call unread is the object being filled for the
@@ -4066,10 +4067,12 @@ function measureThumbFrame({
   // the device's registers (`dmafill_wh`). A direct `str rX, [sp]` is then that local's store, as
   // one at [sp,#4] beside `add rD, sp, #4` is. A frame base only ADDRESSED THROUGH (`mov r3, sp /
   // strh r1, [r3, #4]`, Thumb's sole spelling of a sub-word frame access) hands nothing out and
-  // leaves [sp,#0] a slot. A call nothing declares, a call through a register, or a declaration
-  // nothing sizes may take a stack word, and keeps offset 0 out — unless the base is a
-  // struct-return callee's hidden pointer and `compilerBehaviors.escapedFrameAddressNamesALocal`
-  // holds (its second reader).
+  // leaves [sp,#0] a slot. By DECLARATION, a call nothing declares, a call through a register, or a
+  // declaration nothing sizes may take a stack word, and keeps offset 0 out of the analysis here —
+  // unless the base is a struct-return callee's hidden pointer and
+  // `compilerBehaviors.escapedFrameAddressNamesALocal` holds (its second reader). Where the base is
+  // PUBLISHED, the same licence reads the analysis's measured area instead, after it
+  // (`frameBaseIsTheObject`, which says why only a publish may).
   //
   // THUMB ONLY: the MIPS and PPC frontends (`inLocalArea`) route every local-area access through
   // memory once any frame address is taken, so a direct store at the frame base is already the
@@ -4082,7 +4085,8 @@ function measureThumbFrame({
       }
       const declared = calleeRegister(ins, target) === null ? calls.declaredCall(ins.ops[0] ?? '?') : null;
       // the declaration alone, not `outgoingBlock`: a call whose arguments run past the registers
-      // takes a stack word whether or not the target claims agbcc's staging premise
+      // takes a stack word whether or not the target claims agbcc's staging premise (the measured
+      // area is the published base's half of the licence, `frameBaseIsTheObject`, not this one's)
       return declared !== null && wordsOf(declared.widths, target) <= target.argRegs.length;
     }),
   );
@@ -4300,16 +4304,9 @@ function measureThumbFrame({
     return escapesHere && off !== undefined ? [{ kind: 'escape', off }] : [];
   };
   const stagesOutgoing = target.compilerBehaviors.stagesOutgoingArgsInFrame === true;
-  // THE FRAME BASE PUBLISHED TO MEMORY, at any frame size: a word store hands `sp + 0` to memory
-  // outside the frame (`escapedOffsetOf`, a `str`), under the premise that an escaped frame address
-  // names a local's words from it up. Then [sp,#0] is that local and the outgoing area is empty —
-  // agbcc puts the area beneath every local, and C gives an argument word no address to publish — so
-  // a word access there is the object's (`isFrameObjectAccess`). The DMA fill's source temp, `vu32 t
-  // = 0; *(vu32 *)REG_DMA3SAD = (u32)&t;`, in a frame wider than its one word with a call after it
-  // (corpus/agbcc-dmafill.s `dtwo`); beside a fifth argument agbcc moves the temp to [sp,#4] and
-  // stages [sp,#0] after it (`dfive`). Unlike a constant capture's offset it STAYS an outgoing-
-  // argument event: the publish ends what is pending where it fires, so a word staged at [sp,#0]
-  // for a call after it still reaches that call pending, and refuses there.
+  // THE FRAME BASE PUBLISHED TO MEMORY: a word store hands `sp + 0` to memory outside the frame
+  // (`escapedOffsetOf`, a `str`), under the premise that an escaped frame address names a local's
+  // words from it up. The fourth [sp,#0] licence's second half reads it (`frameBaseIsTheObject`).
   const frameBasePublished =
     escapesHere && [...escapedOffsetOf].some(([ins, off]) => off === 0 && ins.mnemonic === 'str');
   const eventBlocks = asmBlocks.map((ab) => ({
@@ -4368,6 +4365,25 @@ function measureThumbFrame({
       loadedWordBound: loadedBound,
     });
   const outgoingArgs = outgoingArgsOver(eventBlocks);
+  // THE FOURTH [sp,#0] LICENCE, ONE RULE: the frame-base capture is the object where no call takes
+  // a stack word — by declaration (`noCallTakesAStackWord`, any escape), or, for a published base,
+  // by the area this analysis measured. Two places only because of ORDER: the declaration is known
+  // before the analysis, so its half also keeps offset 0 out of the events
+  // (`constantCaptureOffsets`); the measured area is the analysis's output, so the published half
+  // leaves [sp,#0] an outgoing-argument event, the publish ends only what is pending where it
+  // fires, and a word staged at [sp,#0] for a call after it still reaches that call pending and
+  // refuses there (corpus/agbcc-dmafill.s `dfive`, where agbcc moves the temp to [sp,#4]).
+  //
+  // WHY THE MEASURED AREA IS A PUBLISH'S ONLY. An area of 0 says no word was STAGED for a call by a
+  // store; it does not say no call takes [sp,#0]. A block copy writes the outgoing area with no
+  // slot store (`mov r0, sp / mov r2, #0x44 / bl memcpy` for a by-value argument, the producer
+  // table above `capturedObjectIsTheWholeFrame`), and its base escapes to the copying CALLEE, so a
+  // callee escape at [sp,#0] proves nothing over a measured 0. A publish cannot be that base: C
+  // gives an argument word no address, so no compiler stores the outgoing area's address to
+  // memory, and a published [sp,#0] is a local — the DMA fill's source temp, `vu32 t = 0;
+  // *(vu32 *)REG_DMA3SAD = (u32)&t;`, in a frame wider than its one word (`dtwo`).
+  const frameBaseIsTheObject =
+    (noCallTakesAStackWord && frameBaseEscapes) || (frameBasePublished && outgoingArgs.area === 0);
   // THE ESCAPES THE VERDICT LEANS ON, re-asked of the lifted IR (`auditFrameObjects`'
   // `escapesReliedOn`). The `escape` event is read off what a REGISTER holds at a `bl` or a `str`,
   // and it switches refusals OFF; the lift then decides what the call is really handed, and an
@@ -4444,11 +4460,11 @@ function measureThumbFrame({
     width === 4 &&
     ((capturedObjectIsTheWholeFrame && off === 0) ||
       (constantCaptureOffsets.has(off) && off >= outgoingArgs.area && off + 4 <= localArea) ||
-      (off === 0 && frameBasePublished && outgoingArgs.area === 0 && localArea >= 4) ||
+      (off === 0 && frameBaseIsTheObject && localArea >= 4) ||
       (escapesHere &&
         off >= outgoingArgs.area &&
         off + 4 <= localArea &&
-        returnStorage.some((r) => off >= r.from && off + 4 <= r.to)) ||
+        returnStorage.some((r) => r.to !== undefined && off >= r.from && off + 4 <= r.to)) ||
       (inByValueBlock(off, 4) && off >= outgoingArgs.area && off + 4 <= localArea) ||
       (oneObject !== undefined && off >= oneObject.from && off + 4 <= oneObject.to));
 
