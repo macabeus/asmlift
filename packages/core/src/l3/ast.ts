@@ -993,6 +993,7 @@ export function stmtExprs(s: Stmt): Expr[] {
  *  rewrites assign TARGETS as well as expressions, one that turns a statement into a list. Check
  *  the contract before pointing one of them here. */
 export function mapStmtExprs(s: Stmt, f: (e: Expr) => Expr): Stmt {
+  const mapS = (x: Stmt): Stmt => mapStmtExprs(x, f);
   switch (s.k) {
     case 'assign':
       return { ...s, value: f(s.value) };
@@ -1003,24 +1004,18 @@ export function mapStmtExprs(s: Stmt, f: (e: Expr) => Expr): Stmt {
     case 'return':
       return s.value ? { ...s, value: f(s.value) } : s;
     case 'if':
-      return { ...s, cond: f(s.cond), then: mapStmtListExprs(s.then, f), else: mapStmtListExprs(s.else, f) };
+      return { ...s, cond: f(s.cond), then: s.then.map(mapS), else: s.else.map(mapS) };
     case 'while':
     case 'dowhile':
-      return { ...s, cond: f(s.cond), body: mapStmtListExprs(s.body, f) };
+      return { ...s, cond: f(s.cond), body: s.body.map(mapS) };
     case 'for':
-      return {
-        ...s,
-        init: mapStmtExprs(s.init, f),
-        cond: f(s.cond),
-        inc: mapStmtExprs(s.inc, f),
-        body: mapStmtListExprs(s.body, f),
-      };
+      return { ...s, init: mapS(s.init), cond: f(s.cond), inc: mapS(s.inc), body: s.body.map(mapS) };
     case 'switch':
       return {
         ...s,
         scrutinee: f(s.scrutinee),
-        cases: s.cases.map((c) => ({ ...c, body: mapStmtListExprs(c.body, f) })),
-        default: s.default ? mapStmtListExprs(s.default, f) : undefined,
+        cases: s.cases.map((c) => ({ ...c, body: c.body.map(mapS) })),
+        default: s.default?.map(mapS),
       };
     case 'break':
     case 'continue':
@@ -1028,13 +1023,6 @@ export function mapStmtExprs(s: Stmt, f: (e: Expr) => Expr): Stmt {
     case 'caseEndGoto':
       return s;
   }
-}
-
-/** mapStmtExprs over a statement list. A module-level helper rather than a closure the walker
- *  makes per call: under tsx, the loader the bench runs on, every named closure a hot recursive
- *  walker creates pays esbuild's keepNames `__name` shim on each call. */
-function mapStmtListExprs(xs: readonly Stmt[], f: (e: Expr) => Expr): Stmt[] {
-  return xs.map((x) => mapStmtExprs(x, f));
 }
 
 /** An address the target can REMATERIALIZE: a constant expression, reading no variable and no
@@ -1145,20 +1133,14 @@ export type Assign = Extract<Stmt, { k: 'assign' }>;
  *  assigned, never which assignment comes first, so a switch default's position does not matter. */
 export function assignsIn(body: readonly Stmt[]): Assign[] {
   const out: Assign[] = [];
-  for (const s of body) {
-    collectAssigns(s, out);
-  }
+  const visit = (s: Stmt): void => {
+    if (s.k === 'assign') {
+      out.push(s);
+    }
+    stmtChildren(s).forEach(visit);
+  };
+  body.forEach(visit);
   return out;
-}
-
-/** assignsIn's walk, pre-order, at module level for the reason mapStmtListExprs gives. */
-function collectAssigns(s: Stmt, out: Assign[]): void {
-  if (s.k === 'assign') {
-    out.push(s);
-  }
-  for (const c of stmtChildren(s)) {
-    collectAssigns(c, out);
-  }
 }
 
 /** Grow `seed` over assignments to a fixpoint: an assignment adds its target when `propagates`
