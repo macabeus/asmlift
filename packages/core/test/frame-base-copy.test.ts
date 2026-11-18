@@ -1099,7 +1099,7 @@ describe('the frame base is a capture where no call takes a stack word', () => {
   });
 
   // A call nothing sizes may take a stack word, but not this one: the frame base is PUBLISHED by a
-  // word store, so [sp,#0] is a local and the outgoing area is empty (thumb.ts `frameBasePublished`,
+  // word store and no word is staged for a call, so [sp,#0] is a local (thumb.ts `frameBaseIsTheObject`,
   // corpus/agbcc-dmafill.s `dfive`); a word staged there after the publish still refuses
   // (frame-dmafill-probes.test.ts).
   test('a call nothing sizes beside a published frame base leaves [sp,#0] the local', () => {
