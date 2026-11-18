@@ -1,11 +1,11 @@
 {
   "generatedBy": "pnpm regen:declines-census (scripts/regen-decline-census.ts) — do not hand-edit",
-  "distinctMessages": 310,
-  "residueTotal": 114,
+  "distinctMessages": 311,
+  "residueTotal": 115,
   "residueByFile": [
     {
       "file": "frontend/thumb.ts",
-      "count": 31,
+      "count": 32,
       "messages": [
         "cannot lift 'X': 'X X' branches to 'X', which this asm defines as a data label — not modelled",
         "cannot lift 'X': 'X X' calls through a register that holds no function's address — not modelled",
@@ -13,6 +13,7 @@
         "cannot lift 'X': 'X X' loads a word that is not X's own save into callee-saved X, and X reaches a return so, unrestored — the caller sees the write, which no C statement spells",
         "cannot lift 'X': 'X X' targets a label inside this function and not a declared function, and is not a relay this frontend lowers to the branch it stands for — read as a call it would return into a block",
         "cannot lift 'X': 'X' emits fill into the code stream and fillits fill bytes are not a pad encoding this frontend models — they are real instructionsmakes item sizes unknowable",
+        "cannot lift 'X': 'X' in the code stream spells an instruction by its encoding, which this frontend does not decode (skipping it would silently delete its effect)",
         "cannot lift 'X': 'X' is a label here but not a function (the function is 'X')",
         "cannot lift 'X': ARM-mode function (arm_func_start) — this frontend lifts Thumb only",
         "cannot lift 'X': alignment padding depends on the function's base alignment, which this input does not determine — base X and base X both decode consistently but disagree: base X has X, base X has X",

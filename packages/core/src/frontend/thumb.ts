@@ -1269,13 +1269,16 @@ function decode(
         /^\.(byte|ascii|asciz|string|space|skip|quad|8byte|octa|double|float|single|incbin|fill|zero|inst)\b/,
       );
       if (raw) {
+        if (dataLabels.length === 0 && raw[1] === 'inst') {
+          throw new FrontendUnsupportedError(
+            `cannot lift '${name}': '${rest.split(/\s/)[0]}' in the code stream spells an instruction by its ` +
+              `encoding, which this frontend does not decode (skipping it would silently delete its effect)`,
+          );
+        }
         if (dataLabels.length === 0) {
           throw new FrontendUnsupportedError(
-            raw[1] === 'inst'
-              ? `cannot lift '${name}': '${rest.split(/\s/)[0]}' in the code stream spells an instruction by its ` +
-                  `encoding, which this frontend does not decode (skipping it would silently delete its effect)`
-              : `cannot lift '${name}': raw data directive '.${raw[1]}' in the code stream — ` +
-                  `it may encode an instruction the disassembler left undecoded (skipping it would silently delete its effect)`,
+            `cannot lift '${name}': raw data directive '.${raw[1]}' in the code stream — ` +
+              `it may encode an instruction the disassembler left undecoded (skipping it would silently delete its effect)`,
           );
         }
         for (const l of dataLabels) {
