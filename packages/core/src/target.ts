@@ -810,7 +810,9 @@ export interface FrameLayoutBehaviors {
   // above it, since the area is one region at the frame bottom. Its readers apply that
   // contrapositive, at exactly the soundness of the universal. Each frontend measures the lowest
   // such word once (Thumb through `frontend/stackargs.ts` `loadedWordBound`, MIPS in `liftOnce`,
-  // PPC `ppcLoadedWordBound`), and every reader takes that number: Thumb's outgoing-argument
+  // PPC `ppcLoadedWordBound`; on Thumb a load through a runtime index may step it lower, under a
+  // second premise, `stagedStackWordReachesOnlyItsCall`, and every reader below then rests on that
+  // one too), and every reader takes that number: Thumb's outgoing-argument
   // analysis, `frontend/frame-objects.ts` `storedNeverRead` for its pending stores, the MIPS and
   // PPC undeclared-call guesses (`frontend/mips.ts` `lowerJal`, `frontend/ppc.ts` `bl`), and PPC's
   // unread-slot decline, each weighing only the words beneath it. On MIPS it also caps how far an
@@ -918,40 +920,53 @@ export interface FrameLayoutBehaviors {
   // an escape, so a word of a sized temp above the area is that temp's, read back by direct sp
   // loads, and no slot (sret8, sret12). A load through a runtime index into the frame
   // (stackargs.ts `indexed-read`) is read under this premise AND an order one,
-  // `highestStackWordStoredAfterArgumentReads`, which says why it needs both.
+  // `stagedStackWordReachesOnlyItsCall`, which says why it needs both.
   escapedFrameAddressNamesALocal?: boolean;
-  // A CALL'S HIGHEST STAGED STACK WORD IS STORED AFTER EVERY VALUE ITS ARGUMENTS READ, in the
-  // call's own straight run: no load of any argument's value runs between that word's store and
-  // its call. It is the ORDER premise a load through a runtime index into the frame rests on
-  // (`frontend/stackargs.ts`, the `indexed-read` event), read twice:
-  //   • the event ENDS the stores pending from its base up, as an escape does. A read based BELOW
-  //     its object (`u32 *p = a - 1; … p[i]`, the 1-based table idiom) is based at a word an
-  //     outgoing argument may own, and nothing in the read says so; under this premise a word
-  //     staged for a call is stored after the read, so it is still pending at the call and the
-  //     refusals see it.
+  // A CALL'S STAGED STACK WORDS REACH THAT CALL, AND THE ONES IT STAGES LATER LIE HIGHER: every
+  // path from the store of a word staged for a call reaches that call with no other call on the
+  // way (a block copy into the area aside), and a word the call stages after another lies above
+  // it — or below every word staged by the first pass, which a later one never ends. It is the
+  // premise a load through a runtime index into the frame rests on (`frontend/stackargs.ts`, the
+  // `indexed-read` event), whose base proves no local: a pointer formed below its array (`u32 *p =
+  // a - 1; … p[i]`, the 1-based table idiom) bases the read at a word an outgoing argument may own.
+  // The Thumb frontend gives each read a ceiling (`below`): with no call that may take a stack word
+  // after it, none; otherwise the lowest, over the paths to such calls, of the highest word stored
+  // on the way, and no event at all where some path stores nothing. Under this premise a word
+  // beneath the ceiling and stored before the read is no call's highest staged word — that one is
+  // stored after the read, or lies above the ceiling — so the read is read twice:
+  //   • the event ENDS the stores pending from its base up to its ceiling, as an escape does; the
+  //     highest staged word stays pending at its call, and the refusals see the gap beneath it.
   //   • `loadedWordBound` STEPS THE AREA'S BOUND DOWN to a read's base where every store to a word
-  //     it would clear reaches, with no call on the way, a read based at or beneath that word: such
-  //     a store is no call's highest staged word, and staged words are contiguous from [sp,#0].
+  //     it would clear reaches, with no call on the way, a read based at or beneath that word and
+  //     ceiled above it; staged words are contiguous from [sp,#0], so the range holds none.
+  // `outgoingAreaNeverLoadedFrom`'s bound and the frame-object audit's `loadedWords` take that
+  // stepped number, so they rest on this premise too where a read moved it.
   // Absent ⇒ no `indexed-read` event is emitted: a frame word read only through an index is never
   // read by its offset, and an undeclared call beside it keeps the refusal. Read only together
   // with `escapedFrameAddressNamesALocal`, which makes the words from the base up a local's at all.
   //
-  // Set on agbcc, off its source (2.9-arm-000512): calls.c:1897-1899 `precompute_register_parameters`
-  // expands every register argument before any stack argument is stored, and calls.c:1916-1919
-  // then `store_one_arg`s the stack arguments in ascending order (thumb.h defines no
-  // PUSH_ARGS_REVERSED), each computed just before its own store, so the highest word's store
-  // follows every other argument's value. Re-measurable from the committed probe
-  // (`scripts/regen-outgoing-area-probes.ts` → `test/corpus/agbcc-indexed.s` `below1`..`below6`,
-  // read by `frame-indexed-probes.test.ts`): `p[i]` as argument 4 is loaded before argument 5 is
-  // staged, under `?:` too, and argument 6's read follows argument 5's store.
+  // Set on agbcc, off its source (2.9-arm-000512, gcc/calls.c). calls.c:1597-1609 precomputes
+  // every argument containing a call whenever the call has stack arguments (`must_preallocate`,
+  // set under ACCUMULATE_OUTGOING_ARGS), so nothing between a staged word and its call is a call
+  // but `emit_block_move`'s copy of a by-value argument into the area, whose base escapes to it.
+  // The words are staged in passes: :1916-1919 `store_one_arg`s the stack arguments in ascending
+  // order (thumb.h defines no PUSH_ARGS_REVERSED), each computed just before its own store; :1928
+  // then stores the stack part of the one argument split between r3 and the stack, which is the
+  // area's first words, beneath every word of the first pass; and the loads that follow (:2033
+  // `move_block_to_reg` of a by-value struct's register words, `precompute_register_parameters`
+  // having left a BLKmode argument in memory at :587-640, and `emit_push_insn`'s load of the split
+  // argument's register words) store nothing before the call. So a read after the call's last
+  // store sees a path that stores nothing, and gets no event. Re-measurable from the committed
+  // probes (`scripts/regen-outgoing-area-probes.ts` → `test/corpus/agbcc-indexed.s`, read by
+  // `frame-indexed-probes.test.ts`): `below1`..`below6` load `p[i]` as argument 4 before argument
+  // 5 is staged, under `?:` too, with argument 6's read after argument 5's store; `blk1`..`blk3`
+  // load a by-value struct's words through `p[i]` after the last stack word is stored.
   //
-  // Its RESIDUE is asm that stages a call's last stack word BEFORE an argument's indexed read —
-  // hand-written, or from a compiler this is not set on: `ldr r1, =gI / ldr r1, [r1] / str r1,
-  // [sp]` moved above `lsl r0, r0, #2 / add r0, r0, r2 / ldr r3, [r0]` in `below3` reads [sp,#0]
-  // as the array's, and an undeclared callee loses that fifth word from its guessed arity
-  // (`kr(1, 2, 3, p0[a0])`). It is no fact of the ISA, so a second compiler of the same ISA states
-  // it rather than inheriting it from `escapedFrameAddressNamesALocal`.
-  highestStackWordStoredAfterArgumentReads?: boolean;
+  // Its RESIDUE is asm whose staged word does not reach its call, or reaches it past another call
+  // handed no frame address — hand-written, or from a compiler this is not set on. It is no fact
+  // of the ISA, so a second compiler of the same ISA states it rather than inheriting it from
+  // `escapedFrameAddressNamesALocal`.
+  stagedStackWordReachesOnlyItsCall?: boolean;
   // WHERE AN O32 FUNCTION KEEPS ITS LOCALS in the one frame `addiu sp,sp,-N` reserves — the area
   // the MIPS frontend hands the frame-object audit as `ownedLocals`/`declaredLocals`. Below it
   // lies the OUTGOING area, the 16-byte home of a0..a3 every calling function reserves and then
@@ -1657,7 +1672,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     // compiled: the committed probe `test/corpus/agbcc-escape.s` (`scripts/regen-outgoing-area-probes.ts`)
     escapedFrameAddressNamesALocal: true,
     // off calls.c's staging order, measured by `test/corpus/agbcc-indexed.s` `below*` (see the field)
-    highestStackWordStoredAfterArgumentReads: true,
+    stagedStackWordReachesOnlyItsCall: true,
     // agbcc's `*call_indirect` and `*call_value_indirect` emit `bl _call_via_%0` (gcc/thumb.md:997-1021),
     // and libgcc defines `_call_via_<reg>` as `bx <reg>` for r0-r9, sl, fp, ip, sp and lr
     // (libgcc/lib1thumb.asm:595-633). Neither `sp` (the frame) nor `lr` (which the `bl` itself

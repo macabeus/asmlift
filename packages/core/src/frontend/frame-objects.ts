@@ -2112,7 +2112,9 @@ function chooseFrameModel({
  *  agbcc, past the a0..a3 home on O32 (whose compilers load a by-value aggregate's home words back)
  *  and from the parameter area on mwcc (`target.ts` says why). The frontend measures that bound
  *  once, off its instructions, and hands it here (`loadedWords`) — the same number its own
- *  stack-argument refusals take (stackargs' `loadedWordBound` on Thumb).
+ *  stack-argument refusals take (stackargs' `loadedWordBound` on Thumb, where a load through a
+ *  runtime index may step it lower under `stagedStackWordReachesOnlyItsCall` too, and this audit
+ *  then rests on that premise as well).
  *  Every compiled outgoing-argument shape sits beneath any such bound, and a local the source reads
  *  after a call does not: `g(); b[0] = x; b[1] = y; return b[0];` reaches no call, `b[0] = x; g();
  *  return b[0];` is above the bound. What this still refuses that is honest is a local the source

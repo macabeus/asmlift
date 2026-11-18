@@ -20,3 +20,7 @@ int below3(int i) { u32 a[3]; u32 *p = a - 1; a[0] = gA; a[1] = gB; a[2] = gC; r
 int below4(int i, int c) { u32 a[3]; u32 *p = a - 1; a[0] = gA; a[1] = gB; a[2] = gC; return kr(1, 2, 3, c ? p[i] : 7, gI); }
 int below5(int i) { u32 a[3]; u32 *p = a - 2; a[0] = gA; a[1] = gB; a[2] = gC; return kr(1, 2, 3, 4, gI, p[i]); }
 int below6(int i) { u32 a[3]; u32 *p = a - 1; a[0] = gA; a[1] = gB; a[2] = gC; kr(1, 2, 3, 4, gI); return p[i]; }
+struct S12 { u32 a; u32 b; u32 c; };
+int blk1(int i) { u32 w[6]; struct S12 *p = (struct S12 *)(w - 1); w[0] = gA; w[1] = gB; w[2] = gC; w[3] = gD; w[4] = gA; w[5] = gB; return kr(p[i], 3, gI); }
+int blk2(int i) { u32 w[6]; struct S12 *p = (struct S12 *)(w - 2); w[0] = gA; w[1] = gB; w[2] = gC; w[3] = gD; w[4] = gA; w[5] = gB; return kr(p[i], 3, 4, gI); }
+int blk3(int i) { u32 w[6]; struct S12 *p = (struct S12 *)(w - 1); w[0] = gA; w[1] = gB; w[2] = gC; w[3] = gD; w[4] = gA; w[5] = gB; return kr(1, 2, p[i], gI); }
