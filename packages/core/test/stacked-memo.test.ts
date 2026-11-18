@@ -3,9 +3,11 @@
 // rank.ts derives every STACKED_SUBSETS entry onto each source (rank-variations.ts `applyStacked`),
 // and a member sits in up to two dozen of the subsets. The members are pure functions of their
 // input tree, so both loops share a `StackedMemo` keyed by the member and the input tree's identity.
-// Two facts pin it: every subset's result is the one it gets without the memo (the same fired
-// members and the same tree, a throw reported under the same steps), and a member never sees one
-// input twice in a loop — enumeration-wide, with the real members, through enumerateCandidates.
+// Three facts pin it: every subset's result is the one it gets without the memo (the same fired
+// members and the same tree, a throw reported under the same steps), a member never sees one
+// input twice in a loop — enumeration-wide, with the real members, through enumerateCandidates —
+// and nothing writes to a tree a member returned, which a hit hands to every later subset and
+// member holding it where each subset once derived its own.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test, vi } from 'vitest';
@@ -124,5 +126,55 @@ describe('enumeration hands each stacked member an input tree once', () => {
 
   test('no input tree is handed to /narrow-read twice', () => {
     expect([...narrowReadInputs.values()].filter((n) => n > 1)).toEqual([]);
+  });
+});
+
+describe('nothing writes to a tree a stacked member returned', () => {
+  // Every member's output frozen, whole, as it returns: a write to it by a later member, by the
+  // emission, or by a contract check throws (an ES module is strict), and the candidates or the
+  // enumeration's reported throws would differ from the unfrozen run's.
+  const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-dmascope.s'), 'utf8');
+  const enumerate = () => {
+    const threw: string[] = [];
+    const cands = enumerateCandidates('dmascope', asm, ARMV4T_AGBCC, {
+      prototypes: { dmascope: { params: ['s32'], returnsVoid: true } },
+      onEnumerationError: (variations, error) => threw.push(`${variations.join('/')}: ${error}`),
+    });
+    return { threw, cands: cands.map((c) => [c.variations.join('/'), c.source]) };
+  };
+  const freeze = (v: unknown): void => {
+    if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) {
+      Object.freeze(v);
+      for (const k of Object.keys(v)) {
+        freeze((v as Record<string, unknown>)[k]);
+      }
+    }
+  };
+  const plain = enumerate();
+  const applies = STACKED_VARIATIONS.map((sp) => sp.apply);
+  let returned = 0;
+  STACKED_VARIATIONS.forEach((sp, i) => {
+    sp.apply = (sfn) => {
+      const out = applies[i](sfn);
+      if (out) {
+        freeze(out);
+        returned++;
+      }
+      return out;
+    };
+  });
+  let frozen: ReturnType<typeof enumerate>;
+  try {
+    frozen = enumerate();
+  } finally {
+    STACKED_VARIATIONS.forEach((sp, i) => (sp.apply = applies[i]));
+  }
+
+  test('members fire on the fixture', () => {
+    expect(returned).toBeGreaterThan(0);
+  });
+
+  test('the frozen run enumerates what the unfrozen one does', () => {
+    expect(frozen).toEqual(plain);
   });
 });
