@@ -4016,6 +4016,7 @@ function measureThumbFrame({
     return escapesHere && off !== undefined ? [{ kind: 'escape', off }] : [];
   };
   const stagesOutgoing = target.compilerBehaviors.stagesOutgoingArgsInFrame === true;
+  const indexedReadsHere = target.compilerBehaviors.highestStackWordStoredAfterArgumentReads === true;
   // THE FRAME BASE PUBLISHED TO MEMORY: a word store hands `sp + 0` to memory outside the frame
   // (`escapedOffsetOf`, a `str`), under the premise that an escaped frame address names a local's
   // words from it up. The fourth [sp,#0] licence's second half reads it (`frameBaseIsTheObject`).
@@ -4028,8 +4029,9 @@ function measureThumbFrame({
         return escaped;
       }
       // …and a load through a runtime index reads the object it is based in, under the same premise
-      // (`indexedReadOf`, and the event's doc for what its base does and does not prove)
-      const indexedAt = escapesHere ? indexedReadOf.get(ins) : undefined;
+      // and the staging-order one (`highestStackWordStoredAfterArgumentReads`; `indexedReadOf`, and
+      // the event's doc for what its base does and does not prove)
+      const indexedAt = escapesHere && indexedReadsHere ? indexedReadOf.get(ins) : undefined;
       if (indexedAt !== undefined) {
         return [{ kind: 'indexed-read', off: indexedAt }];
       }
