@@ -645,6 +645,38 @@ function regListOf(ops: string[]): string[] | null {
   );
 }
 
+/** Split a comment-free source line into the statements gas assembles from it: `;` separates
+ *  statements in gas for ARM, except inside a string (`"a;b"`, with `\"` escapes) or as a character
+ *  constant (`';`). */
+function splitStatements(line: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let inString = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inString) {
+      cur += c;
+      if (c === '\\' && i + 1 < line.length) {
+        cur += line[++i];
+      } else if (c === '"') {
+        inString = false;
+      }
+    } else if (c === '"') {
+      inString = true;
+      cur += c;
+    } else if (c === "'" && i + 1 < line.length) {
+      cur += c + line[++i];
+    } else if (c === ';') {
+      out.push(cur);
+      cur = '';
+    } else {
+      cur += c;
+    }
+  }
+  out.push(cur);
+  return out;
+}
+
 // Split an operand list on commas that are NOT inside brackets, so a memory operand like
 // `[r0, #0x8]` (base + offset) stays a single token instead of being torn at its comma.
 function splitOperands(s: string): string[] {
@@ -1111,7 +1143,11 @@ const sayFact = (f: LayoutFact): string => {
  *  skipping one reads a disabled, repeated or macro-body line as ordinary code.
  *
  *  `.include` is not on the list, because the bytes it includes are ones this frontend cannot see.
- *  A pret unit includes its macros before the first function, which is outside every slice. An
+ *  A pret unit includes its macros before the first function, which is outside every slice. What
+ *  that leaves unread is a macro the included file defines under an instruction's name (`.macro
+ *  nop`): a macro the input itself defines declines where the slice names it (`macroNames` in
+ *  decode), but an included one is invisible here. No GBA code unit in the benchmark's checkouts or
+ *  in kl2dct defines one. An
  *  INCLUDE_ASM body (`.include "asm/nonmatchings/…"`) follows the previous function's return,
  *  where control cannot reach it. Neither one declines. Names are matched lower-case (gas
  *  directives are case-insensitive); `.cfi_*` is matched by its prefix. */
@@ -1148,7 +1184,10 @@ const ZERO_BYTE_DIRECTIVES: ReadonlySet<string> = new Set([
   'fpu',
   'object_arch',
   'eabi_attribute',
-  // sections (the bytes of a section switched to are read as that section's own items)
+  // sections. Decode does NOT track them: the lines after a switch to another section are read
+  // as items of the function they sit in, so `.pushsection .text.x; add r0, #1; .popsection`
+  // inside a function lifts an `add` that is not in its code (a gap older than this list). The
+  // far-jump lr proof is not fooled by it, since it reads every line, other sections' included.
   'text',
   'data',
   'bss',
@@ -1258,16 +1297,37 @@ function decode(
   // Every `@` comment is dropped here save ONE fact read from it: that a `bl` line carried the
   // target's far-jump mark (`farJumpMark`, from `compilerBehaviors.farJumpRelay`). Kept as a set of
   // line positions, not as text, so nothing downstream can read any other comment.
+  //
+  // A source line is split into its STATEMENTS here: gas for ARM reads `;` as a statement
+  // separator, so `.set K, 1; bx lr` is a zero-byte directive AND an instruction. Classified by its
+  // first token, the whole line was skipped with the directive, and the `bx lr` it hid let a local
+  // call thunk lift as a branch. The mark belongs to the line's last statement, the one its
+  // comment follows.
   const codeLines: string[] = [];
   const farJumpLines = new Set<number>();
   for (const rawLine of withoutDebugSections(asm).split('\n')) {
     const at = rawLine.indexOf('@');
-    const line = (at === -1 ? rawLine : rawLine.slice(0, at)).trim();
-    if (line) {
-      if (at !== -1 && farJumpMark?.test(rawLine.slice(at))) {
+    const statements = splitStatements(at === -1 ? rawLine : rawLine.slice(0, at))
+      .map((st) => st.trim())
+      .filter((st) => st !== '');
+    for (const [k, st] of statements.entries()) {
+      if (k === statements.length - 1 && at !== -1 && farJumpMark?.test(rawLine.slice(at))) {
         farJumpLines.add(codeLines.length);
       }
-      codeLines.push(line);
+      codeLines.push(st);
+    }
+  }
+  // Every macro the input defines, by name (gas matches macro names case-insensitively). A macro
+  // wins over an instruction of the same name, so `.macro nop` / `bx lr` / `.endm` above the
+  // function makes a `nop` line inside it a `bx lr`. Its definition can sit outside every slice, so
+  // {@link LINE_DIRECTIVES} never sees it: a statement in the slice that names one declines below,
+  // as a line this frontend does not read as written. A macro the input only `.include`s is not
+  // visible here (the residue named on {@link ZERO_BYTE_DIRECTIVES}).
+  const macroNames = new Set<string>();
+  for (const line of codeLines) {
+    const md = line.match(/^\.macro\s+([^\s,]+)/i);
+    if (md) {
+      macroNames.add(md[1].toLowerCase());
     }
   }
   const DEBUG_MARKER = /(?<![\w.$])\.L(?:FB|FE|M|BB|BE|etext)\d+\b/g;
@@ -1304,6 +1364,11 @@ function decode(
       if (!rest) {
         continue;
       }
+    }
+    const head = rest.match(/^[\w.$]+/)?.[0].toLowerCase();
+    if (head !== undefined && macroNames.has(head)) {
+      unreadDirectives.push({ at: flat.length - 1, what: head, lines: true });
+      continue;
     }
     if (rest.startsWith('.')) {
       if (rest === '.thumb_func') {
@@ -7265,6 +7330,7 @@ export const thumbFrontend: Frontend = {
  *  is; nothing in `src` reads it. */
 export const __testing = {
   decode,
+  splitStatements,
   PAD_ENCODINGS,
   isPadInstr,
   factKey,

@@ -336,6 +336,42 @@ describe('what is not provably a relay declines loud', () => {
     );
   });
 
+  // gas for ARM reads `;` as a statement separator, so a line led by a zero-byte directive can
+  // still assemble the `bx lr` (objdump: 0x4770 at .Lthunk+2). Read as one statement, the line
+  // was skipped whole and the thunk lifted as a branch: `a0 + 1 + 3` for a machine giving a0 + 8.
+  test('a `bx lr` after a `;` on a zero-byte directive line is read, and the thunk declines', () => {
+    declines(
+      `${H}\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tcmp\tr4, #0\n\tbeq\t.Lskip\n\tbl\t.Lthunk\n\tadd\tr4, #7\n` +
+        '.Lskip:\n\tadd\tr0, r4, #0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+        '.Lthunk:\n\tadd\tr4, #1\n\t.set K, 1; bx lr\n\tadd\tr4, #3\n\tb\t.Lskip\n',
+      /a long branch or a call to a local thunk/,
+    );
+  });
+
+  test('a `;` hiding a byte directive behind a zero-byte one declines, relay or not', () => {
+    declines(
+      `${H}\tadd\tr0, #2\n\t.set K, 1; .dc.w 0x3001\n\tbx\tlr\n`,
+      /'\.dc\.w' is a directive this frontend does not read, where control can reach its bytes/,
+    );
+  });
+
+  test('a `;` inside a string or a character constant is not a statement separator', () => {
+    expect(__testing.splitStatements('.ascii "a;b\\";c"; bx lr')).toEqual(['.ascii "a;b\\";c"', ' bx lr']);
+    expect(__testing.splitStatements("mov r0, #';")).toEqual(["mov r0, #';"]);
+  });
+
+  // A macro wins over the instruction it is named after (gas matches macro names
+  // case-insensitively): `.macro nop` / `bx lr` / `.endm` above the function makes its `NOP` the
+  // thunk's return (objdump: 0x4770 at .Lthunk+2). The definition sits outside the slice.
+  test('a line naming a macro the input defines declines, wherever the macro is defined', () => {
+    declines(
+      `\t.macro nop\n\tbx lr\n\t.endm\n${H}\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tcmp\tr4, #0\n\tbeq\t.Lskip\n` +
+        '\tbl\t.Lthunk\n\tadd\tr4, #7\n.Lskip:\n\tadd\tr0, r4, #0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+        '.Lthunk:\n\tadd\tr4, #1\n\tNOP\n\tadd\tr4, #3\n\tb\t.Lskip\n',
+      /'nop' inside the function changes which lines are assembled/,
+    );
+  });
+
   test('a marked `bl` to a symbol outside this function is not a relay', () => {
     declines(
       `${H}\tpush\t{lr}\n\tbl\th\t@far jump\n\tpop\t{r0}\n\tbx\tr0\n`,
