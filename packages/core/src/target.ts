@@ -957,8 +957,14 @@ export interface FrameLayoutBehaviors {
   // load a by-value struct's words through `p[i]` after the last stack word is stored.
   //
   // Its RESIDUE is asm whose staged word does not reach its call, or reaches it past another call
-  // handed no frame address — hand-written, or from a compiler this is not set on. It is no fact
-  // of the ISA, so a second compiler of the same ISA states it rather than inheriting it from
+  // handed no frame address, or past a store after its call's last staged word — hand-written, or
+  // from a compiler this is not set on. The last is a local's word stored and reloaded between a
+  // read and its call (`blk1` with `str r3,[sp,#0x14]` / `ldr r3,[sp,#0x14]` before the `bl`): its
+  // store raises the read's ceiling over a staged word beneath it, and the word is lost from an
+  // undeclared callee's guessed arity. The ceiling does not leave a reloaded word's store out:
+  // that store is also the only one after a read whose paths hold no staged word at all (a loop
+  // over the array, its calls past the loop), and leaving it out declines those. It is no fact of
+  // the ISA, so a second compiler of the same ISA states it rather than inheriting it from
   // `escapedFrameAddressNamesALocal`.
   stagedStackWordReachesOnlyItsCall?: boolean;
   // WHERE AN O32 FUNCTION KEEPS ITS LOCALS in the one frame `addiu sp,sp,-N` reserves — the area
