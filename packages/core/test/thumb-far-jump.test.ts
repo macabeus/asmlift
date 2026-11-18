@@ -315,9 +315,8 @@ describe('what is not provably a relay declines loud', () => {
   });
 
   // gas's other spellings of the same `bx lr` bytes (each assembled with arm-none-eabi-as
-  // -mthumb -mcpu=arm7tdmi and read back with objdump: 0x4770 at .Lthunk+2). Skipped as unknown
-  // directives, every one lifted the thunk as a branch: `a0 + 1 + 3` for a machine that returns
-  // a0 + 8.
+  // -mthumb -mcpu=arm7tdmi and read back with objdump: 0x4770 at .Lthunk+2). Skipped, each
+  // would lift the thunk as a branch: `a0 + 1 + 3` for a machine that returns a0 + 8.
   test.each([
     '.dc.w 0x4770',
     '.dc 0x4770',

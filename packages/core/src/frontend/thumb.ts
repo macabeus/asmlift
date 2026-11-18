@@ -275,8 +275,8 @@ const controlContinuesPast = (ins: Instr) => {
  *  `mov pc, rN`.) */
 function classifyXfer(ins: Instr): XferKind | null {
   const mn = ins.mnemonic;
-  // agbcc's far-jump relay is a branch wearing the call mnemonic, and so is any relay candidate
-  // (`Instr.farJump`): the lowering declines every function in which one could be anything else.
+  // A relay candidate (`Instr.farJump`) is a branch wearing the call mnemonic wherever the lowering
+  // accepts it, and the lowering declines every function where it could be anything else.
   // Classified here so the layout questions asked BEFORE it is lowered to `b` (`readThumbText`:
   // `lowerFarJumpRelays`) — whether a fill after it is sealed, whether the block before a pool
   // falls into data — read it as the transfer it is; it keeps its 4 bytes there because the
@@ -1012,14 +1012,12 @@ interface Resolved {
  *  function, read as a relay CANDIDATE (`farJump: 'shape'`) — a copy of the item, so a retry over a
  *  longer slice asks afresh. A code label is one whose next item, past stacked labels and alignment
  *  directives, is an instruction: a label heading data, or a raw halfword not yet decoded, is not
- *  one, and a `bl` to it keeps the call reading it always had.
+ *  one, and a `bl` to it keeps the call reading.
  *
- *  A candidate is a branch to every layout question asked before `lowerFarJumpRelays` (it ends its
- *  block; the fill or pool after it is sealed), because that is what it is whenever the lowering
- *  accepts it, and the lowering declines every function in which it could be anything else: the
- *  shape alone does not separate a far jump whose `@far jump` comment a disassembler never had from
- *  a call to a locally-defined thunk, and the lowering does not try to — it proves the lr the `bl`
- *  writes is never read, which is the one effect that separates `bl L` from `b L` on the machine. */
+ *  The shape does not separate a far jump whose `@far jump` comment a disassembler never had from a
+ *  call to a locally-defined thunk, and nothing here tries to: `lowerFarJumpRelays` lowers a
+ *  candidate only where the lr it writes is provably never read, and declines the function
+ *  otherwise. */
 function withRelayCandidates(
   flat: FlatItem[],
   funcLabels: readonly string[],
@@ -1106,13 +1104,11 @@ const sayFact = (f: LayoutFact): string => {
  *  selected function declines where it can matter (`unreadDirectives` in decode says where).
  *
  *  It is an allowlist because the far-jump lowering's lr proof and the layout walk are sound only
- *  if decode sees every instruction in the code stream. A denylist of byte-emitting spellings
- *  missed `.inst.n 0x4770`. When that was closed, gas's other data spellings still got through
- *  (`.dc.w`, `.dc.b`, `.dc.l`, `.dc.a`, `.dc`, `.dcb.w`, `.int`, and upper-case forms such as
- *  `.DC.W`). Each one hid a `bx lr` from the proof, so a local call thunk lifted as a branch. The
- *  list also leaves out the directives that change which lines are assembled (`.if`, `.rept`,
- *  `.irp`, `.macro`; {@link LINE_DIRECTIVES}). Skipping one of those reads a disabled, repeated or
- *  macro-body line as ordinary code.
+ *  if decode sees every instruction in the code stream, and gas spells bytes too many ways for a
+ *  denylist (`.inst.n`, `.dc.w`, `.dcb.w`, `.int`, upper-case `.DC.W`, …): a skipped `bx lr` among
+ *  them would let a local call thunk lift as a branch. The directives that change which lines are
+ *  assembled (`.if`, `.rept`, `.irp`, `.macro`; {@link LINE_DIRECTIVES}) are left out too:
+ *  skipping one reads a disabled, repeated or macro-body line as ordinary code.
  *
  *  `.include` is not on the list, because the bytes it includes are ones this frontend cannot see.
  *  A pret unit includes its macros before the first function, which is outside every slice. An
@@ -1358,10 +1354,10 @@ function decode(
         flat.push({ data: { halfwords: true, values, inCode: dataLabels.length === 0 } });
         continue;
       }
-      // `.inst` / `.inst.n` / `.inst.w` is gas's way to spell an instruction by its encoding
-      // (`.inst.n 0x4770` is `bx lr`). It is refused with the raw data directives rather than
-      // decoded: skipping it, as an unknown directive is skipped below, deletes the instruction —
-      // its effect, its bytes in the layout, and any lr it names from the far-jump proof.
+      // `.inst` / `.inst.n` / `.inst.w` spells an instruction by its encoding (`.inst.n 0x4770` is
+      // `bx lr`). It is refused with the raw data directives rather than decoded: skipping it would
+      // delete the instruction — its effect, its bytes in the layout, and any lr it names from the
+      // far-jump proof.
       const raw = rest.match(
         /^\.(byte|ascii|asciz|string|space|skip|quad|8byte|octa|double|float|single|incbin|fill|zero|inst)\b/,
       );
@@ -1459,7 +1455,7 @@ function decode(
       if (!ZERO_BYTE_DIRECTIVES.has(dname) && !dname.startsWith('cfi_')) {
         unreadDirectives.push({ at: flat.length - 1, what: rest.split(/\s/)[0], lines: LINE_DIRECTIVES.test(dname) });
       }
-      continue; // a directive that emits nothing here
+      continue; // zero-byte, or recorded in `unreadDirectives`
     }
     // pret function macros (asm/macros.inc): pure bookkeeping except the declared mode.
     const macro = rest.match(/^(non_word_aligned_thumb_func_start|thumb_func_start|arm_func_start)\s+\S+$/);
@@ -3180,11 +3176,9 @@ const sayRelay = (ins: Instr) =>
  *  asked of every Thumb function once the CFG exists (`refuseReturnsNotThroughCallersLr`), where
  *  the frame walk says which word each `pop` reads. A thunk fails one half or the other: `bx lr`
  *  and `push {lr}` name lr, and a thunk's `bx r3` is a return that does not go through the
- *  caller's lr. The real m4a functions (pokeemerald `MPlayMain`, sa3 `MP2KPlayerMain`) fail the
- *  first half before the second is asked: their `push {r0, lr}` follows an early `bx lr`, so the
- *  entry block saves no lr and the lowering declines; only a function that pushes lr in its entry
- *  block reaches the `bx r3` refusal. One that leaves the function (`b ext`) declines as any branch
- *  out of it does.
+ *  caller's lr. (The real m4a functions, pokeemerald `MPlayMain` and sa3 `MP2KPlayerMain`, push lr
+ *  only after an early `bx lr`, so they fail the entry-push condition first.) One that leaves the
+ *  function (`b ext`) declines as any branch out of it does.
  *
  *  What the mark adds is the compiler's word that the `bl` is its relay, so a marked `bl` that does
  *  not target a code label of THIS function — agbcc only relays within one — is not its relay, and

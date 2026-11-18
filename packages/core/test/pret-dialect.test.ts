@@ -80,8 +80,8 @@ f:
     },
   );
 
-  // Decode skips only the directives on its zero-byte list. `.dc.w 0x3001` is `adds r0, #1`, and
-  // skipped it lifted `return a0 + 2;` for a function that returns a0 + 3.
+  // Decode skips only the directives on its zero-byte list. `.dc.w 0x3001` is `adds r0, #1`;
+  // skipped, the lift would print `a0 + 2` for a function that returns a0 + 3.
   test.each(['.dc.w 0x3001', '.dc 0x3001', '.dcb.w 1, 0x3001', '.int 0x3001', '.DC.W 0x3001', '.Short 0x3001'])(
     '`%s` where control reaches it fails loud rather than being skipped',
     (line) => {

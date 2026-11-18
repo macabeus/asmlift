@@ -486,10 +486,9 @@ export interface ControlFlowBehaviors {
   // function (a disassembly carries no comment) is lowered behind the same proof. ABSENT ⇒ every
   // comment is dropped, and such a `bl` is read by that shape alone.
   //
-  // So this field decides ONE outcome, besides a decline's wording: a marked `bl` to a label that
-  // is not a code label of this function declines, where the same `bl` unmarked keeps the call
-  // reading (`bl _X` into another function's body lifts as `_X(...)`, as it does on a target with
-  // no mark). The mark is what says that `bl` is a branch, which the call reading would get wrong.
+  // So this field decides ONE outcome besides a decline's wording: a marked `bl` to a label that
+  // is not a code label of this function declines, because the mark says it is a branch, where
+  // the same `bl` unmarked keeps the call reading (`bl _X` lifts as `_X(...)`).
   farJumpRelay?: { readonly comment: RegExp };
   // Regime-A switch recovery: accept a RELATIONAL test as a case where the scrutinee values that
   // can reach it — narrowed by the tests above it — leave exactly one on a side this compiler's

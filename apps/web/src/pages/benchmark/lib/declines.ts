@@ -756,14 +756,12 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // THE CLASS IS THE LOWERING'S OWN REFUSALS, AND NOTHING ELSE: a `bl` to a code label of this
     // function, marked or not, whose lr is not provably dead (no `push` of lr in the entry block, a
     // branch or jump table back to the entry, or another instruction naming lr), or a marked one
-    // whose target is not a code label of this function. A call thunk like m4a's `bl call_r3`
-    // reaches the first: the real MPlayMain / MP2KPlayerMain push lr only after an early `bx lr`,
-    // so their entry block saves none. Only a thunk whose function pushes lr in its entry block and
-    // names it nowhere else gets past the lowering, and then declines on its own return (`bx r3` is
-    // not a return through the caller's lr), which is in the residue. A `blx` to a label of this
-    // function, alignment fill the input leaves open,
-    // and code that runs into data are in the residue: counting them here would book a layout gap
-    // as a far jump. No row reaches either refusal, so the class is in `NO_ROWS`.
+    // whose target is not a code label of this function. m4a's `bl call_r3` reaches the first (the
+    // real MPlayMain / MP2KPlayerMain push lr only after an early `bx lr`); a thunk whose function
+    // pushes lr in its entry block declines on its own `bx r3` return instead, in the residue. A
+    // `blx` to a label of this function, alignment fill the input leaves open, and code that runs
+    // into data are in the residue too: counting them here would book a layout gap as a far jump.
+    // No row reaches either refusal, so the class is in `NO_ROWS`.
     key: 'far-jump',
     label: 'Thumb `bl` to a label inside its function whose lr is not provably dead, or a marked relay that leaves it',
     pattern: /would drop the lr write a|does not target a code label of this function/,
