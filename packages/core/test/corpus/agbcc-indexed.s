@@ -302,3 +302,251 @@ members:
 	.word	gI
 .Lfe7:
 	.size	 members,.Lfe7-members
+	.align	2, 0
+	.globl	below1
+	.type	 below1,function
+	.thumb_func
+below1:
+	push	{lr}
+	add	sp, sp, #-0x10
+	mov	r2, sp
+	ldr	r1, .L30
+	ldr	r1, [r1]
+	str	r1, [sp, #0x4]
+	ldr	r1, .L30+0x4
+	ldr	r1, [r1]
+	str	r1, [sp, #0x8]
+	ldr	r1, .L30+0x8
+	ldr	r1, [r1]
+	str	r1, [sp, #0xc]
+	lsl	r0, r0, #0x2
+	add	r0, r0, r2
+	ldr	r0, [r0]
+	str	r0, [sp]
+	mov	r0, #0x1
+	mov	r1, #0x2
+	mov	r2, #0x3
+	mov	r3, #0x4
+	bl	kr
+	add	sp, sp, #0x10
+	pop	{r1}
+	bx	r1
+.L31:
+	.align	2, 0
+.L30:
+	.word	gA
+	.word	gB
+	.word	gC
+.Lfe8:
+	.size	 below1,.Lfe8-below1
+	.align	2, 0
+	.globl	below2
+	.type	 below2,function
+	.thumb_func
+below2:
+	push	{lr}
+	add	sp, sp, #-0x10
+	mov	r3, sp
+	ldr	r1, .L33
+	ldr	r1, [r1]
+	str	r1, [sp, #0x4]
+	ldr	r1, .L33+0x4
+	ldr	r1, [r1]
+	str	r1, [sp, #0x8]
+	ldr	r1, .L33+0x8
+	ldr	r2, [r1]
+	str	r2, [sp, #0xc]
+	ldr	r1, .L33+0xc
+	lsl	r0, r0, #0x2
+	add	r0, r0, r3
+	ldr	r0, [r0]
+	str	r0, [r1]
+	str	r2, [sp]
+	mov	r0, #0x1
+	mov	r1, #0x2
+	mov	r2, #0x3
+	mov	r3, #0x4
+	bl	kr
+	add	sp, sp, #0x10
+	pop	{r1}
+	bx	r1
+.L34:
+	.align	2, 0
+.L33:
+	.word	gA
+	.word	gB
+	.word	gC
+	.word	gI
+.Lfe9:
+	.size	 below2,.Lfe9-below2
+	.align	2, 0
+	.globl	below3
+	.type	 below3,function
+	.thumb_func
+below3:
+	push	{lr}
+	add	sp, sp, #-0x10
+	mov	r2, sp
+	ldr	r1, .L36
+	ldr	r1, [r1]
+	str	r1, [sp, #0x4]
+	ldr	r1, .L36+0x4
+	ldr	r1, [r1]
+	str	r1, [sp, #0x8]
+	ldr	r1, .L36+0x8
+	ldr	r1, [r1]
+	str	r1, [sp, #0xc]
+	lsl	r0, r0, #0x2
+	add	r0, r0, r2
+	ldr	r3, [r0]
+	ldr	r0, .L36+0xc
+	ldr	r0, [r0]
+	str	r0, [sp]
+	mov	r0, #0x1
+	mov	r1, #0x2
+	mov	r2, #0x3
+	bl	kr
+	add	sp, sp, #0x10
+	pop	{r1}
+	bx	r1
+.L37:
+	.align	2, 0
+.L36:
+	.word	gA
+	.word	gB
+	.word	gC
+	.word	gI
+.Lfe10:
+	.size	 below3,.Lfe10-below3
+	.align	2, 0
+	.globl	below4
+	.type	 below4,function
+	.thumb_func
+below4:
+	push	{lr}
+	add	sp, sp, #-0x10
+	add	r3, r0, #0
+	mov	r2, sp
+	ldr	r0, .L41
+	ldr	r0, [r0]
+	str	r0, [sp, #0x4]
+	ldr	r0, .L41+0x4
+	ldr	r0, [r0]
+	str	r0, [sp, #0x8]
+	ldr	r0, .L41+0x8
+	ldr	r0, [r0]
+	str	r0, [sp, #0xc]
+	cmp	r1, #0
+	beq	.L39	@cond_branch
+	lsl	r0, r3, #0x2
+	add	r0, r0, r2
+	ldr	r3, [r0]
+	b	.L40
+.L42:
+	.align	2, 0
+.L41:
+	.word	gA
+	.word	gB
+	.word	gC
+.L39:
+	mov	r3, #0x7
+.L40:
+	ldr	r0, .L43
+	ldr	r0, [r0]
+	str	r0, [sp]
+	mov	r0, #0x1
+	mov	r1, #0x2
+	mov	r2, #0x3
+	bl	kr
+	add	sp, sp, #0x10
+	pop	{r1}
+	bx	r1
+.L44:
+	.align	2, 0
+.L43:
+	.word	gI
+.Lfe11:
+	.size	 below4,.Lfe11-below4
+	.align	2, 0
+	.globl	below5
+	.type	 below5,function
+	.thumb_func
+below5:
+	push	{lr}
+	add	sp, sp, #-0x14
+	mov	r2, sp
+	ldr	r1, .L46
+	ldr	r1, [r1]
+	str	r1, [sp, #0x8]
+	ldr	r1, .L46+0x4
+	ldr	r1, [r1]
+	str	r1, [sp, #0xc]
+	ldr	r1, .L46+0x8
+	ldr	r1, [r1]
+	str	r1, [sp, #0x10]
+	ldr	r1, .L46+0xc
+	ldr	r1, [r1]
+	str	r1, [sp]
+	lsl	r0, r0, #0x2
+	add	r0, r0, r2
+	ldr	r0, [r0]
+	str	r0, [sp, #0x4]
+	mov	r0, #0x1
+	mov	r1, #0x2
+	mov	r2, #0x3
+	mov	r3, #0x4
+	bl	kr
+	add	sp, sp, #0x14
+	pop	{r1}
+	bx	r1
+.L47:
+	.align	2, 0
+.L46:
+	.word	gA
+	.word	gB
+	.word	gC
+	.word	gI
+.Lfe12:
+	.size	 below5,.Lfe12-below5
+	.align	2, 0
+	.globl	below6
+	.type	 below6,function
+	.thumb_func
+below6:
+	push	{r4, r5, lr}
+	add	sp, sp, #-0x10
+	add	r4, r0, #0
+	mov	r5, sp
+	ldr	r0, .L49
+	ldr	r0, [r0]
+	str	r0, [sp, #0x4]
+	ldr	r0, .L49+0x4
+	ldr	r0, [r0]
+	str	r0, [sp, #0x8]
+	ldr	r0, .L49+0x8
+	ldr	r0, [r0]
+	str	r0, [sp, #0xc]
+	ldr	r0, .L49+0xc
+	ldr	r0, [r0]
+	str	r0, [sp]
+	mov	r0, #0x1
+	mov	r1, #0x2
+	mov	r2, #0x3
+	mov	r3, #0x4
+	bl	kr
+	lsl	r4, r4, #0x2
+	add	r4, r4, r5
+	ldr	r0, [r4]
+	add	sp, sp, #0x10
+	pop	{r4, r5}
+	pop	{r1}
+	bx	r1
+.L50:
+	.align	2, 0
+.L49:
+	.word	gA
+	.word	gB
+	.word	gC
+	.word	gI
+.Lfe13:
+	.size	 below6,.Lfe13-below6
