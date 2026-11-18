@@ -4103,6 +4103,10 @@ function measureThumbFrame({
   // of the call while its stores stay excused. The one-word licence has this re-check
   // (`recheckWholeFramePremise`); this is the same one at any frame size. Only where the analysis
   // would refuse WITHOUT the escapes, so an escape that excused nothing asks nothing of the IR.
+  // The ablation removes escapes only: an `indexed-read` also ends pending words, but it rests on
+  // the order of the asm's own stores, loads and calls, which the lift does not decide again, so it
+  // is no premise of the IR to re-ask (the event's doc, frontend/stackargs.ts); a word it covers
+  // stays covered whatever the lift does to the call an escape fed.
   const escapeOffsets = new Set(
     [...entryReachable].flatMap((b) => eventBlocks[b].events.flatMap((ev) => (ev.kind === 'escape' ? [ev.off] : []))),
   );
