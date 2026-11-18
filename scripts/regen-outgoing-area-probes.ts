@@ -27,7 +27,9 @@
 //     argument analysis's `indexed-read` event, based where the index is added, which must be the
 //     array's start or above it: `im1`/`six3` keep `a[i - 1]`'s constant in the index, `six1`/`six2`
 //     stage [sp,#0] between two reads based above it, `bytes`/`members` add a byte array's and a
-//     struct member's offset after the index, and `ix` reads `a[k]` on one path of a loop only.
+//     struct member's offset after the index, `ix` reads `a[k]` on one path of a loop only, and
+//     `below1`..`below6` read through `a - 1` / `a - 2`, beneath the array, beside a K&R call's
+//     stack arguments staged after the read, before it, and on another path.
 //     Read by `packages/core/test/frame-indexed-probes.test.ts`.
 //   agbcc-dmafill.s — a DMA fill's source temp, its address stored to the device's source register:
 //     `dcall`/`dpaths` load that register's address into a register that holds a frame address
