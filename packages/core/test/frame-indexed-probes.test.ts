@@ -117,3 +117,26 @@ describe('a read based below its array is no proof of a local', () => {
     }
   });
 });
+
+// Both readings of an indexed read rest on agbcc's staging order, a field of its own
+// (`target.ts` `highestStackWordStoredAfterArgumentReads`), not on the escape premise beside it.
+describe('the staging order is a declared premise, and its residue is the one the field names', () => {
+  const NO_ORDER = {
+    ...ARMV4T_AGBCC,
+    compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, highestStackWordStoredAfterArgumentReads: undefined },
+  };
+  const USE = { use: { params: ['u32', 's32'], returnsVoid: true }, rng: { params: [], returnsVoid: true } };
+
+  test('without it, an array read only through an index is unread by offset, and the lift declines', () => {
+    expect(() => decompile('ix', source('ix'), NO_ORDER, { prototypes: USE })).toThrow(/stack pointer used as data/);
+  });
+
+  test('below3 with its last stack word staged before the read lifts with that word lost, and only under it', () => {
+    const staged = '\tldr\tr0, .L36+0xc\n\tldr\tr0, [r0]\n\tstr\tr0, [sp]\n';
+    const read = '\tlsl\tr0, r0, #0x2\n\tadd\tr0, r0, r2\n\tldr\tr3, [r0]\n';
+    const swapped = source('below3').replace(read + staged, staged.replaceAll('r0', 'r1') + read);
+    expect(swapped).not.toBe(source('below3'));
+    expect(decompile('below3', swapped, ARMV4T_AGBCC).source).toContain('return kr(1, 2, 3, p0[a0]);');
+    expect(() => decompile('below3', swapped, NO_ORDER)).toThrow(/the store to \[sp,#0\]/);
+  });
+});
