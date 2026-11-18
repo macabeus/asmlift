@@ -28,7 +28,7 @@ function truth(e: Expr): Expr {
 }
 
 function one(s0: Stmt): Stmt {
-  const s = s0.k === 'for' ? { ...s0, init: one(s0.init), inc: one(s0.inc) } : s0;
+  const s = s0.k === 'for' ? { ...s0, init: one(s0.init), inc: s0.inc.map(one) } : s0;
   const inner = mapStmtLists(s, (list) => list.map(one));
   switch (inner.k) {
     case 'if':

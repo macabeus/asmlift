@@ -114,7 +114,7 @@ export function recognizeForLoops(stmts: Stmt[]): Stmt[] {
     const header = s.k === 'while' ? forHeaderOf(out[out.length - 1], s.cond, s.body) : null;
     if (s.k === 'while' && header !== null) {
       out.pop(); // the init assign moves into the for-header
-      out.push({ k: 'for', init: header.init, cond: s.cond, inc: header.inc, body: header.body });
+      out.push({ k: 'for', init: header.init, cond: s.cond, inc: [header.inc], body: header.body });
       continue;
     }
     out.push(s);

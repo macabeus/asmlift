@@ -20,7 +20,7 @@ const fn = (body: Stmt[], locals: SFn['locals'] = []): SFn => ({
 const bump = (n: string, by: Expr): Stmt => ({ k: 'assign', name: n, value: by });
 const plus1 = (n: string): Expr => ({ k: 'bin', op: '+', l: rd(n), r: { k: 'const', value: 1 } });
 /** a `for`, the one statement whose `init`/`inc` are statements rather than nested LISTS */
-const forLoop = (init: Stmt, inc: Stmt, body: Stmt[]): Stmt => ({ k: 'for', init, cond: rd('c'), inc, body });
+const forLoop = (init: Stmt, inc: Stmt, body: Stmt[]): Stmt => ({ k: 'for', init, cond: rd('c'), inc: [inc], body });
 /** a two-armed `if`, the smallest thing with regions */
 const armIf = (thenS: Stmt[], elseS: Stmt[]): Stmt => ({ k: 'if', cond: rd('c'), then: thenS, else: elseS });
 /** `g(n && c)`: a read under a short-circuit — the edge that keeps a leaf arm from being one basic

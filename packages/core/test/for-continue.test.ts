@@ -7,8 +7,9 @@
 // case body binds to the switch). Every fixture is judged against its own IR by the trace oracle
 // (`irAgreement`), as `structure()` returns it and as it ships after `readabilityRewrites`. The
 // `for` takes a guard that is its test, a guard whose exit edge passes a relay block, an exit that
-// takes the IV, no guard where its first test folds to true, and an update the header computes. It
-// refuses a guard that is not the loop's test, a constant first test that leaves, two updates, a
+// takes the IV, no guard where its first test folds to true, an update the header computes, and a
+// second update ordered after the first where it reads it. It refuses a guard that is not the
+// loop's test, a constant first test that leaves, two updates each reading the other's old value, a
 // latch with an effect, an exit that takes the IV from before its update and an update from a call,
 // and those fixtures lift through the rerun's `while (1)` instead, judged the same way; a relay
 // something else enters refuses it too, and that fixture declines.
@@ -176,13 +177,39 @@ test('a relay block an arm enters too refuses the `for`', () => {
   expect(() => judged(ir)).toThrow(/leaves its switch for a loop exit/);
 });
 
-test('a latch that runs a second update refuses the `for`', () => {
-  // two loop variables would need a comma in the `for`'s update, which L3 does not spell
-  const ir = forJt()
+/** `forJt` with a second loop variable `s`, entered as `lo` and stepped after the counter by `step`,
+ *  which the latch writes from `%36` (the counter's new value) and `%50` (its own old one); case 6
+ *  calls `k(s)` */
+const twoSteps = (step: string): string =>
+  forJt()
     .replace('^bb1(%5: s32):', '^bb1(%5: s32, %50: s32):')
     .replace('^bb1(%0)', '^bb1(%0, %0)')
-    .replace('cond_br %37, ^bb12(), ^bb1(%36)', '%51: s32 = add %50, %36\n  cond_br %37, ^bb12(), ^bb1(%36, %51)')
+    .replace('cond_br %37, ^bb12(), ^bb1(%36)', `${step}\n  cond_br %37, ^bb12(), ^bb1(%36, %51)`)
     .replace('%34: s32 = call %5 {target="k"}', '%34: s32 = call %50 {target="k"}');
+
+test('a latch that runs a second update after the counter lifts as a `for` stepping both, in order', () => {
+  // A SECOND COUNTER: `s += i` reads the counter the first step just wrote, as the latch's `add`
+  // reads `i + 1`, and a `continue` runs both steps
+  const { src, agreement, shipped } = judged(twoSteps('%51: s32 = add %50, %36'));
+  expect(src).toMatch(/for \((\w+) = a0; a1 >= \1; \1 = \1 \+ 1, (\w+) = \2 \+ \1\) \{/);
+  expect(src).not.toContain('while (1)');
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
+});
+
+test('a second update that reads the counter from before its step runs first', () => {
+  // `s = i * 2` of the OLD `i`: the counter cannot step first, so `s`'s step does
+  const { src, agreement, shipped } = judged(twoSteps('%53: s32 = const {value=2}\n  %51: s32 = mul %5, %53'));
+  expect(src).toMatch(/for \((\w+) = a0; a1 >= (\w+); \1 = \2 \* 2, \2 = \2 \+ 1\) \{/);
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBeGreaterThan(SEEDS.length / 4); // a run whose `s` overflows is not judged
+});
+
+test('two updates that each read the other from before its step refuse the `for`', () => {
+  // `s = i` beside a counter stepped from `s`: either order reads a name the other step already wrote
+  const ir = twoSteps('%51: s32 = add %5, %35').replace('%36: s32 = add %5, %35', '%36: s32 = add %50, %35');
   refusesFor(ir);
 });
 

@@ -213,7 +213,7 @@ describe('refusals: walker symmetry and loop cadence', () => {
         {
           k: 'if',
           cond: { k: 'const', value: 1 },
-          then: [{ k: 'for', init, cond: { k: 'const', value: 1 }, inc, body }],
+          then: [{ k: 'for', init, cond: { k: 'const', value: 1 }, inc: [inc], body }],
           else: [],
         },
       ]);
@@ -237,7 +237,7 @@ describe('refusals: walker symmetry and loop cadence', () => {
               k: 'for',
               init: { k: 'assign', name: 'i', value: ix(1) },
               cond: { k: 'const', value: 1 },
-              inc: nop,
+              inc: [nop],
               body: [],
             },
             store(ix(2), { k: 'const', value: 0 }),
@@ -300,7 +300,7 @@ describe('refusals: compound `for` parts and shadowed globals', () => {
         k: 'for',
         init: compoundInit,
         cond: { k: 'const', value: 1 },
-        inc: { k: 'assign', name: 'i', value: { k: 'const', value: 0 } },
+        inc: [{ k: 'assign', name: 'i', value: { k: 'const', value: 0 } }],
         body: [],
       },
     ];

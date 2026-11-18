@@ -281,7 +281,7 @@ function run(sfn: SFn, seed: number): Event[] {
           while (truthy(s.cond)) {
             if (++steps > 4000) throw new Error('step cap');
             exec(s.body);
-            exec([s.inc]);
+            exec(s.inc);
           }
           break;
         case 'return':

@@ -87,13 +87,17 @@ const readsVarArithmetically = (e: Expr, n: string): boolean => {
 const stepIsArithmetic = (e: Expr, n: string): boolean => readsVarArithmetically(e, n) && !hasMemoryRead(e);
 const hasMemoryRead = (e: Expr): boolean =>
   e.k === 'index' || e.k === 'field' || e.k === 'call' || e.k === 'marker' || exprChildren(e).some(hasMemoryRead);
-const forInductionVar = (s: Extract<Stmt, { k: 'for' }>): string | null =>
-  s.init.k === 'assign' &&
-  s.inc.k === 'assign' &&
-  s.init.name === s.inc.name &&
-  stepIsArithmetic(s.inc.value, s.inc.name)
+// a `for` stepping two names has none: its second step may read the first
+const forInductionVar = (s: Extract<Stmt, { k: 'for' }>): string | null => {
+  const [inc, ...more] = s.inc;
+  return s.init.k === 'assign' &&
+    more.length === 0 &&
+    inc.k === 'assign' &&
+    s.init.name === inc.name &&
+    stepIsArithmetic(inc.value, inc.name)
     ? s.init.name
     : null;
+};
 
 /** Is this local's declaration carrying a `volatile` qualifier of either kind — the object itself,
  *  or its pointee? THE one spelling of the question both gate tables' `volatile` rule asks, kept
@@ -158,10 +162,12 @@ function spans(body: Stmt[]): Map<string, Span> {
         const inner = [...loops, s];
         record(s, inner);
         walk(s.body, inner);
-        if (s.inc.k === 'assign') {
-          record(s.inc, inner, inductionVar);
-        } else {
-          walk([s.inc], inner);
+        for (const inc of s.inc) {
+          if (inc.k === 'assign') {
+            record(inc, inner, inductionVar);
+          } else {
+            walk([inc], inner);
+          }
         }
         continue;
       }

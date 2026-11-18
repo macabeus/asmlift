@@ -77,7 +77,7 @@ describe('what un-merges', () => {
 
   test('it fires inside a `for` body', () => {
     const out = unmergeJoins(
-      fn([{ k: 'for', init: asg('i', c(0)), cond: v('cond'), inc: asg('i', c(1)), body: merged() }], ['p', 'x', 'i']),
+      fn([{ k: 'for', init: asg('i', c(0)), cond: v('cond'), inc: [asg('i', c(1))], body: merged() }], ['p', 'x', 'i']),
     );
     expect(out).not.toBeNull();
     expect((out!.body[0] as Extract<Stmt, { k: 'for' }>).body).toHaveLength(1);

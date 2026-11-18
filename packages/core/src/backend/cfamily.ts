@@ -578,15 +578,19 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
     }
     case 'for': {
       // `for (init; cond; inc) { body }`. PRECONDITION (guaranteed by both producers — structure.ts
-      // `recognizeForLoops` and l3/reindex.ts): init/inc are each a SINGLE-LINE `assign` statement. `clause` renders one
+      // `recognizeForLoops` and l3/reindex.ts): init and each inc are a SINGLE-LINE `assign` statement. `clause` renders one
       // and strips its trailing `;` so it sits inside the header (`i = 0; c; i = i + 1`). A multi-line
       // statement (an `if`/nested loop) would render mangled — but the recognizer never builds one here.
+      // Several incs are one comma expression, run left to right (`i = i + 1, j = i << 2`): an
+      // assignment binds tighter than the comma, so no clause needs parentheses.
       refuseMisboundBreak(s.body, 'loop');
       // An identity init (`i = i`, structure.ts `forPlanAt`: the name already holds the entry value)
       // is the empty clause.
       const clause = (st: Stmt) => printStmt(st, '', vt, leaf).join(' ').replace(/;\s*$/, '').trim();
       const identity = s.init.k === 'assign' && s.init.value.k === 'var' && s.init.value.name === s.init.name;
-      const out = [`${indent}for (${identity ? '' : clause(s.init)}; ${pe(s.cond, 99)}; ${clause(s.inc)}) {`];
+      const out = [
+        `${indent}for (${identity ? '' : clause(s.init)}; ${pe(s.cond, 99)}; ${s.inc.map(clause).join(', ')}) {`,
+      ];
       for (const t of s.body) {
         append(out, printStmt(t, indent + '    ', vt, leaf));
       }
@@ -783,7 +787,7 @@ function legalizePointerWrites(fn: SFn): SFn {
       case 'dowhile':
         return { ...s, body: s.body.map(fix) };
       case 'for':
-        return { ...s, init: fix(s.init), inc: fix(s.inc), body: s.body.map(fix) };
+        return { ...s, init: fix(s.init), inc: s.inc.map(fix), body: s.body.map(fix) };
       case 'switch':
         return {
           ...s,

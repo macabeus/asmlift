@@ -303,7 +303,7 @@ export function volatileDeviceStores(sfn: SFn, window?: readonly [number, number
         case 'dowhile':
           return { ...s, body: rewrite(s.body) };
         case 'for':
-          return { ...s, init: rewrite([s.init])[0], inc: rewrite([s.inc])[0], body: rewrite(s.body) };
+          return { ...s, init: rewrite([s.init])[0], inc: rewrite(s.inc), body: rewrite(s.body) };
         case 'switch':
           return {
             ...s,
