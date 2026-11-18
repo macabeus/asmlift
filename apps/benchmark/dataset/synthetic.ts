@@ -20241,9 +20241,13 @@ export const SYNTHETIC: SynthSpec[] = [
   //      through the index is now its `indexed-read` event (frontend/stackargs.ts): the words from
   //      its base up are a local's. stkidx_five is the control the base fact guards: `a[i - 1]`
   //      with `u32 a[2]` at [sp,#4] and a fifth argument staged at [sp,#0], whose read agbcc bases
-  //      at 4, not 0 (`corpus/agbcc-indexed.s`), so `five` keeps its fifth argument. agbcc only:
-  //      the MIPS frontends refuse every address-taken frame local ("local stack frames not
-  //      supported") and the PPC one the stack pointer as data, before any argument analysis.
+  //      at 4, not 0 (`corpus/agbcc-indexed.s`), so `five` keeps its fifth argument. The [sp,#0]
+  //      question is Thumb's (O32 stages from [sp,#16] and PPC from 8, beneath locals their
+  //      frontends route through memory once an address is taken), but the shape is every
+  //      compiler's, so the rows pin it on each: a frame array read through a runtime index lifts
+  //      on the MIPS compilers, and mwcc 2.4.2 strength-reduces stkidx_call's `a[i]` into a pointer
+  //      stepped through the frame (`the captured address at [sp,#8) reaches a phi and is then
+  //      moved by a constant`), a different family's decline.
   {
     sym: 'stkidx_call',
     src:
@@ -20263,7 +20267,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '    rng();\n' +
       '}',
     features: ['variable-index', 'guard-init'],
-    toolchains: ['agbcc'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
     ctx:
       'extern u32 gA, gB;\n' +
       'extern u8 gMask;\n' +
@@ -20289,7 +20293,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '    five(1, 2, 3, a[i - 1], gC);\n' +
       '}',
     features: ['variable-index', 'multi-arg'],
-    toolchains: ['agbcc'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
     ctx: 'extern u32 gA, gB, gC;\nvoid five(s32 a, s32 b, s32 c, s32 d, s32 e);\nvoid stkidx_five(s32 i);',
     proto: {
       stkidx_five: { params: ['s32'], returnsVoid: true },
@@ -20317,7 +20321,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '    return kr(1, 2, 3, 4, p[i]);\n' +
       '}',
     features: ['variable-index', 'multi-arg'],
-    toolchains: ['agbcc'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
     ctx: 'extern u32 gA, gB, gC;\nint kr();\nint stkidx_below(s32 i);',
     proto: { stkidx_below: { params: ['s32'] } },
   },
