@@ -113,14 +113,21 @@ export function derefStrideOk(rt: IrType | undefined, width: number, signed: boo
   // wrong stride does. Read `*(u8 *)p` where the machine did `ldrsb` and `p[9] < 0` is not merely a
   // different value: an `unsigned char` promotes to a non-negative `int`, so the arm goes dead.
   // A word access extends nothing, and a POINTER pointee is a word.
-  const extendsOk = (to: IrType) => width === 4 || (to.kind === 'int' && to.signed === signed);
   if (rt?.kind === 'ptr') {
-    return rt.to.kind !== 'struct' && ptrElemBytes(rt.to) === width && extendsOk(rt.to);
+    return rt.to.kind !== 'struct' && ptrElemBytes(rt.to) === width && accessExtendsOk(rt.to, width, signed);
   }
   if (rt?.kind === 'array') {
-    return rt.elem.kind === 'int' && rt.elem.width === width * 8 && extendsOk(rt.elem);
+    return rt.elem.kind === 'int' && rt.elem.width === width * 8 && accessExtendsOk(rt.elem, width, signed);
   }
   return false;
+}
+
+/** derefStrideOk's signedness half, at module level rather than a closure per call: this and the
+ *  other hot recursive walkers here (exprCType, renderedIntSignedness) run millions of times per
+ *  ranked fan, and under tsx — the loader the bench runs on — every named closure they created
+ *  paid esbuild's keepNames `__name` shim on each call, ~23% of one row's enumeration. */
+function accessExtendsOk(to: IrType, width: number, signed: boolean): boolean {
+  return width === 4 || (to.kind === 'int' && to.signed === signed);
 }
 
 /** The INTEGER RANK a rendered expression carries, as a width in bits: 64 only where it can be
@@ -263,22 +270,15 @@ export function arithConversionSignedness(l: Expr, r: Expr, varType: VarTypes): 
  * declared. Pointers, calls and markers are `undefined`.
  */
 export function renderedIntSignedness(e: Expr, varType: VarTypes): boolean | undefined {
-  const rec = (x: Expr): boolean | undefined => renderedIntSignedness(x, varType);
-  // an lvalue-ish leaf: its C type is a declaration / an explicit cast / a carried access width
-  // Anything narrower than `int` promotes and comes out SIGNED whatever it was declared. `int` and
-  // `long long` keep their own signedness, because no promotion applies to either. A width that is
-  // NEITHER is not a C type at all — an `index` node carries a struct STRIDE as its width — and
-  // stays undetermined, which is what every consumer already takes a cast on.
-  const promoted = (t: IrType | undefined): boolean | undefined =>
-    t?.kind !== 'int' ? undefined : t.width < 32 ? true : t.width === 32 || t.width === 64 ? t.signed : undefined;
   switch (e.k) {
+    // an lvalue-ish leaf: its C type is a declaration / an explicit cast / a carried access width
     case 'var':
     // `v++` renders the value the local held, so it promotes exactly as the bare name does.
     case 'postincr':
     case 'cast':
     case 'index':
     case 'field':
-      return promoted(exprCType(e, varType));
+      return promotedSignedness(exprCType(e, varType));
     // A decimal literal is `int` when it fits in one, and C89 gives a larger one an UNSIGNED type
     // — agbcc says so itself ("decimal constant is so large that it is unsigned"). INT_MIN is in
     // that class despite fitting: the backend prints it as `-2147483648`, which C lexes as unary
@@ -292,7 +292,7 @@ export function renderedIntSignedness(e: Expr, varType: VarTypes): boolean | und
     // `-x` / `~x` carry the PROMOTED type of the operand; `!x` is `int`. A float has no integer
     // signedness at all.
     case 'un':
-      return e.op === 'f-' ? undefined : e.op === '!' ? true : rec(e.e);
+      return e.op === 'f-' ? undefined : e.op === '!' ? true : renderedIntSignedness(e.e, varType);
     case 'bin': {
       if (FLOAT_BINOPS.has(e.op)) {
         return undefined;
@@ -311,7 +311,7 @@ export function renderedIntSignedness(e: Expr, varType: VarTypes): boolean | und
       }
       // `<<` is sign-blind, so it keeps its left operand's type — nothing pins it.
       if (e.op === '<<') {
-        return rec(e.l);
+        return renderedIntSignedness(e.l, varType);
       }
       // Comparisons and the logical connectives yield `int`, which is signed.
       if (INT_RESULT_BINOPS.has(e.op)) {
@@ -324,6 +324,15 @@ export function renderedIntSignedness(e: Expr, varType: VarTypes): boolean | und
     case 'addr':
       return undefined;
   }
+}
+
+/** The signedness an lvalue-ish leaf of C type `t` renders with. Anything narrower than `int`
+ *  promotes and comes out SIGNED whatever it was declared. `int` and `long long` keep their own
+ *  signedness, because no promotion applies to either. A width that is NEITHER is not a C type at
+ *  all — an `index` node carries a struct STRIDE as its width — and stays undetermined, which is
+ *  what every consumer already takes a cast on. */
+function promotedSignedness(t: IrType | undefined): boolean | undefined {
+  return t?.kind !== 'int' ? undefined : t.width < 32 ? true : t.width === 32 || t.width === 64 ? t.signed : undefined;
 }
 
 /** Is the rendered expression provably in [0, 2^31) — the range where a signed and an unsigned
@@ -372,6 +381,12 @@ function nonNegative(e: Expr, varType: VarTypes, orXor: boolean): boolean {
   }
 }
 
+/** Does `x` render as a pointer or an array, which C compares unsigned? */
+function rendersPointer(x: Expr, varType: VarTypes): boolean {
+  const t = exprCType(x, varType);
+  return t?.kind === 'ptr' || t?.kind === 'array';
+}
+
 /** Would C evaluate `l OP r` SIGNED, for an ordering compare the machine did unsigned? Both sides
  *  render as signed-promoting C (or as a type this env cannot see, which may be), neither is a
  *  pointer (C compares an address unsigned), and they are not both `nonNeg`. With the default,
@@ -384,13 +399,9 @@ export function rendersSignedOverUnsigned(
   varType: VarTypes,
   nonNeg: (e: Expr, varType: VarTypes) => boolean = provablyNonNegative,
 ): boolean {
-  const ptrSide = (x: Expr): boolean => {
-    const t = exprCType(x, varType);
-    return t?.kind === 'ptr' || t?.kind === 'array';
-  };
   return (
-    !ptrSide(l) &&
-    !ptrSide(r) &&
+    !rendersPointer(l, varType) &&
+    !rendersPointer(r, varType) &&
     renderedIntSignedness(l, varType) !== false &&
     renderedIntSignedness(r, varType) !== false &&
     !(nonNeg(l, varType) && nonNeg(r, varType))
@@ -439,7 +450,6 @@ export function writesNonPointerIntoPointer(
 }
 
 export function exprCType(e: Expr, varType: (name: string) => IrType | undefined): IrType | undefined {
-  const rec = (x: Expr): IrType | undefined => exprCType(x, varType);
   switch (e.k) {
     case 'var':
     case 'postincr':
@@ -455,15 +465,15 @@ export function exprCType(e: Expr, varType: (name: string) => IrType | undefined
     // `-`/`~` yield the promoted integer; `!` yields int. None yields a pointer. A float negation
     // yields the float it negates.
     case 'un':
-      return e.op === 'f-' ? rec(e.e) : T.s(32);
+      return e.op === 'f-' ? exprCType(e.e, varType) : T.s(32);
     case 'bin': {
       // Both operands are one float type (ir/verify.ts holds the IR op to that), so the left names it.
       if (FLOAT_BINOPS.has(e.op)) {
-        return rec(e.l);
+        return exprCType(e.l, varType);
       }
       if (e.op === '+' || e.op === '-') {
-        const l = rec(e.l);
-        const r = rec(e.r);
+        const l = exprCType(e.l, varType);
+        const r = exprCType(e.r, varType);
         // C pointer arithmetic: ptr ± int is that pointer type; int + ptr commutes; ptr - ptr is
         // an integer; ptr + ptr is not C at all (unknowable — the emitter legalizes it away).
         // Anything else is the usual arithmetic int.
@@ -509,7 +519,7 @@ export function exprCType(e: Expr, varType: (name: string) => IrType | undefined
       // A recovered struct declares no size, so the one other index on its pointer — a CAST VIEW of
       // a `castViews` field, `((u8 *)p)[1]` (structure/memory-access.ts `memAccess`) — is told apart by the
       // same rule that minted it, and reads its scalar.
-      const bt = rec(e.base);
+      const bt = exprCType(e.base, varType);
       // The element of a context-declared struct array (`gBgInfo[i]` under `.hOfs`). It also wins
       // over a SCALAR pointee, the bare-array spelling's note of the same name in `SFn.globals`,
       // since the candidate compiles against the declaration; a struct pointee still wins (l3/ast.ts
@@ -542,7 +552,7 @@ export function exprCType(e: Expr, varType: (name: string) => IrType | undefined
     case 'field': {
       // `base->name` (base: ptr-to-struct) or `base.name` (base: struct value, an array element,
       // or a union member's view).
-      const bt = rec(e.base);
+      const bt = exprCType(e.base, varType);
       return memberOf(bt?.kind === 'ptr' ? bt.to : bt, e.name)?.type;
     }
     case 'marker':
