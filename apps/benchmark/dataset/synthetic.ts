@@ -13708,8 +13708,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // (`stwx r0,r4,r5`). Every recognizer prunes the dispatch block, so the case read a register no
   // lifted path wrote, and the lift minted a parameter for it (`*(s32 *)(a1 + a2) = 7`);
   // frontend/jump-table.ts `enterCaseTarget` writes `i << 2` there. agbcc emits the reuse as
-  // `add r1, r0, r1` (into the pointer register), a dispatch form `recoverJumpTable` does not
-  // recognise; ido7.1 and gcc2.7.2kmc recompute the index in the case. Those three are controls.
+  // `add r1, r0, r1` (into the pointer register) and copies the scaled index out with
+  // `add r2, r0, #0` ahead of the `mov pc`; frontend/thumb.ts `recoverJumpTable` lifts the `lsl` ahead
+  // of that copy. ido7.1 and gcc2.7.2kmc recompute the index in the case, and are controls.
   {
     sym: 'jt_idxreuse',
     src:

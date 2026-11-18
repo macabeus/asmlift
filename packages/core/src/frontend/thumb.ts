@@ -3010,7 +3010,12 @@ function recoverJumpTable(
   }
   const ptrReg = ldrP.ops[0],
     ptrLabel = ldrP.ops[1]; // rP = *(PTR literal)
-  if (!isDataOp(add.mnemonic, 'add') || add.ops[0] !== idxReg) {
+  // The sum goes into either register: `add rY, rY, rP` or `add rP, rY, rP`. agbcc writes it into
+  // the pointer register when a case reads the scaled index after the dispatch (it copies it out in
+  // an extra, `add r2, r0, #0`, and the case reads `p[i]` as `r2 + p`): then the index register
+  // still holds `rX << 2` past the idiom.
+  const addrReg = add.ops[0];
+  if (!isDataOp(add.mnemonic, 'add') || (addrReg !== idxReg && addrReg !== ptrReg)) {
     return null;
   }
   // add rY, rY, rP  (either operand order) — the address = table_base + index*4, nothing else.
@@ -3043,13 +3048,25 @@ function recoverJumpTable(
   // `#0` is the spelling the corpus actually uses (`ldr r0, [r0, #0x00]`), so the check is on the
   // VALUE, not on the operand's absence.
   const { base, off, regOff } = parseAddr(ldrV.ops[1]);
-  if (base !== idxReg || off !== 0 || regOff !== undefined || ldrV.ops[0] !== movpc.ops[1]) {
+  if (base !== addrReg || off !== 0 || regOff !== undefined || ldrV.ops[0] !== movpc.ops[1]) {
     return null;
   }
   if (movpc.mnemonic !== 'mov' || movpc.ops[0] !== 'pc') {
     return null;
   }
-  const extraRefusal = dispatchExtraRefusal(extras, ldrV.ops[0], [idxReg, ptrReg, ldrV.ops[0]]);
+  // THE SCALED INDEX OUTLIVES THE IDIOM where neither the sum nor the load writes its register: it
+  // holds `rX << 2` into every case, the value jump-table.ts `enterCaseTarget` writes at an elided
+  // dispatch's case targets (`scaled`). A KEPT dispatch lifts its `lsl` ahead of its extras instead,
+  // so an extra that reads the index reads the value the hardware computed, and the switch still
+  // reads the scrutinee its block was entered with (`openBlockCursor`). Every other idiom write is a
+  // marker, as before.
+  const keepsIndex = addrReg !== idxReg && ldrV.ops[0] !== idxReg;
+  const kept = keepsIndex && extras.length > 0 ? [lsl, ...extras] : extras;
+  const extraRefusal = dispatchExtraRefusal(
+    kept,
+    ldrV.ops[0],
+    keepsIndex ? [ptrReg, ldrV.ops[0]] : [idxReg, ptrReg, ldrV.ops[0]],
+  );
   if (extraRefusal !== null) {
     refused(extraRefusal);
     return null;
@@ -3095,8 +3112,10 @@ function recoverJumpTable(
   if (!blockLabels.has(defaultLabel) || caseLabels.some((l) => !blockLabels.has(l))) {
     return null;
   }
-  const leaves = idiomLeaves([idxReg, ptrReg, ldrV.ops[0]].map((reg) => ({ reg, scaled: false })));
-  return { scrutReg, caseLabels, defaultLabel, extras, leaves };
+  const leaves = idiomLeaves(
+    [idxReg, ptrReg, ldrV.ops[0]].map((reg) => ({ reg, scaled: keepsIndex && reg === idxReg })),
+  );
+  return { scrutReg, caseLabels, defaultLabel, extras: kept, leaves };
 }
 
 // The instructions an agbcc dispatch may carry between the table load and the `mov pc`. gcse's
