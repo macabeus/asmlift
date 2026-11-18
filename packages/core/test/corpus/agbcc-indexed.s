@@ -698,3 +698,149 @@ blk3:
 	.word	gI
 .Lfe16:
 	.size	 blk3,.Lfe16-blk3
+	.align	2, 0
+	.globl	fpspill
+	.type	 fpspill,function
+	.thumb_func
+fpspill:
+	push	{r4, r5, r6, r7, lr}
+	mov	r7, sl
+	mov	r6, r9
+	mov	r5, r8
+	push	{r5, r6, r7}
+	add	sp, sp, #-0x4c
+	mov	sl, r1
+	ldr	r1, .L63
+	ldr	r1, [r1]
+	mov	r4, r1
+	mul	r4, r4, r3
+	str	r4, [sp, #0x2c]
+	ldr	r1, .L63+0x4
+	ldr	r6, [r1]
+	sub	r1, r6, r3
+	str	r1, [sp, #0x30]
+	ldr	r4, .L63+0x8
+	mov	ip, r4
+	add	r1, r0, #0
+	mov	r4, #0x3f
+	and	r1, r1, r4
+	lsl	r1, r1, #0x2
+	add	r1, r1, ip
+	ldr	r1, [r1]
+	str	r1, [sp, #0x38]
+	str	r1, [sp, #0x34]
+	and	r3, r3, r4
+	lsl	r3, r3, #0x2
+	add	r3, r3, ip
+	ldr	r1, [r3]
+	mov	r5, r1
+	mul	r5, r5, r2
+	str	r5, [sp, #0x3c]
+	str	r5, [sp, #0x40]
+	ldr	r1, [sp, #0x30]
+	str	r1, [sp, #0x44]
+	ldr	r1, .L63+0xc
+	ldr	r4, [r1]
+	add	r7, r4, #0
+	eor	r7, r7, r0
+	mov	r3, #0x4
+	neg	r3, r3
+	add	r3, r3, sp
+	mov	r8, r3
+	str	r6, [sp, #0xc]
+	ldr	r1, .L63+0x10
+	ldr	r1, [r1]
+	str	r1, [sp, #0x10]
+	str	r1, [sp, #0x14]
+	ldr	r1, .L63+0x14
+	ldr	r3, [r1]
+	str	r3, [sp, #0x18]
+	ldr	r1, .L63+0x18
+	ldr	r1, [r1]
+	str	r1, [sp, #0x1c]
+	str	r1, [sp, #0x20]
+	ldr	r1, .L63+0x1c
+	ldr	r1, [r1]
+	str	r1, [sp, #0x24]
+	str	r3, [sp, #0x28]
+	mov	r1, #0x3f
+	and	r2, r2, r1
+	lsl	r2, r2, #0x2
+	add	r2, r2, ip
+	ldr	r6, [r2]
+	mov	r9, r6
+	lsl	r1, r0, #0x1
+	add	r1, r1, r0
+	lsl	r1, r1, #0x2
+	add	r1, r1, r8
+	mov	r2, ip
+	mov	r3, sl
+	cmp	r3, #0
+	beq	.L61	@cond_branch
+	ldr	r0, .L63+0x20
+	ldr	r0, [r0]
+	str	r0, [sp, #0x4]
+	b	.L62
+.L64:
+	.align	2, 0
+.L63:
+	.word	gB
+	.word	gA
+	.word	gT
+	.word	gK
+	.word	gE
+	.word	gC
+	.word	gF
+	.word	gD
+	.word	gI
+.L61:
+	str	r4, [sp, #0x4]
+.L62:
+	mov	r0, #0x3f
+	mov	r4, sl
+	and	r0, r0, r4
+	lsl	r0, r0, #0x2
+	add	r0, r0, r2
+	ldr	r0, [r0]
+	str	r0, [sp, #0x8]
+	ldr	r0, [r1, #0x8]
+	str	r0, [sp]
+	ldr	r2, [r1]
+	ldr	r3, [r1, #0x4]
+	ldr	r0, .L65
+	ldr	r0, [r0]
+	str	r0, [sp, #0x48]
+	mov	r0, r9
+	add	r1, r6, #0
+	ldr	r4, [sp, #0x48]
+	bl	_call_via_r4
+	ldr	r1, [sp, #0x2c]
+	add	r0, r0, r1
+	ldr	r3, [sp, #0x30]
+	add	r0, r0, r3
+	ldr	r4, [sp, #0x34]
+	add	r0, r0, r4
+	ldr	r1, [sp, #0x38]
+	add	r0, r0, r1
+	ldr	r3, [sp, #0x3c]
+	add	r0, r0, r3
+	add	r0, r0, r5
+	ldr	r4, [sp, #0x40]
+	add	r0, r0, r4
+	ldr	r1, [sp, #0x44]
+	add	r0, r0, r1
+	add	r0, r0, r7
+	add	sp, sp, #0x4c
+	pop	{r3, r4, r5}
+	mov	r8, r3
+	mov	r9, r4
+	mov	sl, r5
+	pop	{r4, r5, r6, r7}
+	pop	{r1}
+	bx	r1
+.L66:
+	.align	2, 0
+.L65:
+	.word	gFp
+.Lfe17:
+	.size	 fpspill,.Lfe17-fpspill

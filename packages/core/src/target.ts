@@ -955,23 +955,25 @@ export interface FrameLayoutBehaviors {
   // area's first words, beneath every word of the first pass; and the loads that follow (:2033
   // `move_block_to_reg` of a by-value struct's register words, `precompute_register_parameters`
   // having left a BLKmode argument in memory at :587-640, and `emit_push_insn`'s load of the split
-  // argument's register words) store nothing before the call. So a read after the call's last
-  // store sees a path that stores nothing, and gets no event. Re-measurable from the committed
+  // argument's register words) store nothing before the call but reload's spill of the address
+  // an indirect call goes through (`prepare_call_address`, after the struct's loads under register
+  // pressure), which it loads straight back into that register (`fpspill`). A word the function
+  // loads back is a local's, so the ceiling leaves its store out, and a read after the call's last
+  // staged word sees a path that stores nothing, and gets no event. Re-measurable from the committed
   // probes (`scripts/regen-outgoing-area-probes.ts` → `test/corpus/agbcc-indexed.s`, read by
   // `frame-indexed-probes.test.ts`): `below1`..`below6` load `p[i]` as argument 4 before argument
   // 5 is staged, under `?:` too, with argument 6's read after argument 5's store; `blk1`..`blk3`
   // load a by-value struct's words through `p[i]` after the last stack word is stored.
   //
   // Its RESIDUE is asm whose staged word does not reach its call, or reaches it past another call
-  // handed no frame address, or past a store after its call's last staged word — hand-written, or
-  // from a compiler this is not set on. The last is a local's word stored and reloaded between a
-  // read and its call (`blk1` with `str r3,[sp,#0x14]` / `ldr r3,[sp,#0x14]` before the `bl`): its
-  // store raises the read's ceiling over a staged word beneath it, and the word is lost from an
-  // undeclared callee's guessed arity. The ceiling does not leave a reloaded word's store out:
-  // that store is also the only one after a read whose paths hold no staged word at all (a loop
-  // over the array, its calls past the loop), and leaving it out declines those. It is no fact of
-  // the ISA, so a second compiler of the same ISA states it rather than inheriting it from
-  // `escapedFrameAddressNamesALocal`.
+  // handed no frame address — hand-written, or from a compiler this is not set on. A store after
+  // the call's last staged word is no residue: one loaded back anywhere in the function raises no
+  // ceiling (`blk1` with `str r3,[sp,#0x14]` / `ldr r3,[sp,#0x14]` before the `bl` declines), and
+  // one never loaded stays pending at the call as a staged word, where the refusals see the gap
+  // beneath it. The price is a read whose only later store is a reloaded local, its calls past a
+  // loop over the array (kl2dct `CommonWaitForNextFrame`): no store stages a word there either,
+  // and it declines. It is no fact of the ISA, so a second compiler of the same ISA states it
+  // rather than inheriting it from `escapedFrameAddressNamesALocal`.
   stagedStackWordReachesOnlyItsCall?: boolean;
   // WHERE AN O32 FUNCTION KEEPS ITS LOCALS in the one frame `addiu sp,sp,-N` reserves — the area
   // the MIPS frontend hands the frame-object audit as `ownedLocals`/`declaredLocals`. Below it
