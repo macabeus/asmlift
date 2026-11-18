@@ -160,6 +160,20 @@ describe('the staging order is a declared premise', () => {
     expect(() => decompile('ix', source('ix'), NO_ORDER, { prototypes: USE })).toThrow(/stack pointer used as data/);
   });
 
+  // The residue `target.ts` names: a local's word stored and reloaded after the call's last staged
+  // word raises the read's ceiling over it. Hand-written only; agbcc stores nothing there.
+  test('blk1 with a reloaded local stored after the read lifts with [sp,#0] lost, and only under it', () => {
+    for (const off of ['0x14', '0x18']) {
+      const spilled = source('blk1').replace(
+        '\tmov\tr3, #0x3\n',
+        `\tmov\tr3, #0x3\n\tstr\tr3, [sp, #${off}]\n\tldr\tr3, [sp, #${off}]\n`,
+      );
+      expect(spilled).not.toBe(source('blk1'));
+      expect(decompile('blk1', spilled, ARMV4T_AGBCC, { prototypes: {} }).source).toContain('return kr(v2, v3, v4, ');
+      expect(() => decompile('blk1', spilled, NO_ORDER, { prototypes: {} })).toThrow(/the store to \[sp,#0\]/);
+    }
+  });
+
   test('below3 with its last stack word staged before the read declines: nothing is stored after the read', () => {
     const staged = '\tldr\tr0, .L36+0xc\n\tldr\tr0, [r0]\n\tstr\tr0, [sp]\n';
     const read = '\tlsl\tr0, r0, #0x2\n\tadd\tr0, r0, r2\n\tldr\tr3, [r0]\n';
