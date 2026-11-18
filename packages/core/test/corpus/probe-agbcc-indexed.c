@@ -24,3 +24,5 @@ struct S12 { u32 a; u32 b; u32 c; };
 int blk1(int i) { u32 w[6]; struct S12 *p = (struct S12 *)(w - 1); w[0] = gA; w[1] = gB; w[2] = gC; w[3] = gD; w[4] = gA; w[5] = gB; return kr(p[i], 3, gI); }
 int blk2(int i) { u32 w[6]; struct S12 *p = (struct S12 *)(w - 2); w[0] = gA; w[1] = gB; w[2] = gC; w[3] = gD; w[4] = gA; w[5] = gB; return kr(p[i], 3, 4, gI); }
 int blk3(int i) { u32 w[6]; struct S12 *p = (struct S12 *)(w - 1); w[0] = gA; w[1] = gB; w[2] = gC; w[3] = gD; w[4] = gA; w[5] = gB; return kr(1, 2, p[i], gI); }
+extern u32 gE, gF, gT[64]; extern int gK; extern int (*gFp)();
+int fpspill(int i, int j, int k, int l) { int x0 = gB * l, x1 = gA - l, x2 = gT[i & 63], x3 = gT[i & 63], x4 = gT[l & 63] * k, x5 = gT[l & 63] * k, x6 = gT[l & 63] * k, x7 = gA - l, x8 = gK ^ i; u32 w[8]; struct S12 *p = (struct S12 *)(w - 4); w[0] = gA; w[1] = gE; w[2] = gE; w[3] = gC; w[4] = gF; w[5] = gF; w[6] = gD; w[7] = gC; return gFp(gT[k & 63], gT[k & 63], p[i], j ? gI : gK, gT[j & 63]) + x0 + x1 + x2 + x3 + x4 + x5 + x6 + x7 + x8; }

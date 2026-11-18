@@ -140,6 +140,21 @@ describe('a read after a call’s last staged word clears nothing', () => {
     }
   });
 
+  // Reload's spill of an indirect call's address (`prepare_call_address`, under register pressure):
+  // agbcc DOES store a frame word after the call's last staged word and after the struct's reads,
+  // and loads it straight back into the register the call goes through. A word loaded back is a
+  // local's, so that store raises no read's ceiling.
+  test('fpspill: agbcc stores and reloads a frame word between the last staged word and the call', () => {
+    const l = lines('fpspill');
+    const call = l.indexOf('bl\t_call_via_r4');
+    const staged = l.lastIndexOf('str\tr0, [sp]');
+    const window = l.slice(staged + 1, call);
+    expect(window.slice(0, 2)).toEqual(['ldr\tr2, [r1]', 'ldr\tr3, [r1, #0x4]']);
+    expect(window).toContain('str\tr0, [sp, #0x48]');
+    expect(window.at(-1)).toBe('ldr\tr4, [sp, #0x48]');
+    expect(() => lift('fpspill')).toThrow(/stack pointer used as data|address-taken stack local/);
+  });
+
   test('and a call nothing sizes keeps its stack arguments', () => {
     for (const fn of ['blk1', 'blk2', 'blk3']) {
       expect(() => lift(fn)).toThrow(/the store to \[sp,#0\]/);
@@ -160,18 +175,37 @@ describe('the staging order is a declared premise', () => {
     expect(() => decompile('ix', source('ix'), NO_ORDER, { prototypes: USE })).toThrow(/stack pointer used as data/);
   });
 
-  // The residue `target.ts` names: a local's word stored and reloaded after the call's last staged
-  // word raises the read's ceiling over it. Hand-written only; agbcc stores nothing there.
-  test('blk1 with a reloaded local stored after the read lifts with [sp,#0] lost, and only under it', () => {
-    for (const off of ['0x14', '0x18']) {
-      const spilled = source('blk1').replace(
-        '\tmov\tr3, #0x3\n',
-        `\tmov\tr3, #0x3\n\tstr\tr3, [sp, #${off}]\n\tldr\tr3, [sp, #${off}]\n`,
-      );
-      expect(spilled).not.toBe(source('blk1'));
-      expect(decompile('blk1', spilled, ARMV4T_AGBCC, { prototypes: {} }).source).toContain('return kr(v2, v3, v4, ');
-      expect(() => decompile('blk1', spilled, NO_ORDER, { prototypes: {} })).toThrow(/the store to \[sp,#0\]/);
+  // A local's word stored after the read and loaded back is no staged word, so it raises no
+  // ceiling: the read clears nothing, and [sp,#0] keeps the refusal. At any width, through a
+  // capture, after the call, or on every trip of a loop, the store is a local's.
+  test('blk1 with a local stored after the read and loaded back declines', () => {
+    const m3 = '\tmov\tr3, #0x3\n';
+    const spilled = (src: string, at: string, text: string): string => {
+      expect(src).toContain(at);
+      return src.replace(at, at + text);
+    };
+    for (const text of [
+      '\tstr\tr3, [sp, #0x14]\n\tldr\tr3, [sp, #0x14]\n',
+      '\tstr\tr3, [sp, #0x18]\n\tldr\tr3, [sp, #0x18]\n',
+      '\tstr\tr3, [sp, #0x14]\n\tldrh\tr3, [sp, #0x16]\n',
+      '\tstr\tr3, [sp, #0x14]\n\tadd\tr3, sp, #0x14\n\tldr\tr3, [r3]\n',
+      '\tmov\tr12, r3\n.LX:\n\tstr\tr3, [sp, #0x14]\n\tldr\tr3, [sp, #0x14]\n\tsub\tr3, r3, #0x1\n\tcmp\tr3, #0\n\tbne\t.LX\n\tmov\tr3, r12\n',
+    ]) {
+      const src = spilled(source('blk1'), m3, text);
+      expect(() => decompile('blk1', src, ARMV4T_AGBCC, { prototypes: {} })).toThrow(/stack pointer used as data/);
     }
+    const afterRead = spilled(source('blk1'), '\tldr\tr0, [r2]\n', '\tstr\tr0, [sp, #0x14]\n\tldr\tr0, [sp, #0x14]\n');
+    expect(() => decompile('blk1', afterRead, ARMV4T_AGBCC, { prototypes: {} })).toThrow(/the store to \[sp,#0\]/);
+    const reloadedPastCall = spilled(
+      spilled(source('blk1'), m3, '\tstr\tr3, [sp, #0x14]\n'),
+      '\tbl\tkr\n',
+      '\tldr\tr1, [sp, #0x14]\n\tadd\tr0, r0, r1\n',
+    );
+    expect(() => decompile('blk1', reloadedPastCall, ARMV4T_AGBCC, { prototypes: {} })).toThrow(
+      /the store to \[sp,#0\]/,
+    );
+    const blk2 = spilled(source('blk2'), m3, '\tstr\tr3, [sp, #0x18]\n\tldr\tr3, [sp, #0x18]\n');
+    expect(() => decompile('blk2', blk2, ARMV4T_AGBCC, { prototypes: {} })).toThrow(/the store to \[sp,#0\]/);
   });
 
   test('below3 with its last stack word staged before the read declines: nothing is stored after the read', () => {
