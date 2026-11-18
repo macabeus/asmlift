@@ -655,25 +655,49 @@ export class StackedMemberThrew extends Error {
   }
 }
 
+/** What each stacked member returned on each tree it was handed, kept for one STACKED_SUBSETS
+ *  loop: a member's result (its tree, null for a decline, or what it threw) keyed by the member
+ *  and the IDENTITY of its input tree. The members are pure functions of that tree, so a member a
+ *  dozen subsets hold runs once per distinct input rather than once per subset — and since a hit
+ *  hands back the same output object, the next member's input is a hit too. On
+ *  `kleod:PauseMenuScreenHandler:agbcc` the loops re-ran a declining `/narrow-read` about 25 times
+ *  per source, a quarter of its enumeration. Identity, never structural equality: an equal tree
+ *  under another object is a miss, which costs a recompute and never a wrong result. */
+export type StackedMemo = WeakMap<SFn, Map<VariationName, { out: SFn | null } | { threw: unknown }>>;
+
 /** The subset applied in table order, SKIP-ON-DECLINE: a member that declines contributes
  *  nothing rather than killing the combination — the all-shapes candidate is "everything that
  *  fires", so a pair is reachable whenever the third declines. The variations are the members that
  *  actually FIRED, so they never name a variation that declined; a fired set that
  *  duplicates a smaller subset's derives the same tree, which the caller emits once
- *  (`firstFired`). Null when nothing fired. A member that throws throws StackedMemberThrew. */
+ *  (`firstFired`). Null when nothing fired. A member that throws throws StackedMemberThrew, with
+ *  `memo` too: the throw is kept and re-thrown under this subset's own fired members. */
 export const applyStacked = (
   subset: readonly (typeof STACKED_VARIATIONS)[number][],
   from: SFn,
+  memo?: StackedMemo,
 ): { out: SFn; variations: VariationName[] } | null => {
   let cur = from;
   const fired: VariationName[] = [];
   for (const sp of subset) {
-    let r: SFn | null;
-    try {
-      r = sp.apply(cur);
-    } catch (e) {
-      throw new StackedMemberThrew([...fired, sp.name], e);
+    let byMember = memo?.get(cur);
+    if (memo && !byMember) {
+      byMember = new Map();
+      memo.set(cur, byMember);
     }
+    let result = byMember?.get(sp.name);
+    if (!result) {
+      try {
+        result = { out: sp.apply(cur) };
+      } catch (e) {
+        result = { threw: e };
+      }
+      byMember?.set(sp.name, result);
+    }
+    if ('threw' in result) {
+      throw new StackedMemberThrew([...fired, sp.name], result.threw);
+    }
+    const r = result.out;
     if (r) {
       cur = r;
       fired.push(sp.name);
