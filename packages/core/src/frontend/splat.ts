@@ -45,6 +45,58 @@ const HILO_OP = /%(hi|lo)\s*\(/i;
 const DATA_DIRECTIVE =
   /^\.(byte|half|hword|short|2byte|word|4byte|long|dword|8byte|quad|float|double|ascii|asciz|string|incbin|space|skip|fill|zero)\b/i;
 
+/** A Splat line cut into the statements gas for MIPS assembles from it (mips-linux-gnu-as
+ *  measured): `;` separates statements and `#` comments out the rest of the line, except inside a
+ *  string, a character constant (`'c`, an optional closing `'`) or a `/* … *\/` comment. Every
+ *  statement is then read on its own, so `.set K, 1; addiu $v0, $v0, 4` or a second instruction
+ *  after an addressed one is an unrecognised line that declines, where reading the line by its
+ *  first token skipped an instruction gas assembles. The `/* ROM VRAM BYTES *\/` prefix is kept on
+ *  its statement, since it is what marks an instruction. Null where the line's reading runs into
+ *  the next one (a comment, string or character constant left open), which this reader does not
+ *  follow. */
+function splatStatements(line: string): string[] | null {
+  const out: string[] = [];
+  let cur = '';
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '/' && line[i + 1] === '*') {
+      const close = line.indexOf('*/', i + 2);
+      if (close === -1) {
+        return null;
+      }
+      cur += line.slice(i, close + 2);
+      i = close + 1;
+    } else if (c === '"') {
+      let j = i + 1;
+      while (j < line.length && line[j] !== '"') {
+        j += line[j] === '\\' ? 2 : 1;
+      }
+      if (j >= line.length) {
+        return null;
+      }
+      cur += line.slice(i, j + 1);
+      i = j;
+    } else if (c === "'") {
+      let j = i + 1 + (line[i + 1] === '\\' ? 1 : 0);
+      if (j >= line.length) {
+        return null;
+      }
+      j += line[j + 1] === "'" ? 2 : 1;
+      cur += line.slice(i, j);
+      i = j - 1;
+    } else if (c === '#') {
+      break;
+    } else if (c === ';') {
+      out.push(cur);
+      cur = '';
+    } else {
+      cur += c;
+    }
+  }
+  out.push(cur);
+  return out;
+}
+
 /** Does this text look like Splat-dialect MIPS? Both signals (`glabel` markers and the
  *  three-word instruction-comment prefix) are unique to Splat — objdump and compiler `.s` carry
  *  neither — so a positive match is unambiguous. */
@@ -90,9 +142,19 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
   const instrs: DisasmInstr[] = [];
   const labelAddr = new Map<string, number>();
   let pending: string[] = [];
-  for (const raw of slice) {
+  const statements = slice.flatMap((raw) => {
+    const sts = splatStatements(raw);
+    if (sts === null) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${raw.trim()}' leaves a comment, string or character constant open at the end of ` +
+          `its line, so this reader cannot tell which statements gas assembles`,
+      );
+    }
+    return sts;
+  });
+  for (const raw of statements) {
     const line = raw.trim();
-    if (!line || line.startsWith('#')) {
+    if (!line) {
       continue;
     }
     if (/^(glabel|endlabel|dlabel|jlabel)\b/.test(line) || /^nonmatching\b/.test(line)) {
