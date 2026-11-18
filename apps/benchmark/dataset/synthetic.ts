@@ -20357,6 +20357,43 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'struct S12 { u32 a, b, c; };\nextern u32 gA, gB, gC, gD;\nextern s32 gI;\nint kr();\nint stkidx_byval(s32 i);',
     proto: { stkidx_byval: { params: ['s32'] }, kr: { returns: 'int' } },
   },
+  //  39d. stkidx_fpspill — the CONTROL of item 39's ceiling over a store agbcc DOES make after a
+  //      call's last staged word: under register pressure reload spills the address an indirect
+  //      call goes through (calls.c `prepare_call_address`) to [sp,#0x48] after the split struct's
+  //      register words are read through `p[i]`, and loads it straight back into r4 for
+  //      `bl _call_via_r4`. A word the function loads back raises no read's ceiling (thumb.ts
+  //      `loadedFrameWords`), so the read clears nothing and the lift declines rather than drop
+  //      the call's stack words. agbcc only: the spill is agbcc's register allocation.
+  {
+    sym: 'stkidx_fpspill',
+    src:
+      'struct S12 { u32 a, b, c; };\n' +
+      'extern u32 gA, gB, gC, gD, gE, gF, gT[64];\n' +
+      'extern s32 gI, gK;\n' +
+      'extern int (*gFp)();\n' +
+      'int stkidx_fpspill(s32 i, s32 j, s32 k, s32 l)\n' +
+      '{\n' +
+      '    s32 x0 = gB * l, x1 = gA - l, x2 = gT[i & 63], x3 = gT[i & 63], x4 = gT[l & 63] * k;\n' +
+      '    s32 x5 = gT[l & 63] * k, x6 = gT[l & 63] * k, x7 = gA - l, x8 = gK ^ i;\n' +
+      '    u32 w[8];\n' +
+      '    struct S12 *p = (struct S12 *)(w - 4);\n' +
+      '    w[0] = gA;\n' +
+      '    w[1] = gE;\n' +
+      '    w[2] = gE;\n' +
+      '    w[3] = gC;\n' +
+      '    w[4] = gF;\n' +
+      '    w[5] = gF;\n' +
+      '    w[6] = gD;\n' +
+      '    w[7] = gC;\n' +
+      '    return gFp(gT[k & 63], gT[k & 63], p[i], j ? gI : gK, gT[j & 63]) + x0 + x1 + x2 + x3 + x4 + x5 + x6 + x7 + x8;\n' +
+      '}',
+    features: ['variable-index', 'multi-arg'],
+    toolchains: ['agbcc'],
+    ctx:
+      'struct S12 { u32 a, b, c; };\nextern u32 gA, gB, gC, gD, gE, gF, gT[64];\nextern s32 gI, gK;\n' +
+      'extern int (*gFp)();\nint stkidx_fpspill(s32 i, s32 j, s32 k, s32 l);',
+    proto: { stkidx_fpspill: { params: ['s32', 's32', 's32', 's32'] } },
+  },
   //  40. dmafill_call (kl2dct sub_0802E340: "stack pointer used as data — the store to [sp,#0] is
   //      never reloaded"). A DMA fill whose temp's address is stored to the device's source register,
   //      then a call taking `&w`. agbcc loads the register's address into r0, the same register that
