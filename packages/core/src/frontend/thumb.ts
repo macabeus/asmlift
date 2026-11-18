@@ -3637,7 +3637,7 @@ interface ThumbFrame {
   readonly callsReliedOn: ReadonlySet<Instr>;
   /** the frame offset each instruction leaves a register holding, where `heldFrameWalk` follows it */
   readonly captureOffsetOf: ReadonlyMap<Instr, number>;
-  /** at each call, the frame addresses its argument registers may and must hold (`frameAddressesAtCalls`) */
+  /** at each call, the frame addresses its argument registers may and must hold (`frameAddressesAt`) */
   readonly frameAddressesAtCall: ReadonlyMap<Instr, FrameAddressesAtCall>;
   readonly outgoingArgs: OutgoingArgs<Instr>;
   /** the loaded-word bound both `outgoingArgs` and the frame-object audit take
@@ -3742,10 +3742,12 @@ function measureThumbFrame({
   // a call reads, and which stores send a word outside the frame, are ONE rule for every escape
   // this function asks about — `frameAddressReceivers` — so the three walks that ask differ only
   // in the kill rule, and `heldFrameWalk` says why that one differs.
-  const mayHoldFrameAddress = registersThatMayHoldAFrameAddress(asmBlocks, entryReachable);
-  const constantBased = storesThroughAPoolConstant(asmBlocks, entryReachable);
+  const frameAddressesAtStore = frameAddressesAt(asmBlocks, preds, entryReachable, calls.callClobbers, {
+    at: (ins) => ins.mnemonic === 'str',
+    indexSums: false,
+  });
   const handedOutRegs = (ins: Instr): readonly string[] =>
-    frameAddressReceivers(ins, target, calls, mayHoldFrameAddress, constantBased);
+    frameAddressReceivers(ins, target, calls, frameAddressesAtStore);
   const frameBasePassedToCallee = heldFrameWalk(asmBlocks, entryReachable, mentionsReg, (ins, held) => {
     if (ins.mnemonic !== 'bl' && ins.mnemonic !== 'blx') {
       return false;
@@ -3826,12 +3828,11 @@ function measureThumbFrame({
   // refusal it produces stops being the two-models-for-one-byte one and becomes the audit's. A
   // clause without a row is decoration until an input says otherwise.
   //
-  // THE AUDIT'S RE-PROOF IS NOT THIS PREDICATE RE-SPELLED, but its BASE clause is the same
-  // whole-function fact on both sides. The stored VALUE must be held here (block-local); the BASE
-  // must be no register that holds a frame address ANYWHERE in the function
-  // (`registersThatMayHoldAFrameAddress`), the audit's whole-function `taint` read off the
-  // instructions. So a base captured in an earlier block is refused by the licence itself, before
-  // the audit sees it. Pinned as a row.
+  // THE AUDIT'S RE-PROOF IS NOT THIS PREDICATE RE-SPELLED, but its BASE clause is the same fact on
+  // both sides. The stored VALUE must be held here (block-local); the BASE must be no register that
+  // may hold a frame address AT THE STORE on any path from the entry (`frameAddressesAt`, across
+  // blocks), the audit's per-value `taint` read off the instructions. So a base captured in an
+  // earlier block is refused by the licence itself, before the audit sees it. Pinned as a row.
   const frameBasePublishedToMemory = heldFrameWalk(
     asmBlocks,
     entryReachable,
@@ -4514,7 +4515,10 @@ function measureThumbFrame({
     escapesReliedOn,
     callsReliedOn,
     captureOffsetOf,
-    frameAddressesAtCall: frameAddressesAtCalls(asmBlocks, preds, entryReachable, calls.callClobbers),
+    frameAddressesAtCall: frameAddressesAt(asmBlocks, preds, entryReachable, calls.callClobbers, {
+      at: (ins) => ins.mnemonic === 'bl' || ins.mnemonic === 'blx',
+      indexSums: true,
+    }),
     outgoingArgs,
     loadedWords: loadedFrom === undefined ? undefined : { from: loadedFrom, bound: loadedBound },
     slotsOffReason,
@@ -4748,54 +4752,42 @@ function narrowSlotReloads(
   return found;
 }
 
-// Every register that holds a frame address at some instruction of live code — the shapes
-// `frameAddressDefined` carries, closed over every block at once rather than along one. So it is
-// a SUPERSET of every block's `held`, and what it EXCLUDES is the only thing it is used for: a
-// store through one of these is not a store outside the frame. A frame address reloaded from
-// memory is not followed; the store through it then counts as leaving the frame, which is the
-// imprecision `frameAddressReceivers` states.
-function registersThatMayHoldAFrameAddress(
-  asmBlocks: readonly AsmBlock[],
-  entryReachable: ReadonlySet<number>,
-): ReadonlySet<string> {
-  const held = new Map<string, number>();
-  for (let grew = true; grew;) {
-    grew = false;
-    for (const b of entryReachable) {
-      for (const ins of asmBlocks[b].instrs) {
-        // CONSTANT OFFSETS ONLY. Closed over every block at once, an index sum (NaN) would carry
-        // the frame base through every `add rD, rS, rT` in the function — measured: klonoa's
-        // `DmaControllerInit` then held its DMA register's base, and its publish stopped counting
-        // as one. A store through `&buf[i]` stays the counted-as-leaving imprecision stated above.
-        const defined = frameAddressDefined(ins, held);
-        if (defined !== null && Number.isFinite(defined[1]) && !held.has(defined[0])) {
-          held.set(defined[0], 0); // the offset is not the question here, only the register
-          grew = true;
-        }
-      }
-    }
-  }
-  return new Set(held.keys());
-}
-
-// THE FRAME ADDRESSES ARGUMENT REGISTERS HOLD AT EACH CALL, two ways. The shapes carried are
-// `frameAddressDefined`'s, and a write of anything else ends one, as in `heldFrameWalk`.
+// THE FRAME ADDRESSES REGISTERS HOLD AT EACH CALL — and, asked again, at each word store — two
+// ways. The shapes carried are `frameAddressDefined`'s, and a write of anything else ends one, as in
+// `heldFrameWalk`.
 //   - `may`: on SOME path from the entry, ACROSS blocks, joined by union — the question is a
 //     refusal's, so a capture made in one block and handed over in the next (`mov r5, sp` / … /
 //     `.L3: add r3, r5, #0` / `bl`) must count, and a call ends only what it clobbers, because a
 //     capture in r4-r7 outlives it. Two paths that disagree on the offset leave it unknown (NaN).
 //     The entry block starts empty, which keeps an incoming argument register from counting:
 //     nothing arrives in it but the caller's value.
-//   - `must`: defined in the call's own block, which every path to the call runs.
+//   - `must`: defined in the instruction's own block, which every path to it runs.
+//
+// `indexSums` says whether a frame address moved by a register (`&buf[i]`, offset NaN) is carried.
+// The calls' question carries it: an undeclared call's guessed arity must not drop `&buf[i]`. The
+// stores' question (`frameAddressReceivers`: is this store's base a frame address, so the store
+// writes INTO this frame?) does not, and a register holding only an index sum is then no frame
+// address there: measured, klonoa's `DmaControllerInit` sums a frame address into the register it
+// later loads its DMA register's address into, and its publish stopped counting as one. A store
+// through `&buf[i]` stays the counted-as-leaving imprecision `frameAddressReceivers` states.
+// …where the index sum is the INSTRUCTION, not the offset: an address two paths left at different
+// offsets is NaN too, and it is still a frame address (a loop's `add r2, #4` over a capture), so
+// what is not carried is only the `add rD, rS, rT` that moves one by a register.
+function movedByARegister(ins: Instr): boolean {
+  const [d, s1, s2] = ins.ops;
+  const by = s2 === undefined ? s1 : s2;
+  return /^adds?$/.test(ins.mnemonic) && d !== undefined && by !== undefined && !IMM_LITERAL.test(by);
+}
 interface FrameAddressesAtCall {
   readonly may: ReadonlyMap<string, number>;
   readonly must: ReadonlyMap<string, number>;
 }
-function frameAddressesAtCalls(
+function frameAddressesAt(
   asmBlocks: readonly AsmBlock[],
   preds: readonly (readonly number[])[],
   entryReachable: ReadonlySet<number>,
   clobbers: readonly string[],
+  { at, indexSums }: { readonly at: (ins: Instr) => boolean; readonly indexSums: boolean },
 ): ReadonlyMap<Instr, FrameAddressesAtCall> {
   const atCall = new Map<Instr, FrameAddressesAtCall>();
   const out = asmBlocks.map(() => new Map<string, number>());
@@ -4810,7 +4802,7 @@ function frameAddressesAtCalls(
         held.delete(r);
       }
     }
-    if (carried !== null) {
+    if (carried !== null && (indexSums || !movedByARegister(ins))) {
       held.set(carried[0], carried[1]);
     }
   };
@@ -4823,7 +4815,7 @@ function frameAddressesAtCalls(
     }
     const must = new Map<string, number>();
     for (const ins of asmBlocks[b].instrs) {
-      if (record && (ins.mnemonic === 'bl' || ins.mnemonic === 'blx')) {
+      if (record && at(ins)) {
         atCall.set(ins, { may: new Map(may), must: new Map(must) });
       }
       step(ins, may);
@@ -4859,7 +4851,7 @@ function frameAddressesAtCalls(
 // pass it. "Every register" is wider than what the lift passes an undeclared callee — a guessed
 // count, or the bound of a call through an argument register — and the two agree on a frame address
 // only because the lowering refuses to leave one out (`lowerCall`'s `leftOut`, over
-// `frameAddressesAtCalls`, which holds at each call a superset of what the walks here hold) — of
+// `frameAddressesAt`, which holds at each call a superset of what the walks here hold) — of
 // the registers its guess leaves out, of those the trim cuts afterwards (`GuessedCallSite.
 // trimmed`), and of those the call's own block wrote that the ranked `/setup-args` reading would
 // cut, which is withheld for that site instead (it runs in the ranker, after the audit below). Where
@@ -4874,23 +4866,21 @@ function frameAddressesAtCalls(
 // it addresses with no reader (`frontend/call-arity.ts` cutsUnreadFrameObjects).
 //
 // A WORD `str` hands its source register to whoever reads the memory it writes, unless the base is
-// sp or any register that may hold a frame address (`registersThatMayHoldAFrameAddress`, whole-
-// function): then the address is written INTO this frame, and nothing outside has been handed it.
-// A frame address the base reached through memory is the one this misses, and it counts as
-// leaving. A `strh`/`strb` hands over part of an address, which no reader can follow.
-//
-// …UNLESS THE BASE HOLDS A POOL CONSTANT AT THE STORE (`storesThroughAPoolConstant`): a register
-// that holds a frame address somewhere in the function holds a literal address here, which names no
-// byte of this frame. agbcc reuses one register for both inside a function: `DmaFill32(0, gP, n);
-// g(); use(&w);` publishes through `ldr r0, =0x040000D4 / mov r1, sp / str r1, [r0]` and later
-// passes `add r0, sp, #4` in the same r0. The audit's re-proof (`publishedOutward`) asks it per
-// VALUE, where a pool constant is never a frame address either.
+// sp or a register that may hold a frame address AT THAT STORE (`frameAddressesAt`'s `may`, over
+// every path from the entry): then the address is written INTO this frame, and nothing outside has
+// been handed it. Asked per store, not of the register's name: agbcc reuses one register for both
+// inside a function — `DmaFill32(0, gP, n); g(); use(&w);` publishes through `ldr r0, =0x040000D4 /
+// mov r1, sp / str r1, [r0]` and later passes `add r0, sp, #4` in the same r0, and the publish is
+// a pool constant's store whatever r0 holds elsewhere; so is one through a pointer loaded from a
+// global or a call's result. The audit's re-proof (`publishedOutward`) asks it per VALUE too. A
+// frame address the base reached through memory is the one this misses, and it counts as leaving,
+// as does a store through `&buf[i]` (`indexSums`). A `strh`/`strb` hands over part of an address,
+// which no reader can follow.
 function frameAddressReceivers(
   ins: Instr,
   target: TargetDescription,
   calls: CallDeclarations,
-  mayHoldFrameAddress: ReadonlySet<string>,
-  constantBased: ReadonlySet<Instr>,
+  frameAddressesAtStore: ReadonlyMap<Instr, FrameAddressesAtCall>,
 ): readonly string[] {
   if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
     const targetReg = calleeRegister(ins, target);
@@ -4902,51 +4892,7 @@ function frameAddressReceivers(
     return [];
   }
   const { base } = parseAddr(ins.ops[1] ?? '');
-  return isSpReg(base) || (mayHoldFrameAddress.has(reg(base)) && !constantBased.has(ins))
-    ? []
-    : [reg(ins.ops[0] ?? '')];
-}
-
-// THE STORES WHOSE BASE REGISTER HOLDS A LITERAL-POOL CONSTANT, plus constants added to it — `ldr
-// r1, .L3+0x4 / … / str r0, [r1] / add r1, r1, #4 / str r0, [r1]`, a device register block written
-// word by word. Block-local and killed at any other write of the register and at every call, so it
-// only ever names fewer stores than hold a constant base: an acceptance, never over-approximated.
-// A pool load is an `ldr` whose address operand is a label, not a bracketed register.
-function storesThroughAPoolConstant(asmBlocks: readonly AsmBlock[], entryReachable: ReadonlySet<number>): Set<Instr> {
-  const found = new Set<Instr>();
-  for (const b of entryReachable) {
-    const constant = new Set<string>();
-    for (const ins of asmBlocks[b].instrs) {
-      if (ins.mnemonic === 'str' && ins.ops[1] !== undefined && ins.ops[1].trim().startsWith('[')) {
-        const { base, regOff } = parseAddr(ins.ops[1]);
-        if (regOff === undefined && constant.has(reg(base))) {
-          found.add(ins);
-        }
-      }
-      if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
-        constant.clear();
-        continue;
-      }
-      const [d, s1, s2] = ins.ops;
-      const stays =
-        d !== undefined &&
-        ((ins.mnemonic === 'ldr' && s1 !== undefined && !s1.trim().startsWith('[') && s2 === undefined) ||
-          (/^adds?$/.test(ins.mnemonic) &&
-            (s2 === undefined
-              ? s1 !== undefined && IMM_LITERAL.test(s1) && constant.has(reg(d))
-              : s1 !== undefined && IMM_LITERAL.test(s2) && constant.has(reg(s1)))) ||
-          (/^movs?$/.test(ins.mnemonic) && s2 === undefined && s1 !== undefined && constant.has(reg(s1))));
-      for (const r of [...constant]) {
-        if (mayWriteReg(ins, r)) {
-          constant.delete(r);
-        }
-      }
-      if (stays) {
-        constant.add(reg(d));
-      }
-    }
-  }
-  return found;
+  return isSpReg(base) || frameAddressesAtStore.get(ins)?.may.has(reg(base)) !== false ? [] : [reg(ins.ops[0] ?? '')];
 }
 
 // Is the word-slot model safe for THIS function? Every disqualifier below leaves every `[sp,#k]`

@@ -196,3 +196,48 @@ dfive:
 	.word	-0x7affffe6
 .Lfe4:
 	.size	 dfive,.Lfe4-dfive
+	.align	2, 0
+	.globl	dglob
+	.type	 dglob,function
+	.thumb_func
+dglob:
+	push	{lr}
+	add	sp, sp, #-0x8
+	mov	r0, #0x0
+	str	r0, [sp]
+	ldr	r0, .L20
+	ldr	r0, [r0]
+	mov	r1, sp
+	str	r1, [r0]
+	bl	g
+	add	r0, sp, #0x4
+	bl	use
+	add	sp, sp, #0x8
+	pop	{r0}
+	bx	r0
+.L21:
+	.align	2, 0
+.L20:
+	.word	gDst
+.Lfe5:
+	.size	 dglob,.Lfe5-dglob
+	.align	2, 0
+	.globl	dret
+	.type	 dret,function
+	.thumb_func
+dret:
+	push	{lr}
+	add	sp, sp, #-0x8
+	mov	r0, #0x0
+	str	r0, [sp]
+	bl	dst
+	mov	r1, sp
+	str	r1, [r0]
+	bl	g
+	add	r0, sp, #0x4
+	bl	use
+	add	sp, sp, #0x8
+	pop	{r0}
+	bx	r0
+.Lfe6:
+	.size	 dret,.Lfe6-dret
