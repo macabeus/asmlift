@@ -750,18 +750,20 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   },
   {
     // agbcc spells a branch past Thumb's ±2 KB reach as `bl .Lx @far jump` (thumb.md `jump`,
-    // `*cond_branch`, `*cond_branch_reversed`), and `frontend/thumb.ts` lowers it to `b`.
+    // `*cond_branch`, `*cond_branch_reversed`), a disassembly spells it `bl .Lx` with no comment,
+    // and `frontend/thumb.ts` lowers either to `b` where the lr the `bl` writes is provably never read.
     //
-    // THE CLASS IS THE LOWERING'S OWN REFUSALS, AND NOTHING ELSE: a marked relay whose lr is not
-    // provably dead (no `push` of lr in the entry block, a branch or jump table back to the entry,
-    // or another instruction naming lr) or whose target is not a code label of this function. An
-    // UNMARKED `bl` to a label of this function (a call thunk like m4a's `bl call_r3`, or a relay
-    // whose comment a splitter dropped), alignment fill the input leaves open, and code that runs
-    // into data are in the residue: a marked relay never reaches them, so counting them here would
-    // book a thunk or a layout gap as a far jump. No row reaches either refusal, so the class is in
-    // `NO_ROWS`.
+    // THE CLASS IS THE LOWERING'S OWN REFUSALS, AND NOTHING ELSE: a `bl` to a code label of this
+    // function, marked or not, whose lr is not provably dead (no `push` of lr in the entry block, a
+    // branch or jump table back to the entry, or another instruction naming lr), or a marked one
+    // whose target is not a code label of this function. m4a's `bl call_r3` reaches the first (the
+    // real MPlayMain / MP2KPlayerMain push lr only after an early `bx lr`); a thunk whose function
+    // pushes lr in its entry block declines on its own `bx r3` return instead, in the residue. A
+    // `blx` to a label of this function, alignment fill the input leaves open, and code that runs
+    // into data are in the residue too: counting them here would book a layout gap as a far jump.
+    // No row reaches either refusal, so the class is in `NO_ROWS`.
     key: 'far-jump',
-    label: 'Thumb far-jump relays whose lr is not provably dead, or that leave the function',
+    label: 'Thumb `bl` to a label inside its function whose lr is not provably dead, or a marked relay that leaves it',
     pattern: /would drop the lr write a|does not target a code label of this function/,
   },
   // The three control-transfer gaps, ABOVE `branch-form`, which would otherwise take all of them on

@@ -95,12 +95,14 @@ interface Instr {
    *  Messages must use this: a decline naming `ldrsh` for a file containing `ldsh` sends the
    *  reader looking for an instruction that is not there. */
   asWritten?: string;
-  /** set only on a `bl <label>` whose line carried the target's far-jump mark — agbcc's
-   *  `@far jump` / `@ far jump`, the relay it spells a branch past Thumb's ±2 KB reach with (see
-   *  `compilerBehaviors.farJumpRelay`); never on a target that declares no mark. The
-   *  comment is the ONLY text that separates it from a call: everything else on the line is
-   *  dropped at tokenizing, and a call thunk is the same `bl` to a label of this function. */
-  farJump?: true;
+  /** set only on a `bl <label>` that may be a branch wearing the call mnemonic — the relay agbcc
+   *  spells a branch past Thumb's ±2 KB reach with — for `lowerFarJumpRelays` to lower or decline:
+   *    • `'marked'`: its line carried the target's far-jump mark (agbcc's `@far jump` /
+   *      `@ far jump`, `compilerBehaviors.farJumpRelay`), whatever it targets;
+   *    • `'shape'`: unmarked, and it targets a code label of the selected function's own text that
+   *      no declaration makes a function (`withRelayCandidates`) — a disassembly carries no compiler
+   *      comment, and a call to a locally-defined thunk has this shape too. */
+  farJump?: 'marked' | 'shape';
 }
 /** The label a block the .s does not label is given — one no .s spells (`thumbCallLocator`). */
 const ANON_BLOCK_PREFIX = '.L_anon';
@@ -273,10 +275,12 @@ const controlContinuesPast = (ins: Instr) => {
  *  `mov pc, rN`.) */
 function classifyXfer(ins: Instr): XferKind | null {
   const mn = ins.mnemonic;
-  // agbcc's far-jump relay is a branch wearing the call mnemonic. Classified here so the layout
-  // questions asked BEFORE it is lowered to `b` (`readThumbText`: `lowerFarJumpRelays`) — whether
-  // a fill after it is sealed, whether the block before a pool falls into data — read it as the
-  // transfer it is; it keeps its 4 bytes there because the mnemonic is still `bl`.
+  // A relay candidate (`Instr.farJump`) is a branch wearing the call mnemonic wherever the lowering
+  // accepts it, and the lowering declines every function where it could be anything else.
+  // Classified here so the layout questions asked BEFORE it is lowered to `b` (`readThumbText`:
+  // `lowerFarJumpRelays`) — whether a fill after it is sealed, whether the block before a pool
+  // falls into data — read it as the transfer it is; it keeps its 4 bytes there because the
+  // mnemonic is still `bl`.
   if (mn === 'b' || (mn === 'bl' && ins.farJump)) {
     return 'uncond';
   }
@@ -639,6 +643,52 @@ function regListOf(ops: string[]): string[] | null {
       .map((r) => r.trim())
       .filter(Boolean),
   );
+}
+
+/** Split a source line, its `@` comment already cut, into the statements gas assembles from it:
+ *  `;` separates statements in gas for ARM, except inside a string (`"a;b"`, with `\"` escapes), as
+ *  a character constant (`';`), or inside a `/* … *\/` comment. Two comment forms are read the way
+ *  gas reads them (arm-none-eabi-as checked): a `/* … *\/` closed on the line is blank space, and a
+ *  `#` that starts a statement (at the line's start, after its labels, or after a `;`) comments out
+ *  the rest of the line, `;`s included. A `/*` left open is kept as written to the line's end, as
+ *  it was before statements were split: a comment spanning lines is not read here. */
+function splitStatements(line: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let inString = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inString) {
+      cur += c;
+      if (c === '\\' && i + 1 < line.length) {
+        cur += line[++i];
+      } else if (c === '"') {
+        inString = false;
+      }
+    } else if (c === '"') {
+      inString = true;
+      cur += c;
+    } else if (c === "'" && i + 1 < line.length) {
+      cur += c + line[++i];
+    } else if (c === '/' && line[i + 1] === '*') {
+      const end = line.indexOf('*/', i + 2);
+      if (end === -1) {
+        cur += line.slice(i);
+        break;
+      }
+      cur += ' ';
+      i = end + 1;
+    } else if (c === '#' && /^\s*(?:[A-Za-z_.$][\w.$]*:\s*)*$/.test(cur)) {
+      break;
+    } else if (c === ';') {
+      out.push(cur);
+      cur = '';
+    } else {
+      cur += c;
+    }
+  }
+  out.push(cur);
+  return out;
 }
 
 // Split an operand list on commas that are NOT inside brackets, so a memory operand like
@@ -1004,6 +1054,54 @@ interface Resolved {
   witness: LayoutFact[];
 }
 
+/** The slice with every unmarked `bl` to a code label of its own text, that no declaration makes a
+ *  function, read as a relay CANDIDATE (`farJump: 'shape'`) — a copy of the item, so a retry over a
+ *  longer slice asks afresh. A code label is one whose next item, past stacked labels and alignment
+ *  directives, is an instruction: a label heading data, or a raw halfword not yet decoded, is not
+ *  one, and a `bl` to it keeps the call reading.
+ *
+ *  The shape does not separate a far jump whose `@far jump` comment a disassembler never had from a
+ *  call to a locally-defined thunk, and nothing here tries to: `lowerFarJumpRelays` lowers a
+ *  candidate only where the lr it writes is provably never read, and declines the function
+ *  otherwise. */
+function withRelayCandidates(
+  flat: FlatItem[],
+  funcLabels: readonly string[],
+  dataWords: ReadonlyMap<string, string[]>,
+  nonWordData: ReadonlyMap<string, string>,
+): FlatItem[] {
+  const declared = new Set(funcLabels);
+  const codeLabels = new Set<string>();
+  let pending: string[] = [];
+  for (const f of flat) {
+    if (f.label !== undefined) {
+      pending.push(f.label);
+    } else if (f.instr) {
+      pending.forEach((l) => codeLabels.add(l));
+      pending = [];
+    } else if (f.data) {
+      pending = [];
+    }
+  }
+  const isCandidate = (ins: Instr) => {
+    const to = ins.ops[0];
+    return (
+      ins.mnemonic === 'bl' &&
+      ins.farJump === undefined &&
+      ins.ops.length === 1 &&
+      codeLabels.has(to) &&
+      !declared.has(to) &&
+      !dataWords.has(to) &&
+      !nonWordData.has(to)
+    );
+  };
+  return flat.map((f) =>
+    f.instr && isCandidate(f.instr)
+      ? { ...f, instr: { ...f.instr, ops: [...f.instr.ops], farJump: 'shape' as const } }
+      : f,
+  );
+}
+
 /** A GNU-as listing without its debug and stabs sections: every line from a `.section .debug_*` (or a
  *  `.stab*` section) up to the next section switch is dropped, and every other line is kept verbatim,
  *  so a listing with no debug section comes back unchanged. What agbcc `-g` adds to a `.s` beside
@@ -1044,6 +1142,101 @@ const sayFact = (f: LayoutFact): string => {
         : `byte offset 0x${f.to.off.toString(16)}, which is no item`;
   return `raw branch at item ${f.at} → ${to}`;
 };
+
+/** The directives decode may SKIP: each one emits no byte into the section it sits in and leaves
+ *  which source lines are assembled unchanged. That is a claim about the assembler, so it is a
+ *  closed list. The directives decode reads (the word, halfword and alignment families and the
+ *  raw-data refusals) are matched before this list is consulted. Any other directive inside the
+ *  selected function declines where it can matter (`unreadDirectives` in decode says where).
+ *
+ *  It is an allowlist because the far-jump lowering's lr proof and the layout walk are sound only
+ *  if decode sees every instruction in the code stream, and gas spells bytes too many ways for a
+ *  denylist (`.inst.n`, `.dc.w`, `.dcb.w`, `.int`, upper-case `.DC.W`, …): a skipped `bx lr` among
+ *  them would let a local call thunk lift as a branch. The directives that change which lines are
+ *  assembled (`.if`, `.rept`, `.irp`, `.macro`; {@link LINE_DIRECTIVES}) are left out too:
+ *  skipping one reads a disabled, repeated or macro-body line as ordinary code.
+ *
+ *  `.include` is not on the list, because the bytes it includes are ones this frontend cannot see.
+ *  A pret unit includes its macros before the first function, which is outside every slice. What
+ *  that leaves unread is a macro the included file defines under an instruction's name (`.macro
+ *  nop`): a macro the input itself defines declines where the slice names it (`macroUses` in
+ *  decode), but an included one is invisible here. No GBA code unit in the benchmark's checkouts or
+ *  in kl2dct defines one. An
+ *  INCLUDE_ASM body (`.include "asm/nonmatchings/…"`) follows the previous function's return,
+ *  where control cannot reach it. Neither one declines. Names are matched lower-case (gas
+ *  directives are case-insensitive); `.cfi_*` is matched by its prefix. */
+const ZERO_BYTE_DIRECTIVES: ReadonlySet<string> = new Set([
+  // symbols and their bookkeeping
+  'global',
+  'globl',
+  'type',
+  'size',
+  'thumb_func',
+  'thumb_set',
+  'weak',
+  'weakref',
+  'local',
+  'hidden',
+  'protected',
+  'internal',
+  'extern',
+  'equ',
+  'set',
+  'equiv',
+  'eqv',
+  'comm',
+  'lcomm',
+  // instruction set and assembler mode
+  'code',
+  'thumb',
+  'arm',
+  'force_thumb',
+  'syntax',
+  'cpu',
+  'arch',
+  'arch_extension',
+  'fpu',
+  'object_arch',
+  'eabi_attribute',
+  // sections. Decode does NOT track them: the lines after a switch to another section are read
+  // as items of the function they sit in, so `.pushsection .text.x; add r0, #1; .popsection`
+  // inside a function lifts an `add` that is not in its code (a gap older than this list). The
+  // far-jump lr proof is not fooled by it, since it reads every line, other sections' included.
+  'text',
+  'data',
+  'bss',
+  'section',
+  'pushsection',
+  'popsection',
+  'previous',
+  // debug and listing output: nothing in `.text`
+  'file',
+  'ident',
+  'loc',
+  'loc_mark_labels',
+  'stabs',
+  'stabn',
+  'stabd',
+  'def',
+  'endef',
+  'scl',
+  'val',
+  'tag',
+  'dim',
+  'ln',
+  'list',
+  'nolist',
+  'title',
+  'sbttl',
+  'eject',
+  'psize',
+  'end',
+]);
+
+/** The directives that decide which source lines gas assembles: conditional assembly, repetition
+ *  and macro definition. One of them inside a function declines whether or not control reaches
+ *  it, because what it changes is the text decode reads, not bytes at its own position. */
+const LINE_DIRECTIVES = /^(if\w*|else\w*|endif|rept|irpc?|endr|macro|endm|exitm)$/;
 
 function decode(
   name: string,
@@ -1087,6 +1280,13 @@ function decode(
   // actually tested: 'size' (how many fill bytes) or 'fill' (which bytes they are). A data
   // directive leaves only the first open.
   const hazards: { at: number; what: string; code: boolean; why?: 'size' | 'fill' }[] = [];
+  // Directives outside ZERO_BYTE_DIRECTIVES that decode does not read, by the same allFlat
+  // position as `hazards`. Inside the selected slice, one that changes which lines are assembled
+  // (`lines`: `.if`, `.rept`, `.macro`) declines wherever it sits. Any other one declines where
+  // control can reach its bytes (`.dc.w 0x4770` is `bx lr`) or where the slice needs byte-accurate
+  // layout. That reach test is the one an unreadable `.align` gets. It keeps an INCLUDE_ASM
+  // `.include` after a function's sealed return out of that function's lift.
+  const unreadDirectives: { at: number; what: string; lines: boolean }[] = [];
   // The labels naming the CURRENT data run's base address, and there can be several: two
   // labels with nothing between them name the same bytes, so a directive under the second is
   // equally a directive under the first. Keying by the most recent label alone hid an aliased
@@ -1111,16 +1311,51 @@ function decode(
   // Every `@` comment is dropped here save ONE fact read from it: that a `bl` line carried the
   // target's far-jump mark (`farJumpMark`, from `compilerBehaviors.farJumpRelay`). Kept as a set of
   // line positions, not as text, so nothing downstream can read any other comment.
+  //
+  // A source line is split into its STATEMENTS here: gas for ARM reads `;` as a statement
+  // separator, so `.set K, 1; bx lr` is a zero-byte directive AND an instruction. Classified by its
+  // first token, the whole line was skipped with the directive, and the `bx lr` it hid let a local
+  // call thunk lift as a branch. The mark belongs to the line's last statement, the one its
+  // comment follows.
   const codeLines: string[] = [];
   const farJumpLines = new Set<number>();
   for (const rawLine of withoutDebugSections(asm).split('\n')) {
     const at = rawLine.indexOf('@');
-    const line = (at === -1 ? rawLine : rawLine.slice(0, at)).trim();
-    if (line) {
-      if (at !== -1 && farJumpMark?.test(rawLine.slice(at))) {
+    const statements = splitStatements(at === -1 ? rawLine : rawLine.slice(0, at))
+      .map((st) => st.trim())
+      .filter((st) => st !== '');
+    for (const [k, st] of statements.entries()) {
+      if (k === statements.length - 1 && at !== -1 && farJumpMark?.test(rawLine.slice(at))) {
         farJumpLines.add(codeLines.length);
       }
-      codeLines.push(line);
+      codeLines.push(st);
+    }
+  }
+  // Every statement that names a macro the input has defined ABOVE it (gas matches macro names
+  // case-insensitively, and expands a macro only after its definition). A macro wins over an
+  // instruction of the same name, so `.macro nop` / `bx lr` / `.endm` above the function makes a
+  // `nop` line inside it a `bx lr`. Its definition can sit outside every slice, so
+  // {@link LINE_DIRECTIVES} never sees it: a statement in the slice that names one declines below,
+  // as a line this frontend does not read as written. A `nop` above the definition is the
+  // instruction, and reads as one. `.purgem` is not honoured (a purge inside a skipped `.if` would
+  // un-define a macro gas still expands), so a name stays a macro once defined. A macro the input
+  // only `.include`s is not visible here (the residue named on {@link ZERO_BYTE_DIRECTIVES}).
+  const macroUses = new Set<number>();
+  {
+    const defined = new Set<string>();
+    for (const [k, line] of codeLines.entries()) {
+      const md = line.match(/^\.macro\s+([^\s,]+)/i);
+      if (md) {
+        defined.add(md[1].toLowerCase());
+        continue;
+      }
+      const head = line
+        .replace(/^(?:[A-Za-z_.$][\w.$]*:\s*)+/, '')
+        .match(/^[\w.$]+/)?.[0]
+        .toLowerCase();
+      if (head !== undefined && defined.has(head)) {
+        macroUses.add(k);
+      }
     }
   }
   const DEBUG_MARKER = /(?<![\w.$])\.L(?:FB|FE|M|BB|BE|etext)\d+\b/g;
@@ -1157,6 +1392,10 @@ function decode(
       if (!rest) {
         continue;
       }
+    }
+    if (macroUses.has(lineNo)) {
+      unreadDirectives.push({ at: flat.length - 1, what: rest.match(/^[\w.$]+/)![0].toLowerCase(), lines: true });
+      continue;
     }
     if (rest.startsWith('.')) {
       if (rest === '.thumb_func') {
@@ -1207,10 +1446,20 @@ function decode(
         flat.push({ data: { halfwords: true, values, inCode: dataLabels.length === 0 } });
         continue;
       }
+      // `.inst` / `.inst.n` / `.inst.w` spells an instruction by its encoding (`.inst.n 0x4770` is
+      // `bx lr`). It is refused with the raw data directives rather than decoded: skipping it would
+      // delete the instruction — its effect, its bytes in the layout, and any lr it names from the
+      // far-jump proof.
       const raw = rest.match(
-        /^\.(byte|ascii|asciz|string|space|skip|quad|8byte|octa|double|float|single|incbin|fill|zero)\b/,
+        /^\.(byte|ascii|asciz|string|space|skip|quad|8byte|octa|double|float|single|incbin|fill|zero|inst)\b/,
       );
       if (raw) {
+        if (dataLabels.length === 0 && raw[1] === 'inst') {
+          throw new FrontendUnsupportedError(
+            `cannot lift '${name}': '${rest.split(/\s/)[0]}' in the code stream spells an instruction by its ` +
+              `encoding, which this frontend does not decode (skipping it would silently delete its effect)`,
+          );
+        }
         if (dataLabels.length === 0) {
           throw new FrontendUnsupportedError(
             `cannot lift '${name}': raw data directive '.${raw[1]}' in the code stream — ` +
@@ -1292,8 +1541,13 @@ function decode(
       const alignish = rest.match(/^\.([\w.$]*align[\w.$]*)\b/i);
       if (alignish) {
         hazards.push({ at: flat.length - 1, what: `.${alignish[1]}`, code: true, why: 'size' });
+        continue;
       }
-      continue; // other directives skipped
+      const dname = rest.match(/^\.([\w.$]+)/)?.[1].toLowerCase() ?? '';
+      if (!ZERO_BYTE_DIRECTIVES.has(dname) && !dname.startsWith('cfi_')) {
+        unreadDirectives.push({ at: flat.length - 1, what: rest.split(/\s/)[0], lines: LINE_DIRECTIVES.test(dname) });
+      }
+      continue; // zero-byte, or recorded in `unreadDirectives`
     }
     // pret function macros (asm/macros.inc): pure bookkeeping except the declared mode.
     const macro = rest.match(/^(non_word_aligned_thumb_func_start|thumb_func_start|arm_func_start)\s+\S+$/);
@@ -1329,7 +1583,7 @@ function decode(
         mnemonic: canon,
         ops,
         ...(canon === m[1] ? {} : { asWritten: m[1] }),
-        ...(canon === 'bl' && ops.length === 1 && farJumpLines.has(lineNo) ? { farJump: true as const } : {}),
+        ...(canon === 'bl' && ops.length === 1 && farJumpLines.has(lineNo) ? { farJump: 'marked' as const } : {}),
       },
     });
   }
@@ -1390,7 +1644,7 @@ function decode(
   let boundaryIdx = 0;
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    flat = allFlat.slice(sliceStart, boundaries[boundaryIdx]);
+    flat = withRelayCandidates(allFlat.slice(sliceStart, boundaries[boundaryIdx]), funcLabels, dataWords, nonWordData);
 
     // ── luvdis raw-encoding mode ─────────────────────────────────────────────────────────────
     // Disassembler-extracted splits carry two things only byte-accurate LAYOUT can resolve:
@@ -1472,6 +1726,21 @@ function decode(
     // i.e. its fill is emitted at addresses BELOW this function and belongs to the sibling.
     // Admitting it declined every function that merely FOLLOWED an unsizable alignment, which is
     // the poisoning the allFlat-position bookkeeping exists to prevent (see `hazards` above).
+    const inSlice = (at: number) => at >= sliceStart && at < boundaries[boundaryIdx];
+    const unreadLines = unreadDirectives.find((u) => u.lines && inSlice(u.at));
+    if (unreadLines) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${unreadLines.what}' inside the function changes which lines are assembled, ` +
+          `and this frontend reads every line as written`,
+      );
+    }
+    const liveUnread = unreadDirectives.find((u) => inSlice(u.at) && fillIsReachable(u.at - sliceStart + 1));
+    if (liveUnread) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${liveUnread.what}' is a directive this frontend does not read, where control can reach ` +
+          `its bytes — it may emit an instruction (skipping it would silently delete its effect)`,
+      );
+    }
     const liveHazard = hazards.find(
       (h) => h.code && h.at >= sliceStart && h.at < boundaries[boundaryIdx] && fillIsReachable(h.at - sliceStart + 1),
     );
@@ -1495,6 +1764,13 @@ function decode(
     // sits behind a dead `.L` label that the rule above seals. So a clean `bench diff` says NOTHING about any code inside this branch —
     // `thumb-pad-directives.test.ts` is its only gate, and a change here has to be argued there.
     if (needsLayout) {
+      const sizedNothing = unreadDirectives.find((u) => inSlice(u.at));
+      if (sizedNothing) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': raw-encoded input needs byte-accurate layout, but '${sizedNothing.what}' is a ` +
+            `directive this frontend does not read, so it contributes no size to the layout`,
+        );
+      }
       // Only a hazard WITHIN this function's slice makes its layout unknowable. A fill this pass
       // cannot model keeps the directive out of the item stream entirely, so it contributes no
       // size here even though its count is arithmetic — a different fact from an unknown count,
@@ -1891,7 +2167,7 @@ function decode(
     for (const b of aliasOf.size ? blocks : []) {
       for (const ins of b.instrs) {
         const k = ins.ops.length - 1;
-        // A marked relay is a branch here too (classifyXfer), though still spelt `bl` until
+        // A relay candidate is a branch here too (classifyXfer), though still spelt `bl` until
         // `lowerFarJumpRelays`: a relay to a dropped alias must name the label it stands for.
         if ((ins.mnemonic === 'b' || COND_OPCODE[ins.mnemonic] || ins.farJump) && k >= 0) {
           ins.ops[k] = aliasOf.get(ins.ops[k]) ?? ins.ops[k];
@@ -2957,16 +3233,28 @@ function refuseReturnsNotThroughCallersLr(name: string, cfg: ThumbCfg): void {
   }
 }
 
-/** Lower every far-jump relay the target marks (`bl .Lx @far jump`, agbcc's; see
- *  `compilerBehaviors.farJumpRelay`) in the selected function to the `b .Lx` it stands for, in
- *  place, or decline. Only a target that declares the mark gets here with one: `decode` sets
- *  `farJump` from that declaration alone.
+/** How a relay candidate is named in a decline: a marked one by the compiler's word for it, an
+ *  unmarked one by what it is and the open question about it — nothing says whether it is a long
+ *  branch or a call to a local thunk, and a decline means the lowering could not settle that. */
+const sayRelay = (ins: Instr) =>
+  `'${ins.asWritten ?? ins.mnemonic} ${ins.ops.join(', ')}' ` +
+  (ins.farJump === 'marked'
+    ? '(a far-jump relay)'
+    : '(a `bl` to a label inside this function — a long branch or a call to a local thunk, ' +
+      'read as a branch only where the lr it writes is never read)');
+
+/** Lower every relay candidate (`Instr.farJump`) in the selected function to the `b .Lx` it stands
+ *  for, in place, or decline. A candidate is a `bl` agbcc marked as its far jump (`bl .Lx @far jump`,
+ *  `compilerBehaviors.farJumpRelay`), or an unmarked `bl` to a code label of this function's text
+ *  that no declaration makes a function (`withRelayCandidates`) — the far jump as a disassembly
+ *  spells it, with no comment, and also the call to a locally-defined thunk (pokeemerald m4a_1.s's
+ *  `bl call_r3` … `call_r3: bx r3`, ARMv4T's stand-in for the `blx rN` it has no encoding for).
  *
- *  A relay and a call differ in one effect: `bl` writes lr, `b` does not. So the lowering is sound
- *  exactly when nothing can observe the lr the relay wrote. What the mark MEANS is the compiler's
- *  fact, declared with it. That nothing observes lr is checked here on the function's own text,
- *  not assumed from agbcc's habit (thumb.c `far_jump_used_p` makes it push lr in any function with
- *  a far jump, which is why every relay in practice passes):
+ *  The two readings are not told apart here, and need not be: a `bl` and a `b` to one label differ
+ *  in one effect, the lr the `bl` writes, so lowering is sound exactly when nothing can observe that
+ *  lr — and then the machine runs the `bl` as the `b`, whatever its author meant. That is checked on
+ *  the function's own text, not assumed from agbcc's habit (thumb.c `far_jump_used_p` makes it push
+ *  lr in any function with a far jump, which is why every compiled relay passes):
  *    • the entry block saves lr with a `push`, and no branch of this function names the entry
  *      label, so that push runs once, before any relay, and saves the CALLER's lr. A recovered
  *      jump table is the other way back to the entry, and `readThumbText` asks that once the
@@ -2978,12 +3266,17 @@ function refuseReturnsNotThroughCallersLr(name: string, cfg: ThumbCfg): void {
  *  That every RETURN jumps through the caller's lr — not through a word the relay's lr could have
  *  reached, nor through a saved callee register — is the other half of the argument, and it is
  *  asked of every Thumb function once the CFG exists (`refuseReturnsNotThroughCallersLr`), where
- *  the frame walk says which word each `pop` reads.
- *  The mark itself is the only thing that makes a `bl` a relay: a call thunk (`bl call_r3`, in a
- *  function that pushes lr too) has the same shape and no mark, and declines below.
+ *  the frame walk says which word each `pop` reads. A thunk fails one half or the other: `bx lr`
+ *  and `push {lr}` name lr, and a thunk's `bx r3` is a return that does not go through the
+ *  caller's lr. (The real m4a functions, pokeemerald `MPlayMain` and sa3 `MP2KPlayerMain`, push lr
+ *  only after an early `bx lr`, so they fail the entry-push condition first.) One that leaves the
+ *  function (`b ext`) declines as any branch out of it does.
  *
- *  The relay must also target a code label of THIS function that is not a declared function start:
- *  agbcc only relays within a function, and a marked `bl` anywhere else is not its relay. */
+ *  What the mark adds is the compiler's word that the `bl` is its relay, so a marked `bl` that does
+ *  not target a code label of THIS function — agbcc only relays within one — is not its relay, and
+ *  declines. That is the one outcome the mark decides: an unmarked `bl` to such a label is not a
+ *  candidate (`withRelayCandidates` takes only this function's code labels), and keeps the call
+ *  reading every `bl` has. */
 function lowerFarJumpRelays(name: string, blocks: readonly AsmBlock[], funcLabels: ReadonlySet<string>): Instr | null {
   const instrs = blocks.flatMap((b) => b.instrs);
   const relays = instrs.filter((ins) => ins.farJump);
@@ -2991,18 +3284,16 @@ function lowerFarJumpRelays(name: string, blocks: readonly AsmBlock[], funcLabel
     return null;
   }
   const blockLabels = new Set(blocks.map((b) => b.label));
-  // The compiler is the target's declaration, not a name this function knows: "a far-jump relay".
-  const say = (ins: Instr) => `'${ins.asWritten ?? ins.mnemonic} ${ins.ops.join(', ')}' (a far-jump relay)`;
   const refuse = (ins: Instr, why: string) => {
     throw new FrontendUnsupportedError(
-      `cannot lift '${name}': ${say(ins)} ${why} — lowering it to a branch would drop the lr write a \`bl\` makes`,
+      `cannot lift '${name}': ${sayRelay(ins)} ${why} — lowering it to a branch would drop the lr write a \`bl\` makes`,
     );
   };
   for (const relay of relays) {
     const target = relay.ops[0];
     if (!blockLabels.has(target) || funcLabels.has(target)) {
       throw new FrontendUnsupportedError(
-        `cannot lift '${name}': ${say(relay)} does not target a code label of this function`,
+        `cannot lift '${name}': ${sayRelay(relay)} does not target a code label of this function`,
       );
     }
   }
@@ -3026,8 +3317,8 @@ function lowerFarJumpRelays(name: string, blocks: readonly AsmBlock[], funcLabel
   return relays[0];
 }
 
-/** `farJumpMark` is the target's `compilerBehaviors.farJumpRelay` comment; absent, no `bl` is a
- *  relay, and one to a label of this function declines below. */
+/** `farJumpMark` is the target's `compilerBehaviors.farJumpRelay` comment; absent, no comment marks
+ *  a `bl`, and a relay is read by its shape alone (`withRelayCandidates`). */
 function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbText {
   assertInputFormat('thumb', 'gnu-as', asm);
   const { blocks: rawBlocks, dataWords, nonWordData, funcLabels, aliasOf } = decode(name, asm, farJumpMark);
@@ -3155,7 +3446,7 @@ function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbTe
   const entryLabel = rawBlocks[0]?.label;
   if (relayed && [...tables.values()].some((t) => [...t.caseLabels, t.defaultLabel].includes(entryLabel))) {
     throw new FrontendUnsupportedError(
-      `cannot lift '${name}': '${relayed.asWritten} ${relayed.ops.join(', ')}' (a far-jump relay) is in a function ` +
+      `cannot lift '${name}': ${sayRelay(relayed)} is in a function ` +
         `whose jump table dispatches back to its entry '${entryLabel}', past the lr save — lowering it to a branch ` +
         `would drop the lr write a \`bl\` makes`,
     );
@@ -3168,21 +3459,18 @@ function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbTe
   // signal, not a vanished branch. Mirrors MIPS `jr`/PPC `bctr`. (A RECOGNISED jump table's
   // dispatch block is already elided or cut to its extras above, so it is not scanned here.)
   //
-  // The same rule for a `bl` whose target is inside this function's own text. agbcc relays a
-  // conditional branch past Thumb's ±256-byte reach through an unconditional one, and past THAT
-  // branch's own ±2 KB reach the relay becomes `bl .Lfar @far jump` — an intra-function long
-  // branch wearing the call mnemonic. The decode switch reads it as a call, so without this the
-  // lift emits a call to a block label (`.L3(a0, a1, a2)`): not a branch that vanished but a
-  // transfer turned into something that RETURNS, and syntactically not C.
+  // The same rule for a `blx` whose target is inside this function's own text, and for a `bl` that
+  // reached here unlowered. agbcc relays a conditional branch past Thumb's ±256-byte reach through
+  // an unconditional one, and past THAT branch's own ±2 KB reach the relay becomes `bl .Lfar` — an
+  // intra-function long branch wearing the call mnemonic. Read as a call, the lift emits a call to a
+  // block label (`.L3(a0, a1, a2)`): not a branch that vanished but a transfer turned into something
+  // that RETURNS, and syntactically not C.
   //
-  // A relay agbcc MARKED (`@far jump`) never reaches here: `lowerFarJumpRelays` has already lowered
-  // it to `b`, behind a proof that lr is dead. What is left is a `bl` to a label of this function
-  // with no mark, and the shape does not separate a relay whose comment a splitter dropped from a
-  // locally-defined call thunk — `call_r3: bx r3`, ARMv4T's stand-in for the `blx rN` it has no
-  // encoding for, which pokeemerald's m4a_1.s calls four times from inside MPlayMain's own slice.
-  // Both are a `bl` to a bare label the slice defines, both sit under a conditional branch that
-  // skips them, both leave `lr` clobbered, and the thunk's function pushes lr too (`push {r0, lr}`),
-  // so no liveness, layout or prologue fact tells them apart. Only the mark does.
+  // Every `bl` to a code label of this function is a relay candidate (`withRelayCandidates`), and
+  // `lowerFarJumpRelays` has already lowered it to `b` behind a proof that the lr it writes is never
+  // read, or declined. So what is left is a `blx` to such a label — a mode switch into the
+  // function's own text, which no compiler emits — or a label that only became a block of this
+  // function after decoding read the slice; both decline rather than lift as a call.
   //
   // DECLARED function starts are excluded: a `.thumb_func`/`thumb_func_start` label is a function
   // by declaration, so `bl` to one is a call however the slice came to contain it — the entry
@@ -3211,8 +3499,8 @@ function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbTe
       if (callee !== undefined && !funcLabels.has(callee) && blockLabels.has(callee)) {
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': '${ins.mnemonic} ${callee}' targets a label inside this function ` +
-            `and not a declared function — an intra-function long branch and a locally-defined call ` +
-            `thunk are the same shape here, so this declines rather than guessing which`,
+            `and not a declared function, and is not a relay this frontend lowers to the branch it stands for — ` +
+            `read as a call it would return into a block`,
         );
       }
     }
@@ -7069,6 +7357,7 @@ export const thumbFrontend: Frontend = {
  *  is; nothing in `src` reads it. */
 export const __testing = {
   decode,
+  splitStatements,
   PAD_ENCODINGS,
   isPadInstr,
   factKey,
