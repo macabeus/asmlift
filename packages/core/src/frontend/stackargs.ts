@@ -36,34 +36,21 @@ export interface StackArgsEscape {
   readonly off: number;
 }
 
-/** A LOAD THROUGH A RUNTIME INDEX into the frame object based at `sp + off` — `lsl r0, r4, #2 /
- *  add r0, r0, sp / ldr r0, [r0]`, agbcc's `a[i]` — which reads SOME word from `off` up, and this
- *  function cannot say which. It is read exactly as an `escape` is, for the same reason: the
- *  receiver here is this function's own load, and the words from `off` up are an object's, so a
- *  store there that nothing reloads by its offset has been read through the index.
+/** A LOAD THROUGH A RUNTIME INDEX into the frame based at `sp + off` — `lsl r0, r4, #2 / add r0,
+ *  r0, sp / ldr r0, [r0]`, agbcc's `a[i]` — which reads some word from `off` up, and this function
+ *  cannot say which. Like an escape it ends the stores pending from `off` up, but only beneath its
+ *  ceiling (`below`).
  *
- *  `off` is where the address is based BEFORE the index is added, the object's start or a byte
- *  inside it when the source indexes the object it names (agbcc keeps `a[i - 1]`'s constant in the
- *  index, and adds an array's offset after it: `corpus/agbcc-indexed.s`). NOT ALWAYS: a pointer the
- *  source forms below its array (`u32 *p = a - 1`, the 1-based table idiom) bases the read beneath
- *  the object, at a word another object or an outgoing argument owns, and nothing in the read says
- *  so. Emitted only under `compilerBehaviors.escapedFrameAddressNamesALocal`, the premise that a
- *  frame address names a local's words from it up, AND `stagedStackWordReachesOnlyItsCall`,
- *  the staging-order premise both claims below rest on (`target.ts` states it and its residue).
+ *  `off` is the base before the index is added, the object's start or inside it where the source
+ *  indexes the object it names (`corpus/agbcc-indexed.s`). A pointer formed below its array (`u32 *p
+ *  = a - 1`, the 1-based table idiom) bases the read beneath the object, at a word an outgoing
+ *  argument may own, and nothing in the read says so. So it is emitted only under both
+ *  `escapedFrameAddressNamesALocal` and `stagedStackWordReachesOnlyItsCall` (`target.ts` states the
+ *  second and its residue), and a word a later call stages at or above the ceiling stays pending at
+ *  that call. Whether the read also BOUNDS THE AREA, as a load does, is `loadedWordBound`'s question.
  *
- *  So the read is TWO claims of different strength, each only beneath its ceiling (`below`). Where
- *  it fires, it ends the stores pending from its base up to the ceiling, as an escape does — which
- *  is safe below an object too, because a word a call stages before the read and beneath the
- *  ceiling is not that call's highest: the frontend sets the ceiling at the highest word stored
- *  between the read and each call that may take a stack word (`stagedStackWordReachesOnlyItsCall`),
- *  so that word stays pending at the call for the refusals to see. Whether it BOUNDS THE AREA
- *  flow-insensitively, as a load does, is `loadedWordBound`'s question, and the base alone does not
- *  answer it.
- *
- *  NO RE-PROOF OF THE LIFTED IR, unlike an escape (`escapesReliedOn`): what an escape excuses rests
- *  on what a call is HANDED, which the lift decides again (a guessed arity, then the trim) and can
- *  shrink, so the audit asks it again. This event rests on nothing the lift decides: the load is
- *  this function's own, and what it proves is the ORDER of the asm's stores, reads and calls. */
+ *  Unlike an escape it needs no re-proof of the lifted IR (`escapesReliedOn`): it rests on the order
+ *  of the asm's own stores, reads and calls, which the lift does not decide again. */
 export interface StackArgsIndexedRead {
   readonly kind: 'indexed-read';
   readonly off: number;
@@ -163,18 +150,14 @@ const readsFromUp = <C>(ev: StackArgsEvent<C>): ev is StackArgsEscape | StackArg
  *  cannot supply.
  *
  *  A LOAD THROUGH A RUNTIME INDEX (`indexed-read`) LOWERS IT TO ITS BASE ONLY WHERE NO WORD IT
- *  WOULD CLEAR IS A STAGED ONE. Its base is not proof of a local: `u32 *p = a - 1` bases `p[i]` at
- *  [sp,#0] for an `a` at [sp,#4], where a K&R call's fifth argument is staged (`below*`). What is
- *  proof is the order of the stores (`target.ts` `stagedStackWordReachesOnlyItsCall`, the premise
- *  the events are emitted under, with its residue): a staged word reaches its call with no other
- *  call on the way, and a read's ceiling lies at or beneath the highest word stored between it and
- *  any call it may precede. A store that reaches, with no call on the way, a load through an index
- *  based at or beneath its word and ceiled above it is therefore no call's highest staged word; and
- *  the staged words are contiguous from the area's start, so a range of words none of which holds
- *  such a store, above a bound already proven, holds no staged word at all. So the bound steps down to a read's base
- *  where EVERY store to a word between that base and the bound so far reaches such a read — the
- *  mask loop that reads `a[i]` only on some trips (`CommonWaitForNextFrame`: the array filled, then
- *  the loop, then the call) — and stops at the first base where one does not. */
+ *  WOULD CLEAR IS A STAGED ONE, since its base proves no local: `u32 *p = a - 1` bases `p[i]` at
+ *  [sp,#0] for an `a` at [sp,#4], where a K&R call's fifth argument is staged (`below*`). The proof
+ *  is the store order (`target.ts` `stagedStackWordReachesOnlyItsCall`): a store that reaches, with
+ *  no call on the way, a read based at or beneath its word and ceiled above it is no call's highest
+ *  staged word, and staged words are contiguous from the area's start. So the bound steps down to a
+ *  read's base where EVERY store between that base and the bound so far reaches such a read — an
+ *  array filled, read through an index on some loop trips, then a call — and stops at the first
+ *  base where one does not. */
 export function loadedWordBound<C>(
   blocks: readonly StackArgsBlock<C>[],
   preds: readonly (readonly number[])[],
