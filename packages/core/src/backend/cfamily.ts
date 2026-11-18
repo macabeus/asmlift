@@ -319,17 +319,8 @@ function printConverted(e: Expr, vt: PrintEnv, leaf?: LeafHook): string {
   return to === null ? printExpr(e, 99, vt, leaf) : `(${cType(to)})${printExpr(e, 2, vt, leaf)}`;
 }
 
-/** printExpr bound to one env and leaf hook: what a walker passes a child to. Made by a module-level
- *  factory, so the printer's walkers hold an ANONYMOUS function. Bound to a `const` inside each walker
- *  instead, it was a named closure, and under tsx — the loader the bench runs on — esbuild's
- *  keepNames `__name` shim ran on every node printed, a sixth of one ranked fan's enumeration with
- *  typing.ts's and ast.ts's walkers. */
-function exprPrinter(vt: PrintEnv, leaf: LeafHook | undefined): (x: Expr, p: number) => string {
-  return (x, p) => printExpr(x, p, vt, leaf);
-}
-
 function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): string {
-  const rec = exprPrinter(vt, leaf);
+  const rec = (x: Expr, p: number) => printExpr(x, p, vt, leaf);
   if (leaf) {
     const s = leaf(e, rec);
     if (s !== null) {
@@ -526,7 +517,7 @@ function structReturnCall(call: Extract<Expr, { k: 'call' }>, vt: PrintEnv, leaf
 }
 
 function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): string[] {
-  const pe = exprPrinter(vt, leaf);
+  const pe = (e: Expr, p: number) => printExpr(e, p, vt, leaf);
   switch (s.k) {
     case 'assign': {
       const lhs = s.name;
@@ -622,7 +613,7 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
  *  because it is the one statement kind whose printing is a program of its own; `printStmt`'s arm
  *  is one call. */
 function printSwitchStmt(s: Extract<Stmt, { k: 'switch' }>, indent: string, vt: PrintEnv, leaf?: LeafHook): string[] {
-  const pe = exprPrinter(vt, leaf);
+  const pe = (e: Expr, p: number) => printExpr(e, p, vt, leaf);
   // A plain `break;` in an arm BODY is the innermost LOOP's in L3 (l3/ast.ts) and the SWITCH's in
   // C, so printing one between `case` labels rebinds it — a changed program that reads as ordinary
   // C. Refused HERE because the rebinding is the printer's, for every producer rather than for
