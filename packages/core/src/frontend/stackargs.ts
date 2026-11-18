@@ -48,15 +48,17 @@ export interface StackArgsEscape {
  *  source forms below its array (`u32 *p = a - 1`, the 1-based table idiom) bases the read beneath
  *  the object, at a word another object or an outgoing argument owns, and nothing in the read says
  *  so. Emitted only under `compilerBehaviors.escapedFrameAddressNamesALocal`, the premise that a
- *  frame address names a local's words from it up, AND `highestStackWordStoredAfterArgumentReads`,
+ *  frame address names a local's words from it up, AND `stagedStackWordReachesOnlyItsCall`,
  *  the staging-order premise both claims below rest on (`target.ts` states it and its residue).
  *
- *  So the read is TWO claims of different strength. Where it fires, it ends the stores pending from
- *  its base up, as an escape does — which is safe below an object too, because agbcc computes
- *  every argument's value before it stages a call's last stack word, so a read never runs between
- *  that word's store and its call (`highestStackWordStoredAfterArgumentReads`), and the word stays
- *  pending at the call for the refusals to see. Whether it BOUNDS THE AREA flow-insensitively, as a
- *  load does, is `loadedWordBound`'s question, and the base alone does not answer it.
+ *  So the read is TWO claims of different strength, each only beneath its ceiling (`below`). Where
+ *  it fires, it ends the stores pending from its base up to the ceiling, as an escape does — which
+ *  is safe below an object too, because a word a call stages before the read and beneath the
+ *  ceiling is not that call's highest: the frontend sets the ceiling at the highest word stored
+ *  between the read and each call that may take a stack word (`stagedStackWordReachesOnlyItsCall`),
+ *  so that word stays pending at the call for the refusals to see. Whether it BOUNDS THE AREA
+ *  flow-insensitively, as a load does, is `loadedWordBound`'s question, and the base alone does not
+ *  answer it.
  *
  *  NO RE-PROOF OF THE LIFTED IR, unlike an escape (`escapesReliedOn`): what an escape excuses rests
  *  on what a call is HANDED, which the lift decides again (a guessed arity, then the trim) and can
@@ -65,6 +67,11 @@ export interface StackArgsEscape {
 export interface StackArgsIndexedRead {
   readonly kind: 'indexed-read';
   readonly off: number;
+  /** The read ends and clears only the words beneath this offset: a call whose stack words
+   *  nothing states exactly may follow it, and every path to one stores a word at or above it on
+   *  the way, which that call staged after the read (`target.ts` `stagedStackWordReachesOnlyItsCall`).
+   *  Absent, no such call follows it. */
+  readonly below?: number;
 }
 
 /** A call, and what its callee's DECLARATION says it takes on the stack. `declared` is the block
@@ -158,13 +165,13 @@ const readsFromUp = <C>(ev: StackArgsEvent<C>): ev is StackArgsEscape | StackArg
  *  A LOAD THROUGH A RUNTIME INDEX (`indexed-read`) LOWERS IT TO ITS BASE ONLY WHERE NO WORD IT
  *  WOULD CLEAR IS A STAGED ONE. Its base is not proof of a local: `u32 *p = a - 1` bases `p[i]` at
  *  [sp,#0] for an `a` at [sp,#4], where a K&R call's fifth argument is staged (`below*`). What is
- *  proof is the order of the stores: agbcc stores a call's highest stack word after every value its
- *  arguments read, in the call's own straight run, so that store reaches its call with no load on
- *  the way (`target.ts` `highestStackWordStoredAfterArgumentReads`, the premise the events are
- *  emitted under, with its residue). A store that reaches, with no call on the way, a load through
- *  an index based at or beneath its word is therefore no call's highest staged word; and the staged
- *  words are contiguous from the area's start, so a range of words none of which holds such a
- *  store, above a bound already proven, holds no staged word at all. So the bound steps down to a read's base
+ *  proof is the order of the stores (`target.ts` `stagedStackWordReachesOnlyItsCall`, the premise
+ *  the events are emitted under, with its residue): a staged word reaches its call with no other
+ *  call on the way, and a read's ceiling lies at or beneath the highest word stored between it and
+ *  any call it may precede. A store that reaches, with no call on the way, a load through an index
+ *  based at or beneath its word and ceiled above it is therefore no call's highest staged word; and
+ *  the staged words are contiguous from the area's start, so a range of words none of which holds
+ *  such a store, above a bound already proven, holds no staged word at all. So the bound steps down to a read's base
  *  where EVERY store to a word between that base and the bound so far reaches such a read — the
  *  mask loop that reads `a[i]` only on some trips (`CommonWaitForNextFrame`: the array filled, then
  *  the loop, then the call) — and stops at the first base where one does not. */
@@ -207,7 +214,7 @@ export function loadedWordBound<C>(
       let ended = false;
       for (let k = i; k < evs.length && !ended; k++) {
         const ev = evs[k];
-        if (ev.kind === 'indexed-read' && ev.off <= word) {
+        if (ev.kind === 'indexed-read' && ev.off <= word && word < (ev.below ?? Infinity)) {
           return true;
         }
         ended = isCallEvent(ev);
@@ -500,8 +507,9 @@ export function analyzeOutgoingArgs<C>({
           // the receiver of the escaped address reads what it was handed (an indexed load reads
           // what its base addresses), so those words stop being pending exactly as a reload would
           // end them
+          const below = ev.kind === 'indexed-read' ? (ev.below ?? Infinity) : Infinity;
           for (const o of everySlot) {
-            if (o >= ev.off) {
+            if (o >= ev.off && o < below) {
               may.delete(o);
               must.delete(o);
             }

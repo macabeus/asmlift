@@ -118,12 +118,41 @@ describe('a read based below its array is no proof of a local', () => {
   });
 });
 
+// A by-value struct's register words are loaded AFTER the call's stack words are stored (agbcc
+// calls.c `move_block_to_reg`, and the stack part of a struct split between r3 and the stack), so a
+// read through a pointer formed below its array can run between a staged word's store and its call.
+// The read clears nothing above the highest word stored on its way to such a call, and nothing at
+// all where that path stores no word (`thumb.ts` `indexedReadBelow`).
+describe('a read after a call’s last staged word clears nothing', () => {
+  test('agbcc stages the stack words, then loads the struct’s register words through the index', () => {
+    for (const [fn, staged] of [
+      ['blk1', 'str\tr0, [sp]'],
+      ['blk2', 'str\tr0, [sp, #0x4]'],
+      ['blk3', 'str\tr0, [sp]'],
+    ] as const) {
+      const l = lines(fn);
+      const last = l.lastIndexOf(staged);
+      expect(last).toBeGreaterThan(0);
+      expect(l.slice(last + 1).filter((x) => /^ldr\tr[0-3], \[r[0-3](, #0x[48])?\]$/.test(x)).length).toBeGreaterThan(
+        1,
+      );
+      expect(l.slice(last + 1).some((x) => x.startsWith('str'))).toBe(false);
+    }
+  });
+
+  test('and a call nothing sizes keeps its stack arguments', () => {
+    for (const fn of ['blk1', 'blk2', 'blk3']) {
+      expect(() => lift(fn)).toThrow(/the store to \[sp,#0\]/);
+    }
+  });
+});
+
 // Both readings of an indexed read rest on agbcc's staging order, a field of its own
-// (`target.ts` `highestStackWordStoredAfterArgumentReads`), not on the escape premise beside it.
-describe('the staging order is a declared premise, and its residue is the one the field names', () => {
+// (`target.ts` `stagedStackWordReachesOnlyItsCall`), not on the escape premise beside it.
+describe('the staging order is a declared premise', () => {
   const NO_ORDER = {
     ...ARMV4T_AGBCC,
-    compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, highestStackWordStoredAfterArgumentReads: undefined },
+    compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, stagedStackWordReachesOnlyItsCall: undefined },
   };
   const USE = { use: { params: ['u32', 's32'], returnsVoid: true }, rng: { params: [], returnsVoid: true } };
 
@@ -131,12 +160,11 @@ describe('the staging order is a declared premise, and its residue is the one th
     expect(() => decompile('ix', source('ix'), NO_ORDER, { prototypes: USE })).toThrow(/stack pointer used as data/);
   });
 
-  test('below3 with its last stack word staged before the read lifts with that word lost, and only under it', () => {
+  test('below3 with its last stack word staged before the read declines: nothing is stored after the read', () => {
     const staged = '\tldr\tr0, .L36+0xc\n\tldr\tr0, [r0]\n\tstr\tr0, [sp]\n';
     const read = '\tlsl\tr0, r0, #0x2\n\tadd\tr0, r0, r2\n\tldr\tr3, [r0]\n';
     const swapped = source('below3').replace(read + staged, staged.replaceAll('r0', 'r1') + read);
     expect(swapped).not.toBe(source('below3'));
-    expect(decompile('below3', swapped, ARMV4T_AGBCC).source).toContain('return kr(1, 2, 3, p0[a0]);');
-    expect(() => decompile('below3', swapped, NO_ORDER)).toThrow(/the store to \[sp,#0\]/);
+    expect(() => decompile('below3', swapped, ARMV4T_AGBCC)).toThrow(/the store to \[sp,#0\]/);
   });
 });

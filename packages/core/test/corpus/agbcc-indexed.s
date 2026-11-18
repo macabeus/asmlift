@@ -550,3 +550,151 @@ below6:
 	.word	gI
 .Lfe13:
 	.size	 below6,.Lfe13-below6
+	.align	2, 0
+	.globl	blk1
+	.type	 blk1,function
+	.thumb_func
+blk1:
+	push	{r4, lr}
+	add	sp, sp, #-0x1c
+	mov	r4, sp
+	ldr	r1, .L52
+	ldr	r3, [r1]
+	str	r3, [sp, #0x4]
+	ldr	r1, .L52+0x4
+	ldr	r2, [r1]
+	str	r2, [sp, #0x8]
+	ldr	r1, .L52+0x8
+	ldr	r1, [r1]
+	str	r1, [sp, #0xc]
+	ldr	r1, .L52+0xc
+	ldr	r1, [r1]
+	str	r1, [sp, #0x10]
+	str	r3, [sp, #0x14]
+	str	r2, [sp, #0x18]
+	lsl	r2, r0, #0x1
+	add	r2, r2, r0
+	lsl	r2, r2, #0x2
+	add	r2, r2, r4
+	ldr	r0, .L52+0x10
+	ldr	r0, [r0]
+	str	r0, [sp]
+	ldr	r0, [r2]
+	ldr	r1, [r2, #0x4]
+	ldr	r2, [r2, #0x8]
+	mov	r3, #0x3
+	bl	kr
+	add	sp, sp, #0x1c
+	pop	{r4}
+	pop	{r1}
+	bx	r1
+.L53:
+	.align	2, 0
+.L52:
+	.word	gA
+	.word	gB
+	.word	gC
+	.word	gD
+	.word	gI
+.Lfe14:
+	.size	 blk1,.Lfe14-blk1
+	.align	2, 0
+	.globl	blk2
+	.type	 blk2,function
+	.thumb_func
+blk2:
+	push	{r4, lr}
+	add	sp, sp, #-0x20
+	mov	r4, sp
+	ldr	r1, .L55
+	ldr	r3, [r1]
+	str	r3, [sp, #0x8]
+	ldr	r1, .L55+0x4
+	ldr	r2, [r1]
+	str	r2, [sp, #0xc]
+	ldr	r1, .L55+0x8
+	ldr	r1, [r1]
+	str	r1, [sp, #0x10]
+	ldr	r1, .L55+0xc
+	ldr	r1, [r1]
+	str	r1, [sp, #0x14]
+	str	r3, [sp, #0x18]
+	str	r2, [sp, #0x1c]
+	lsl	r2, r0, #0x1
+	add	r2, r2, r0
+	lsl	r2, r2, #0x2
+	add	r2, r2, r4
+	mov	r0, #0x4
+	str	r0, [sp]
+	ldr	r0, .L55+0x10
+	ldr	r0, [r0]
+	str	r0, [sp, #0x4]
+	ldr	r0, [r2]
+	ldr	r1, [r2, #0x4]
+	ldr	r2, [r2, #0x8]
+	mov	r3, #0x3
+	bl	kr
+	add	sp, sp, #0x20
+	pop	{r4}
+	pop	{r1}
+	bx	r1
+.L56:
+	.align	2, 0
+.L55:
+	.word	gA
+	.word	gB
+	.word	gC
+	.word	gD
+	.word	gI
+.Lfe15:
+	.size	 blk2,.Lfe15-blk2
+	.align	2, 0
+	.globl	blk3
+	.type	 blk3,function
+	.thumb_func
+blk3:
+	push	{r4, lr}
+	add	sp, sp, #-0x20
+	add	r4, sp, #0x4
+	ldr	r1, .L58
+	ldr	r3, [r1]
+	str	r3, [sp, #0x8]
+	ldr	r1, .L58+0x4
+	ldr	r2, [r1]
+	str	r2, [sp, #0xc]
+	ldr	r1, .L58+0x8
+	ldr	r1, [r1]
+	str	r1, [sp, #0x10]
+	ldr	r1, .L58+0xc
+	ldr	r1, [r1]
+	str	r1, [sp, #0x14]
+	str	r3, [sp, #0x18]
+	str	r2, [sp, #0x1c]
+	lsl	r1, r0, #0x1
+	add	r1, r1, r0
+	lsl	r1, r1, #0x2
+	add	r1, r1, r4
+	ldr	r0, .L58+0x10
+	ldr	r0, [r0]
+	str	r0, [sp, #0x4]
+	ldr	r0, [r1, #0x8]
+	str	r0, [sp]
+	ldr	r2, [r1]
+	ldr	r3, [r1, #0x4]
+	mov	r0, #0x1
+	mov	r1, #0x2
+	bl	kr
+	add	sp, sp, #0x20
+	pop	{r4}
+	pop	{r1}
+	bx	r1
+.L59:
+	.align	2, 0
+.L58:
+	.word	gA
+	.word	gB
+	.word	gC
+	.word	gD
+	.word	gI
+.Lfe16:
+	.size	 blk3,.Lfe16-blk3

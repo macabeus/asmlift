@@ -4016,7 +4016,75 @@ function measureThumbFrame({
     return escapesHere && off !== undefined ? [{ kind: 'escape', off }] : [];
   };
   const stagesOutgoing = target.compilerBehaviors.stagesOutgoingArgsInFrame === true;
-  const indexedReadsHere = target.compilerBehaviors.highestStackWordStoredAfterArgumentReads === true;
+  const indexedReadsHere = target.compilerBehaviors.stagedStackWordReachesOnlyItsCall === true;
+  // …AND HOW HIGH WHAT IT READS MAY CLEAR. The read's base proves no local (the event's doc), so
+  // what it may clear rests on the staging premise (`stagedStackWordReachesOnlyItsCall`): every
+  // path from a staged word's store reaches its call with no other call on the way, a block copy
+  // into the area aside, and a word the call stages after a read lies above the ones it staged
+  // before. A read may run between a word's store and its call — agbcc loads a by-value struct's
+  // register words there (`struct S12 *p = (struct S12 *)(w - 1); kr(p[i], 3, gI)` stores gI at
+  // [sp,#0], then loads `p[i]` from [sp,#0] up into r0..r2) — so its ceiling (`below`) is the
+  // lowest, over the paths from it to a call whose stack words nothing states exactly, of the
+  // highest word stored on the way, or that call's stated words where a count states more. A call
+  // a typed parameter list declares ends a path unbounded: a word it takes that the read clears is
+  // missing at the call and refuses there, and a word above its block is no word of it. A call
+  // handed a frame address does not end one: it may be that block copy (`add r0, sp, #4 / … / bl
+  // memcpy`). `Infinity` where no such call follows the read; `-Infinity` where a path stores
+  // nothing before one, and the read is no event.
+  const isCall = (ins: Instr): boolean => ins.mnemonic === 'bl' || ins.mnemonic === 'blx';
+  const storedWord = (ins: Instr): number | null => (/^str/.test(ins.mnemonic) ? slotAcc(ins) : null);
+  // the words a call's declaration states it takes, `Infinity` where a typed parameter list states
+  // them exactly, 0 where nothing states them
+  const statedStackEnd = (ins: Instr): number => {
+    const callee = ins.ops[0] ?? '?';
+    const declared = calleeRegister(ins, target) === null ? calls.declaredCall(callee) : null;
+    if (declared === null) {
+      return 0;
+    }
+    if (calls.declaredParams(callee)?.every((p) => p.spelling !== '') === true) {
+      return Infinity;
+    }
+    return 4 * (outgoingBlock(declared.widths, target)?.length ?? 0);
+  };
+  // the ceiling from instruction `i` of block `b`, given the ceiling at each block's start
+  const clearsBelowFrom = (b: number, i: number, atStart: readonly number[]): number => {
+    let highest = -Infinity;
+    let ceiling = Infinity;
+    const instrs = asmBlocks[b].instrs;
+    for (let k = i; k < instrs.length; k++) {
+      const ins = instrs[k];
+      if (isCall(ins)) {
+        ceiling = Math.min(ceiling, Math.max(highest, statedStackEnd(ins)));
+        if (!escapedOffsetOf.has(ins)) {
+          return ceiling;
+        }
+      }
+      highest = Math.max(highest, storedWord(ins) ?? -Infinity);
+    }
+    return Math.min(
+      ceiling,
+      ...succs[b].filter((q) => entryReachable.has(q)).map((q) => Math.max(highest, atStart[q])),
+    );
+  };
+  const clearsBelowAtStart = asmBlocks.map(() => Infinity);
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const b of entryReachable) {
+      const v = clearsBelowFrom(b, 0, clearsBelowAtStart);
+      if (v < clearsBelowAtStart[b]) {
+        clearsBelowAtStart[b] = v;
+        changed = true;
+      }
+    }
+  }
+  const indexedReadBelow = new Map<Instr, number>();
+  for (const b of entryReachable) {
+    asmBlocks[b].instrs.forEach((ins, i) => {
+      if (indexedReadOf.has(ins)) {
+        indexedReadBelow.set(ins, clearsBelowFrom(b, i + 1, clearsBelowAtStart));
+      }
+    });
+  }
   // THE FRAME BASE PUBLISHED TO MEMORY: a word store hands `sp + 0` to memory outside the frame
   // (`escapedOffsetOf`, a `str`), under the premise that an escaped frame address names a local's
   // words from it up. The fourth [sp,#0] licence's second half reads it (`frameBaseIsTheObject`).
@@ -4029,11 +4097,15 @@ function measureThumbFrame({
         return escaped;
       }
       // …and a load through a runtime index reads the object it is based in, under the same premise
-      // and the staging-order one (`highestStackWordStoredAfterArgumentReads`; `indexedReadOf`, and
-      // the event's doc for what its base does and does not prove)
+      // and the staging-order one (`stagedStackWordReachesOnlyItsCall`; `indexedReadOf`, and
+      // the event's doc for what its base does and does not prove), clearing only beneath
+      // `indexedReadBelow`
       const indexedAt = escapesHere && indexedReadsHere ? indexedReadOf.get(ins) : undefined;
       if (indexedAt !== undefined) {
-        return [{ kind: 'indexed-read', off: indexedAt }];
+        const below = indexedReadBelow.get(ins) ?? -Infinity;
+        return below <= indexedAt
+          ? []
+          : [{ kind: 'indexed-read', off: indexedAt, ...(below === Infinity ? {} : { below }) }];
       }
       // …and a narrow reload of a word slot is that slot's reload, as its word reload would be,
       // one the lift keeps as a capture included (a held argument home's, or one inside the

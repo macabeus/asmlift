@@ -267,7 +267,10 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   from "this output lacks the shape" to a claim about what produced it. `outgoingAreaNeverLoadedFrom`
   (`target.ts`) is the worked case: from a measured start offset up, the compiler never reads a
   word of its outgoing area, so a word it reads there is a local, and so is every word above it
-  (`frontend/stackargs.ts` `loadedWordBound`). The offset is part of the universal: 0 on agbcc, 16
+  (`frontend/stackargs.ts` `loadedWordBound`). On Thumb a load through a runtime index into the
+  frame may step that bound lower, and the step is a second universal's contrapositive
+  (`stagedStackWordReachesOnlyItsCall`: a store that reaches such a read beneath its ceiling is no
+  call's highest staged word), so every reader of the number rests on both there. The offset is part of the universal: 0 on agbcc, 16
   on the three O32 toolchains, whose compilers stage a by-value aggregate's words in the a1..a3
   home and load them back, and 8 on mwcc, where the callee's parameter area starts. Each frontend
   measures the bound once and hands the one number to every reader: on MIPS and PowerPC it caps
