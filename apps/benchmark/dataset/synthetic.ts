@@ -20325,7 +20325,7 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['variable-index', 'multi-arg'],
     toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
     ctx: 'extern u32 gA, gB, gC;\nint kr();\nint stkidx_below(s32 i);',
-    proto: { stkidx_below: { params: ['s32'] } },
+    proto: { stkidx_below: { params: ['s32'] }, kr: { returns: 'int' } },
   },
   //  40. dmafill_call (kl2dct sub_0802E340: "stack pointer used as data — the store to [sp,#0] is
   //      never reloaded"). A DMA fill whose temp's address is stored to the device's source register,
