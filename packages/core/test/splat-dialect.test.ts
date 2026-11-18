@@ -296,3 +296,31 @@ test('splat: classifyAsmText names the format so a mis-fed Splat file declines o
   // a Splat file handed to the ARM/agbcc (gnu-as) target declines at the format boundary
   expect(() => decompile('func_8000113C_1D3C', SPLAT_CLAMP, ARMV4T_AGBCC)).toThrow(/looks like Splat/);
 });
+
+// gas for MIPS reads `;` as a statement separator and `#` as a comment (mips-linux-gnu-as
+// -march=vr4300 + objdump: each line below assembles `addiu v0,a0,1; addiu v0,v0,4; jr ra; nop`,
+// a function returning a0 + 5). Read by its first token, the line hid the second `addiu` and
+// lifted `return a0 + 1;`. Every statement is now read on its own, and the unaddressed one declines.
+describe('every statement of a Splat line is read, as gas for MIPS reads it', () => {
+  const fn = (middle: string) =>
+    'glabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1' +
+    middle +
+    '\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 00000000 */   nop\nendlabel f\n';
+  test.each(['\n    .set K, 1; addiu $v0, $v0, 4', '; addiu $v0, $v0, 4'])(
+    'a statement after `;` (`%s`) declines',
+    (middle) => {
+      expect(() => decompile('f', fn(middle), MIPS_IDO)).toThrow(
+        /unrecognised line in the Splat disassembly: 'addiu \$v0, \$v0, 4'/,
+      );
+    },
+  );
+  test('a `;` inside a `#` comment or a `/* … */` comment separates nothing', () => {
+    expect(decompile('f', fn(' # x; addiu $v0, $v0, 4'), MIPS_IDO).source).toContain('return a0 + 1;');
+    expect(decompile('f', fn(' /* x; y */'), MIPS_IDO).source).toContain('return a0 + 1;');
+  });
+  test('a comment left open at the end of a line declines', () => {
+    expect(() => decompile('f', fn(' /* x\n */'), MIPS_IDO)).toThrow(
+      /leaves a comment, string or character constant open/,
+    );
+  });
+});

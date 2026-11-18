@@ -11,7 +11,8 @@ import { __testing } from '../src/frontend/thumb';
 import { decompile } from '../src/pipeline';
 import { ARMV4T_AGBCC } from '../src/target';
 
-const { decode } = __testing;
+const { decode, readGasLines } = __testing;
+const texts = (asm: string) => readGasLines(asm).map((l) => l.statements.map((st) => st.text));
 const MARK = ARMV4T_AGBCC.compilerBehaviors.farJumpRelay?.comment;
 
 const bls = (asm: string) =>
@@ -356,8 +357,8 @@ describe('what is not provably a relay declines loud', () => {
   });
 
   test('a `;` inside a string or a character constant is not a statement separator', () => {
-    expect(__testing.splitStatements('.ascii "a;b\\";c"; bx lr')).toEqual(['.ascii "a;b\\";c"', ' bx lr']);
-    expect(__testing.splitStatements("mov r0, #';")).toEqual(["mov r0, #';"]);
+    expect(texts('.ascii "a;b\\";c"; bx lr')).toEqual([['.ascii "a;b\\";c"', 'bx lr']]);
+    expect(texts("mov r0, #';")).toEqual([["mov r0, #';"]]);
   });
 
   // A macro wins over the instruction it is named after (gas matches macro names
@@ -387,7 +388,7 @@ describe('what is not provably a relay declines loud', () => {
     expect(lift(`${H}\tadd\tr0, #2 /* x; y */\n\tbx\tlr\n`)).toContain('return a0 + 2;');
     expect(lift(`${H}\tadd\tr0, #2\n# x; add r0, #1\n\tbx\tlr\n`)).toContain('return a0 + 2;');
     expect(lift(`${H}\tadd\tr0, #1; # x; add r0, #4\n.Lb: # z; add r0, #8\n\tbx\tlr\n`)).toContain('return a0 + 1;');
-    expect(__testing.splitStatements('add r0, #3 /* a; b */; add r0, #1')).toEqual(['add r0, #3  ', ' add r0, #1']);
+    expect(texts('add r0, #3 /* a; b */; add r0, #1')).toEqual([['add r0, #3', 'add r0, #1']]);
   });
 
   test('a marked `bl` to a symbol outside this function is not a relay', () => {
@@ -407,5 +408,89 @@ describe('what is not provably a relay declines loud', () => {
       '\tthumb_func_start h\nh:\n\tmov r0, #1\n_08000022:\n\tbx lr\n';
     declines(rom('\t@ far jump'), /does not target a code label of this function/);
     expect(decompile('f', rom(''), ARMV4T_AGBCC).source).toContain('_08000022(');
+  });
+});
+
+// Every statement gas assembles reaches decode, read the way gas reads it, or the function declines.
+// The probe is the call thunk: `bl .Lthunk` returns to the `add r4, #7` after it whenever gas puts
+// a `bx lr` (0x4770) at .Lthunk+2, so a function giving a0 + 1 + LINE + 3 + 7. Read as a branch it
+// lifts `a0 + 1 + 3`. Each LINE was assembled with arm-none-eabi-as -mthumb -mcpu=arm7tdmi and read
+// back with objdump; the halfwords from .Lthunk are in each row. One reader cuts every line into
+// statements (comments, strings, character constants, `;`) for decode, the debug-section filter
+// and the macro scan alike, and a statement that reader or decode cannot classify declines in the
+// slice instead of being skipped.
+describe('every statement in the function is read the way gas reads it, or the function declines', () => {
+  const thunk = (line: string, prefix = '') =>
+    `${prefix}${H}\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tcmp\tr4, #0\n\tbeq\t.Lskip\n\tbl\t.Lthunk\n\tadd\tr4, #7\n` +
+    '.Lskip:\n\tadd\tr0, r4, #0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+    `.Lthunk:\n\tadd\tr4, #1\n${line}\n\tadd\tr4, #3\n\tb\t.Lskip\n`;
+  const declines = (asm: string, why: RegExp) => {
+    expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(FrontendUnsupportedError);
+    expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(why);
+  };
+  const READS_LR = /names lr after saving it \('bx lr'\)/;
+
+  // The `bx lr` reaches the lr proof, which declines the relay.
+  test.each([
+    // 3401 4770 3403: an `@` inside `/* … */` is comment text, not the start of an `@` comment
+    ['/* a @ b */ bx lr', ''],
+    // 3401 3400 4770 3403
+    ['\tadd r4, #0 /* x @ y */ ; bx lr', ''],
+    // 3401 2140 4770 3403: `'@` is the character constant 64, and the `;` after it separates
+    ["\tmov r1, #'@ ; bx lr", ''],
+    // 3401 4770 3403: the closing `'` of `'a'` is optional and eaten; the `;` after it separates
+    ["\t.set K, 'a'; bx lr", ''],
+    // 3401 4770 3403: `'\\'` is the escape `\\'` (39) and its closing quote
+    ["\t.set K, '\\'; bx lr", ''],
+    // 3401 4770 3403: a `/* … */` comment spanning lines ends where it closes
+    ['/* x\n*/ bx lr', ''],
+    // 3401 4770 3403: any number of labels on one statement
+    ['a: b: bx lr', ''],
+    // 3401 4770 3403: `;` splits the section switch, so `.text` comes back before the `bx lr`
+    ['\t.section .debug_str,"MS",%progbits,1; .text\n\tbx lr\n\t.text', ''],
+    // 3401 4770 3403: `.pushsection` and `.previous` leave a debug section as `.text` does
+    ['\t.section .debug_str\n\t.pushsection .text\n\tbx lr\n\t.popsection\n\t.byte 1\n\t.text', ''],
+    ['\t.section .debug_str\n\t.previous\n\tbx lr', ''],
+    // 3401 4770 3403: a quoted section name is the same section
+    ['\t.section ".debug_str"\n\t.byte 1; .text; bx lr', ''],
+  ])('`%s` assembles a `bx lr` the lr proof reads', (line, prefix) => {
+    declines(thunk(line, prefix), READS_LR);
+  });
+
+  test.each([
+    // 3401 4770 3403: gas reads `"lab":` as a label; this frontend reads no quoted symbol
+    ['"lab": bx lr', /'"lab": bx lr' is a statement this frontend does not read the way the assembler does/],
+    // gas: an error (`'` reads the line break as its character), so no lift
+    ["\tmov r1, #'\n\tbx lr", /is a character constant at the end of its line/],
+    // gas: a warning, and the string reads on through the next line
+    ['\t.ascii "ab\n\tbx lr', /is a string still open at the end of its line/],
+  ])('`%s` is a statement this frontend cannot read, and declines', (line, why) => {
+    declines(thunk(line), why);
+  });
+
+  // A macro defined by a label (`nop: .macro`: 3401 4770 3403), or inside a debug section (gas
+  // defines it wherever it sits: 3401 4770 3403), still makes the thunk's `nop` its `bx lr`.
+  test.each([
+    ['nop: .macro\n\tbx lr\n\t.endm\n'],
+    ['\t.section .debug_str,"MS",%progbits,1\n\t.macro nop\n\tbx lr\n\t.endm\n\t.text\n'],
+    ['\t.text; .macro nop; bx lr; .endm\n'],
+  ])('a `nop` after a definition `%s` declines', (prefix) => {
+    declines(thunk('\tnop', prefix), /'nop' inside the function changes which lines are assembled/);
+  });
+
+  // What gas assembles WITHOUT a `bx lr` still lifts, as the branch it is (a0 + 1 + 3).
+  test.each([
+    // 3401 3403: a `#` after a closed `/* … */` comments out the rest of the line
+    ['/* x\n*/ # y; bx lr', ''],
+    // 3401 46c0 3403: `m: .macro nop` defines `m`, and `nop` stays the instruction
+    ['\tnop', 'm: .macro nop\n\tbx lr\n\t.endm\n'],
+  ])('`%s` assembles no `bx lr`, and the thunk lifts as a branch', (line, prefix) => {
+    expect(lift(thunk(line, prefix))).toContain('a0 = a0 + 1 + 3;');
+  });
+
+  test('the reader keeps the far-jump mark of an `@` comment after a string holding `@`', () => {
+    expect(readGasLines('\t.ascii "a@b" @far jump').map((l) => [l.statements.map((s) => s.text), l.comment])).toEqual([
+      [['.ascii "a@b"'], '@far jump'],
+    ]);
   });
 });
