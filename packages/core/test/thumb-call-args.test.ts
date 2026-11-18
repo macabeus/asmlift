@@ -487,7 +487,7 @@ describe('a frame address an undeclared arity leaves out refuses', () => {
   });
 
   // r1 is captured into AFTER the first call, so at that call it still holds the caller's value —
-  // the flow-insensitive closure (`registersThatMayHoldAFrameAddress`) would say otherwise.
+  // a flow-insensitive closure over the register's name would say otherwise.
   test('an incoming argument register a later capture reuses does not decline', () => {
     const later =
       'later:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tadd\tr4, r1, #0\n\tbl\talloc\n\tmov\tr1, sp\n' +

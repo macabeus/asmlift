@@ -27,7 +27,8 @@ const lift = (fn: string, prototypes = {}) => decompile(fn, source(fn), ARMV4T_A
 
 // The device register's address is a pool constant, loaded into a register that holds a frame
 // address elsewhere in the same function. That register is no frame address AT THE STORE, so the
-// store hands the temp's address out of the frame (thumb.ts `storesThroughAPoolConstant`).
+// store hands the temp's address out of the frame (thumb.ts `frameAddressReceivers`, over
+// `frameAddressesAt`'s per-store `may`).
 describe('a publish through a register that holds a frame address elsewhere', () => {
   test('dcall: r0 is the device register at the publish and `&w` at the call', () => {
     const dcall = lines('dcall');
@@ -47,6 +48,22 @@ describe('a publish through a register that holds a frame address elsewhere', ()
     expect(out).toContain('*(volatile s32 *)67109076 = sp0;');
     expect(out).toContain('*(volatile s32 *)67109076 = (u32)sp0 + 4;');
     expect(out).toContain('    k();\n');
+  });
+
+  // not only a pool constant: a pointer loaded from a global, or a call's result, in the register
+  // that holds `&w` at the later call, is no frame address at the publish either. The store is read
+  // as the publish it is, so the temp's word is no argument staged for `g`; what then declines is
+  // the audit's question of who reads a published address nothing declares — a device's source
+  // register is declared (`dcall`), `*gDst` is not.
+  test('dglob, dret: a loaded pointer and a returned one are bases outside the frame', () => {
+    expect(lines('dglob').slice(5, 9)).toEqual(['ldr\tr0, .L20', 'ldr\tr0, [r0]', 'mov\tr1, sp', 'str\tr1, [r0]']);
+    expect(lines('dret').slice(5, 8)).toEqual(['bl\tdst', 'mov\tr1, sp', 'str\tr1, [r0]']);
+    const dst = { dst: { params: [], returns: 'u32' } };
+    for (const fn of ['dglob', 'dret']) {
+      expect(() => lift(fn, { ...DECLARED, ...dst })).toThrow(
+        /the address is published rather than passed as an argument, and nothing declares what reads it/,
+      );
+    }
   });
 
   // the control: the same register holding a frame address AT the store writes the address into

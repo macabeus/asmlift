@@ -20269,8 +20269,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //      then a call taking `&w`. agbcc loads the register's address into r0, the same register that
   //      holds `&w` at the call, and the publish was read off the register's NAME: a register that
   //      holds a frame address anywhere is a base into this frame, so the store published nothing
-  //      and the temp's word read as staged for `g`. The publish is now read per store where the
-  //      base holds a pool constant (thumb.ts `storesThroughAPoolConstant`). agbcc only, as item 26.
+  //      and the temp's word read as staged for `g`. The publish is now read per store: a base that
+  //      holds no frame address AT the store, on any path, publishes what it stores (thumb.ts
+  //      `frameAddressReceivers` over `frameAddressesAt`). agbcc only, as item 26.
   {
     sym: 'dmafill_call',
     src:
