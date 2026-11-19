@@ -228,6 +228,25 @@ test("a counter the latch writes after a second update is still the `for`'s coun
   expect(agreement.judged).toBeGreaterThan(0);
 });
 
+test('the counter is the step the test reads directly, not one it reaches through a later step', () => {
+  // `i++, j = i + 4` tested on `j`: `j`'s new value reads `i`'s, so a walk through the steps finds
+  // both, and the counter is `j`, the one the compare names, whose init the `for` clause holds
+  const ir = forJt({
+    guard:
+      '%2: s32 = const {value=4}\n  %3: s32 = add %0, %2\n  %4: u32 = icmp_slt %1, %3\n  cond_br %4, ^bb12(), ^bb1(%0, %3)',
+    latch:
+      '%35: s32 = const {value=1}\n  %36: s32 = add %5, %35\n  %38: s32 = const {value=4}\n  %39: s32 = add %36, %38\n' +
+      '  %37: u32 = icmp_slt %1, %39\n  cond_br %37, ^bb12(), ^bb1(%36, %39)',
+  })
+    .replace('^bb1(%5: s32):', '^bb1(%5: s32, %50: s32):')
+    .replace('%34: s32 = call %5 {target="k"}', '%34: s32 = call %50 {target="k"}');
+  const { src, agreement, shipped } = judged(ir);
+  expect(src).toMatch(/for \((\w+) = [^;]*; a1 >= \1; (\w+) = \2 \+ 1, \1 = \2 \+ 4\) \{/);
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBeGreaterThan(0);
+});
+
 test("three steps are ordered by what each reads of the others, not by the latch's write order", () => {
   // `i += c`, `b += 1`, `c += b`, written in that order: `c` must step after `i`, which reads its old
   // value, and before `b`, whose old value it reads, so the one order is `i`, `c`, `b`
