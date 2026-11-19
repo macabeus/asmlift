@@ -50,6 +50,7 @@ import {
   type StaleIdiomRead,
   caseEntries,
   enterCaseTarget,
+  enterKeptDispatch,
   idiomLeaves,
   parkedIn,
   refuseStaleIdiomReads,
@@ -2584,12 +2585,16 @@ interface JumpTable {
   scrutReg: string;
   caseLabels: string[];
   defaultLabel: string;
-  /** What runs between the table load and the `mov pc` ({@link dispatchExtraRefusal}). */
+  /** What runs between the table load and the `mov pc` ({@link dispatchExtraRefusal}): code the
+   *  compiler placed in the dispatch, none of the idiom's own. */
   extras: Instr[];
   /** What the dispatch idiom leaves in each register it writes (index, table pointer, target;
-   *  jump-table.ts `idiomLeaves`). The `add` rewrites the index the `lsl` scaled, so every one is a
-   *  marker here: an elided dispatch writes them at the entry of each case target (`caseEntries`), a
-   *  kept one at its own block's end, save the ones its extras rewrote. */
+   *  jump-table.ts `idiomLeaves`). The table pointer and the target are markers. The index the `lsl`
+   *  scaled is one too where the `add` or the target load rewrites it; where neither does (the sum
+   *  goes into the pointer register) it is `scaled`, the scrutinee shifted by two. An elided dispatch
+   *  writes them at the entry of each case target (`caseEntries`); a kept one writes the scaled index
+   *  at its own block's entry (jump-table.ts `enterKeptDispatch`) and the markers at its end, save the
+   *  ones its extras rewrote. */
   leaves: ReadonlyMap<string, IdiomLeft>;
 }
 
@@ -2754,15 +2759,15 @@ function recoverJumpTable(
     return null;
   }
   // THE SCALED INDEX OUTLIVES THE IDIOM where neither the sum nor the load writes its register: it
-  // holds `rX << 2` into every case, the value jump-table.ts `enterCaseTarget` writes at an elided
-  // dispatch's case targets (`scaled`). A KEPT dispatch lifts its `lsl` ahead of its extras instead,
-  // so an extra that reads the index reads the value the hardware computed, and the switch still
-  // reads the scrutinee its block was entered with (`openBlockCursor`). Every other idiom write is a
-  // marker, as before.
+  // holds `rX << 2` into every case (`scaled`), the value jump-table.ts `enterCaseTarget` writes at an
+  // elided dispatch's case targets and `enterKeptDispatch` at a kept one's entry, so an extra that
+  // reads the index reads the value the hardware computed. The extras are judged against the idiom's
+  // other writes only. The idiom itself is not: its `lsl` reads the scrutinee before the `ldr rP`
+  // runs, which is right where agbcc puts the scrutinee in the register it then loads the table
+  // pointer into (`lsl r0, r1, #2; ldr r1, .L`, the switch on a second parameter).
   const keepsIndex = addrReg !== idxReg && ldrV.ops[0] !== idxReg;
-  const kept = keepsIndex && extras.length > 0 ? [lsl, ...extras] : extras;
   const extraRefusal = dispatchExtraRefusal(
-    kept,
+    extras,
     ldrV.ops[0],
     keepsIndex ? [ptrReg, ldrV.ops[0]] : [idxReg, ptrReg, ldrV.ops[0]],
   );
@@ -2814,7 +2819,7 @@ function recoverJumpTable(
   const leaves = idiomLeaves(
     [idxReg, ptrReg, ldrV.ops[0]].map((reg) => ({ reg, scaled: keepsIndex && reg === idxReg })),
   );
-  return { scrutReg, caseLabels, defaultLabel, extras: kept, leaves };
+  return { scrutReg, caseLabels, defaultLabel, extras, leaves };
 }
 
 // The instructions an agbcc dispatch may carry between the table load and the `mov pc`. gcse's
@@ -6143,6 +6148,9 @@ function openBlockCursor(fill: ThumbFill, ab: AsmBlock, bi: number): BlockCursor
   const walk = makeFrameWalk({ argRegs: target.argRegs, start });
   const jt = text.tables.get(ab);
   const dispatchScrutinee = jt && jt.extras.length > 0 ? ssa.readVar(reg(jt.scrutReg), bi) : null;
+  if (jt && dispatchScrutinee !== null) {
+    enterKeptDispatch(jt.leaves, dispatchScrutinee, irb.ops, (r, v) => ssa.writeVar(reg(r), bi, v));
+  }
   return { ab, bi, irb, walk, pendingCmp, noCmpWhy, consumed: null, dispatchScrutinee };
 }
 
@@ -7261,12 +7269,15 @@ function lowerTerminator(fill: ThumbFill, cur: BlockCursor): void {
     // a branch and already sent every value past N-1 to the default, so its switch is `exhaustive`.
     const scrut = cur.dispatchScrutinee ?? readVar(reg(jt.scrutReg), bi);
     // What the unlifted idiom left in the registers no extra rewrote is no value the lift models: on
-    // the hardware the case blocks see the scaled index, the table's address and the case's own code
-    // address. Each is a marker here, and a read of one declines (`refuseStaleIdiomReads`). The
+    // the hardware the case blocks see the table's address and the case's own code address, and the
+    // scaled index where the sum or the load rewrote it. Each is a marker here, and a read of one
+    // declines (`refuseStaleIdiomReads`). A scaled index the idiom left intact was written at the
+    // block's entry (`enterKeptDispatch`), and is the value it holds unless an extra rewrote it. The
     // elided form cannot put them here, since its bounds block's default path never ran the idiom: it
     // writes them at each case target's entry instead (`openBlockCursor`).
     if (cur.dispatchScrutinee !== null) {
-      for (const r of [...jt.leaves.keys()].filter((r) => !jt.extras.some((ins) => ins.ops[0] === r))) {
+      const opaque = [...jt.leaves].filter(([, left]) => left === 'opaque').map(([r]) => r);
+      for (const r of opaque.filter((r) => !jt.extras.some((ins) => ins.ops[0] === r))) {
         ssa.writeVar(
           reg(r),
           bi,

@@ -186,8 +186,8 @@ export function makeTableBases(hoisted: Iterable<HoistedDispatch>, fail: Fronten
 // (`unsettledScaledIndices`); elsewhere it is a marker. A target two tables enter, and the
 // function's entry, whose call edge no `preds` lists, make every register a marker.
 
-/** What an elided dispatch leaves in a register it writes: the scrutinee scaled by four, or an
- *  address no C expression spells. */
+/** What a dispatch leaves in a register it writes: the scrutinee scaled by four, or an address no C
+ *  expression spells. */
 export type IdiomLeft = 'scaled' | 'opaque';
 
 /** The registers an elided dispatch's idiom writes, in program order, each with whether it is the
@@ -340,6 +340,28 @@ export function enterCaseTarget(
       continue;
     }
     io.write(r, staleMarker(ops, io.key(r), { reg: r, form: 'elided', parks: entry.exact }, stale));
+  }
+}
+
+/** Write the scaled index a KEPT dispatch's idiom leaves (`leaves`' `scaled` registers) at the entry
+ *  of the block that keeps its extras, before the first of them: `scrutinee` is the scrutinee read
+ *  there, `write` defines a register in the block. The extras and the cases then read the value the
+ *  hardware computed, as an elided dispatch's case targets do ({@link enterCaseTarget}); every
+ *  `opaque` register is written a marker at the block's end instead, save the ones an extra rewrote. */
+export function enterKeptDispatch(
+  leaves: ReadonlyMap<string, IdiomLeft>,
+  scrutinee: Value,
+  ops: Op[],
+  write: (reg: string, v: Value) => void,
+): void {
+  const scaled = [...leaves].filter(([, left]) => left === 'scaled').map(([r]) => r);
+  if (scaled.length === 0) {
+    return;
+  }
+  const shl = mkOp('shl', { operands: [scrutinee], results: [mkValue(T.unk(32))], attrs: { imm: 2 } });
+  ops.push(shl);
+  for (const r of scaled) {
+    write(r, shl.results[0]);
   }
 }
 

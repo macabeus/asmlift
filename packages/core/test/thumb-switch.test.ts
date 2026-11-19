@@ -508,6 +508,21 @@ test('a dispatch summing into the pointer register leaves the scaled index for t
   expect(elided).toMatch(/case 0:\s*\n\s*return \(a0 << 2\) \+ a3;/);
 });
 
+test('a dispatch summing into the pointer register reads the scrutinee from that register before the table load', () => {
+  // agbcc's switch on a second parameter: the scrutinee is in r1, which the `ldr r1, .Lp` then
+  // overwrites. The `lsl` ran before it, so it is the idiom, not an extra reading a stale register.
+  const asm =
+    'f:\n\tcmp\tr1, #0x1\n\tbhi\t.Ldef\n\tlsl\tr0, r1, #0x2\n\tldr\tr1, .Lp\n\tadd\tr1, r0, r1\n' +
+    '\tldr\tr1, [r1]\n\tadd\tr2, r0, #0\n\tmov\tpc, r1\n.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n' +
+    '\t.word\t.Lc1\n.Lc0:\n\tadd\tr0, r2, r3\n\tbx\tlr\n.Lc1:\n\tmov\tr0, #11\n\tbx\tlr\n.Ldef:\n\tmov\tr0, #9\n\tbx\tlr\n';
+  const src = decompile('f', asm, ARMV4T_AGBCC).source;
+  expect(src).toContain('switch (a1)');
+  expect(src).toMatch(/case 0:\s*\n\s*return \(a1 << 2\) \+ a3;/);
+  // a case reading the table pointer's register still declines: it holds the code address now
+  const reads1 = asm.replace('.Lc0:\n\tadd\tr0, r2, r3', '.Lc0:\n\tadd\tr0, r1, r3');
+  expect(() => decompile('f', reads1, ARMV4T_AGBCC)).toThrow(/reads r1, which the unlifted dispatch idiom wrote/);
+});
+
 test('a dispatch summing into the pointer register still marks what the idiom wrote over', () => {
   const stale = /a case of the (kept|elided) jump table reads (r0|r1), which the unlifted dispatch idiom wrote/;
   // the table pointer and the code address, kept and elided
