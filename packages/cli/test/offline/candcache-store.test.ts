@@ -7,6 +7,8 @@
 // hardlinked per key under `ns/<namespace>/` — so a key costs an inode, not a copy, and evicting
 // one namespace leaves every other namespace's answers intact.
 import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
+import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -21,6 +23,8 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
+
+import { TSX_ONLY } from './loaded-code-child';
 
 // A BLOCKING-spawnSync suite in a pool whose config says there are none: every case here drives
 // several `spawnSync` compiles, and the file's neighbours in `test:offline` run in parallel worker
@@ -80,6 +84,16 @@ const object = (bytes: string): string => {
   const p = join(scratch(), 'cand.o');
   writeFileSync(p, bytes);
   return p;
+};
+/** Every key file of one namespace, as `ab/<file>`. */
+const entriesIn = (root: string, ns: string): string[] => {
+  const dir = join(root, 'ns', ns.slice(0, 16));
+  if (!existsSync(dir)) {
+    return [];
+  }
+  return readdirSync(dir, { withFileTypes: true }).flatMap((ab) =>
+    ab.isDirectory() && !ab.name.startsWith('.') ? readdirSync(join(dir, ab.name)).map((f) => join(ab.name, f)) : [],
+  );
 };
 const objectsIn = (root: string): string[] => {
   const dir = join(root, 'objects');
@@ -166,7 +180,7 @@ describe('the store is content-addressed and hardlinked', () => {
   });
 });
 
-describe('the LRU cap evicts whole namespaces, oldest first, and never the one in use', () => {
+describe('the LRU cap evicts the least recently used entries, and never in a namespace in use', () => {
   test('over the cap: the cold namespace goes, its objects are reaped, the live one stays', async () => {
     const root = scratch();
     // Run one: fill namespace A with a generous cap so nothing prunes.
@@ -206,12 +220,12 @@ describe('the LRU cap evicts whole namespaces, oldest first, and never the one i
     expect(err).not.toContain('BYTE MISMATCH');
   });
 
-  test('the namespace IN USE keeps its DIRECTORY and loses its oldest keys — the cap fires on one toolchain', async () => {
+  test('the namespace IN USE keeps its DIRECTORY and loses its keys — the cap fires on one toolchain', async () => {
     // The steady state of this repo is ONE agbcc namespace that every run resolves, growing by
     // ~640 keys a run forever: 46,197 keys / 155.3 MB after one full bench run. If the only
     // evictable unit were a whole OTHER namespace, the cap could never fire there at all — which
     // is what a wall-clock "not resolved for an hour" test on the namespace this run just
-    // resolved amounts to. Its directory and its lease survive; its oldest-written keys do not.
+    // resolved amounts to. Its directory and its lease survive; its keys do not.
     const root = scratch();
     await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root, ASMLIFT_CANDCACHE_MAX_MB: '4096' }, (m) => {
       m.candCache('t', () => NS_A).put('k1', 'f', object('A-ONE'));
@@ -224,7 +238,8 @@ describe('the LRU cap evicts whole namespaces, oldest first, and never the one i
     await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root, ASMLIFT_CANDCACHE_MAX_MB: '0' }, (m) => {
       const c = m.candCache('t', () => NS_A);
       c.warm();
-      expect(m.cacheStats()).toMatchObject({ prunedNamespaces: 1, prunedKeys: 1 });
+      // B's key and A's own: a cap of 0 takes every entry no other process holds.
+      expect(m.cacheStats()).toMatchObject({ prunedNamespaces: 1, prunedKeys: 2 });
       expect(c.get('k1', 'f'), 'the evicted key is a MISS, which is always a correct answer').toBeUndefined();
     });
     expect(readdirSync(join(root, 'ns')), 'the directory the run is using is never removed').toEqual([
@@ -365,12 +380,13 @@ describe('the LRU cap evicts whole namespaces, oldest first, and never the one i
     expect(objectsIn(root).length, 'not one byte of this store is in objects/').toBe(0);
     age(root, NS_A);
     // 300 entries x one 4096-byte block = ~1.2 MB of real cost against a 0.5 MB cap; the same
-    // store weighs 0 MB by the old accounting, so nothing would prune.
+    // store weighs 0 MB by the old accounting, so nothing would prune. 80% of the cap is 102.4
+    // blocks, so 198 entries go and 102 stay: only as many as it takes, not the namespace.
     await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root, ASMLIFT_CANDCACHE_MAX_MB: '0.5' }, (m) => {
       m.candCache('t', () => NS_B).warm();
-      expect(m.cacheStats()).toMatchObject({ prunedNamespaces: 1 });
+      expect(m.cacheStats()).toEqual({ prunedKeys: 198 });
     });
-    expect(readdirSync(join(root, 'ns'))).toEqual([NS_B.slice(0, 16)]);
+    expect(entriesIn(root, NS_A).length).toBe(102);
   });
 
   test('the prune stops at a WALL-CLOCK BUDGET, and says both that it started and that it stopped', async () => {
@@ -434,6 +450,339 @@ describe('the LRU cap evicts whole namespaces, oldest first, and never the one i
       expect(m.cacheStats().prunedNamespaces).toBeUndefined();
     });
     expect(readdirSync(join(root, 'ns')).sort()).toEqual([NS_A.slice(0, 16), NS_B.slice(0, 16)].sort());
+  });
+});
+
+describe('across namespaces, the least recently USED entries go first, and only as many as the cap needs', () => {
+  // A store shared by parallel worktrees: before, any open over the cap deleted every idle
+  // namespace whole until the store was under 80% of it, so a real tier's one namespace — 5.5 GB
+  // on a measured store — went the first time anything else opened the store after it went idle.
+  const FAIL = new CompilerRejection("agbcc failed: c.c:2: conflicting types for `f'");
+  const NS_C = 'c'.repeat(64);
+  const NS_O = 'd'.repeat(64);
+  const H = 60 * 60 * 1000;
+  const keys = (n: number): string[] => Array.from({ length: n }, (_, i) => `k${i}`);
+  /** Where key `key` of namespace `ns` lives — the module's own `keyId` under label `t`, symbol `f`. */
+  const keyPath = (root: string, ns: string, key: string, ext: 'o' | 'fail' = 'fail'): string => {
+    const n = ns.slice(0, 16);
+    const k = createHash('sha256').update(`t ${n} f ${key}`).digest('hex');
+    return join(root, 'ns', n, k.slice(0, 2), `${k}.${ext}`);
+  };
+  const setAge = (p: string, msAgo: number): void => {
+    const t = new Date(Date.now() - msAgo);
+    utimesSync(p, t, t);
+  };
+  /** The namespace DIRECTORY past the grace window, so only its entries' own ages decide. */
+  const ageDir = (root: string, ns: string): void => setAge(join(root, 'ns', ns.slice(0, 16)), 3 * H);
+  /** A cap of exactly `blocks` rejections' cost: each `.fail` costs one 4096-byte block. */
+  const capOf = (blocks: number): string => String((blocks * 4096) / 1048576);
+  const roomy = (root: string): Record<string, string> => ({
+    ASMLIFT_CANDCACHE: '1',
+    ASMLIFT_CANDCACHE_DIR: root,
+    ASMLIFT_CANDCACHE_MAX_MB: '4096',
+    ASMLIFT_CANDCACHE_SAMPLE: '0',
+  });
+  const fill = (root: string, ns: string, ks: readonly string[]): Promise<void> =>
+    load(roomy(root), (m) => {
+      const c = m.candCache('t', () => ns);
+      for (const k of ks) {
+        c.putFail(k, 'f', FAIL);
+      }
+    });
+  const present = (root: string, ns: string, ks: readonly string[]): string[] =>
+    ks.filter((k) => existsSync(keyPath(root, ns, k)));
+
+  test('several namespaces over the cap: the oldest ENTRIES go, whichever namespace holds them', async () => {
+    const root = scratch();
+    for (const ns of [NS_A, NS_B, NS_C]) {
+      await fill(root, ns, keys(10));
+    }
+    keys(10).forEach((k, i) => {
+      setAge(keyPath(root, NS_A, k), i < 5 ? 5 * H : 1.5 * H); // half of A is the oldest of all
+      setAge(keyPath(root, NS_B, k), 4 * H - i * 60_000); // B: 4 h old, k0 the oldest
+      setAge(keyPath(root, NS_C, k), 2 * H);
+    });
+    for (const ns of [NS_A, NS_B, NS_C]) {
+      ageDir(root, ns);
+    }
+    // 30 entries against a 25-entry cap: down to 80% of it, 20, so exactly 10 go.
+    await load({ ...roomy(root), ASMLIFT_CANDCACHE_MAX_MB: capOf(25) }, (m) => {
+      m.candCache('t', () => NS_O).warm();
+      expect(m.cacheStats()).toEqual({ prunedKeys: 10 });
+    });
+    expect(present(root, NS_A, keys(10)), "A's five 5-hour-old entries went; its recent half stayed").toEqual(
+      keys(10).slice(5),
+    );
+    expect(present(root, NS_B, keys(10)), "then B's five oldest").toEqual(keys(10).slice(5));
+    expect(present(root, NS_C, keys(10)), 'C, the most recently used, is whole').toEqual(keys(10));
+  });
+
+  test('a recently USED namespace survives: a serve refreshes what it serves', async () => {
+    // Both namespaces were WRITTEN long ago; only A was used since. By write time A goes first.
+    const setup = async (serveA: boolean): Promise<string> => {
+      const root = scratch();
+      await fill(root, NS_A, keys(10));
+      await fill(root, NS_B, keys(10));
+      for (const k of keys(10)) {
+        setAge(keyPath(root, NS_A, k), 5 * H);
+        setAge(keyPath(root, NS_B, k), 4 * H);
+      }
+      if (serveA) {
+        await load(roomy(root), (m) => {
+          const c = m.candCache('t', () => NS_A);
+          for (const k of keys(10)) {
+            expect(c.get(k, 'f')).toBeInstanceOf(Error);
+          }
+          expect(m.cacheStats()).toEqual({ failHit: 10 });
+        });
+      }
+      ageDir(root, NS_A);
+      ageDir(root, NS_B);
+      // 20 entries against a 12.5-entry cap: down to 10, so one whole namespace's worth goes.
+      await load({ ...roomy(root), ASMLIFT_CANDCACHE_MAX_MB: capOf(12.5) }, (m) => {
+        m.candCache('t', () => NS_O).warm();
+        expect(m.cacheStats()).toEqual({ prunedKeys: 10, prunedNamespaces: 1 });
+      });
+      return root;
+    };
+    const served = await setup(true);
+    expect(present(served, NS_A, keys(10)), 'the namespace a run used keeps everything').toEqual(keys(10));
+    expect(readdirSync(join(served, 'ns')).sort()).toEqual([NS_A.slice(0, 16), NS_O.slice(0, 16)].sort());
+    // The control: the same store with no serve loses A, the older-written one.
+    const idle = await setup(false);
+    expect(present(idle, NS_A, keys(10))).toEqual([]);
+    expect(present(idle, NS_B, keys(10))).toEqual(keys(10));
+  });
+
+  test("the opener's OWN namespace keeps the keys runs still ask for and loses the ones they stopped asking for", async () => {
+    // Its keys used to go oldest-WRITTEN first — on a store that is hit and never rewritten, the
+    // very keys every run still asks for.
+    const root = scratch();
+    await fill(root, NS_O, keys(10));
+    for (const k of keys(10)) {
+      setAge(keyPath(root, NS_O, k), 5 * H);
+    }
+    await load(roomy(root), (m) => {
+      const c = m.candCache('t', () => NS_O);
+      for (const k of keys(5)) {
+        c.get(k, 'f');
+      }
+    });
+    await load({ ...roomy(root), ASMLIFT_CANDCACHE_MAX_MB: capOf(6.25) }, (m) => {
+      const c = m.candCache('t', () => NS_O);
+      c.warm();
+      expect(m.cacheStats()).toEqual({ prunedKeys: 5 });
+      for (const k of keys(10)) {
+        expect(c.get(k, 'f') !== undefined, k).toBe(keys(5).includes(k));
+      }
+    });
+  });
+
+  test('a serve refreshes an entry at most once an hour', async () => {
+    const root = scratch();
+    await fill(root, NS_A, ['k0', 'k1']);
+    setAge(keyPath(root, NS_A, 'k0'), 30 * 60_000);
+    setAge(keyPath(root, NS_A, 'k1'), 2 * H);
+    await load(roomy(root), (m) => {
+      const c = m.candCache('t', () => NS_A);
+      c.get('k0', 'f');
+      c.get('k1', 'f');
+    });
+    const age = (k: string): number => Date.now() - statSync(keyPath(root, NS_A, k)).mtimeMs;
+    expect(age('k0'), 'half an hour old: left as it was').toBeGreaterThan(29 * 60_000);
+    expect(age('k1'), 'two hours old: refreshed').toBeLessThan(60_000);
+  });
+
+  test("a reader WAITS while a live pruner's mark is down, and serves once it is gone", async () => {
+    const root = scratch();
+    await fill(root, NS_A, ['k0']);
+    // pid 1 is init/launchd: certainly alive, certainly not us.
+    const mark = join(root, 'pruning', NS_A.slice(0, 16), '1-cafe');
+    mkdirSync(dirname(mark), { recursive: true });
+    writeFileSync(mark, '1\n');
+    const lifter = spawn('sh', ['-c', 'sleep 0.6; rm -f "$0"', mark], { stdio: 'ignore' });
+    const exited = new Promise((r) => lifter.on('close', r));
+    await load(roomy(root), (m) => {
+      const t0 = Date.now();
+      const hit = m.candCache('t', () => NS_A).get('k0', 'f');
+      expect(Date.now() - t0, 'it waited for the mark').toBeGreaterThanOrEqual(500);
+      expect(hit).toBeInstanceOf(Error);
+    });
+    await exited;
+  });
+
+  test("a DEAD pruner's mark is swept and not waited on", async () => {
+    const root = scratch();
+    await fill(root, NS_A, ['k0']);
+    const mark = join(root, 'pruning', NS_A.slice(0, 16), '2147483000-dead');
+    mkdirSync(dirname(mark), { recursive: true });
+    writeFileSync(mark, '2147483000\n');
+    await load(roomy(root), (m) => {
+      expect(m.candCache('t', () => NS_A).get('k0', 'f')).toBeInstanceOf(Error);
+    });
+    expect(existsSync(mark)).toBe(false);
+  });
+
+  test('a namespace STAMPED between the listing and the deletes is let go, with nothing unlinked in it', async () => {
+    // A process running an older copy of this module writes no mark and claims its lease only
+    // after its own prune: the stamp on the namespace directory is the only thing it does before
+    // serving. The hook stands in for that opener arriving after this prune listed the store.
+    const root = scratch();
+    await fill(root, NS_A, keys(10));
+    await fill(root, NS_B, keys(10));
+    for (const k of keys(10)) {
+      setAge(keyPath(root, NS_A, k), 5 * H); // A's keys are the oldest: without the stamp, they go first
+      setAge(keyPath(root, NS_B, k), 4 * H);
+    }
+    ageDir(root, NS_A);
+    ageDir(root, NS_B);
+    const said = await load({ ...roomy(root), ASMLIFT_CANDCACHE_MAX_MB: capOf(0) }, (m) => {
+      let out = '';
+      const spy = vi.spyOn(process.stderr, 'write').mockImplementation((c: string | Uint8Array) => {
+        out += typeof c === 'string' ? c : Buffer.from(c).toString();
+        return true;
+      });
+      m.setPruneTestHook(() => {
+        const now = new Date();
+        utimesSync(join(root, 'ns', NS_A.slice(0, 16)), now, now);
+      });
+      try {
+        m.candCache('t', () => NS_O).warm();
+        expect(m.cacheStats(), "B's ten keys, and none of A's").toEqual({ prunedKeys: 10, prunedNamespaces: 1 });
+      } finally {
+        m.setPruneTestHook(undefined);
+        spy.mockRestore();
+      }
+      return out;
+    });
+    expect(present(root, NS_A, keys(10)), 'the stamped namespace is whole').toEqual(keys(10));
+    expect(present(root, NS_B, keys(10))).toEqual([]);
+    expect(readdirSync(join(root, 'pruning')), 'its mark was released').toEqual([]);
+    expect(said).toContain('1 other namespace(s) held by a live process');
+  });
+
+  test('a trash/ entry older than any prune is swept even when its pid is alive (a recycled pid)', async () => {
+    const root = scratch();
+    // pid 1 is init/launchd: alive, and not a pruner.
+    const old = join(root, 'trash', `${NS_A.slice(0, 16)}-1-cafe`);
+    const young = join(root, 'trash', `${NS_B.slice(0, 16)}-1-beef`);
+    for (const t of [old, young]) {
+      mkdirSync(join(t, '00'), { recursive: true });
+      writeFileSync(join(t, '00', 'k.fail'), 'x');
+    }
+    setAge(old, 48 * H);
+    await load(roomy(root), (m) => {
+      m.candCache('t', () => NS_O).warm();
+    });
+    expect(existsSync(old), 'abandoned: swept').toBe(false);
+    expect(existsSync(young), 'a live pid and a fresh stamp: a prune may still be deleting it').toBe(true);
+  });
+
+  test('what trash/ still links is part of the cost, so a store holding only that is over its cap', async () => {
+    const root = scratch();
+    const t = join(root, 'trash', `${NS_A.slice(0, 16)}-1-cafe`);
+    mkdirSync(join(t, '00'), { recursive: true });
+    writeFileSync(join(t, '00', 'k.fail'), 'x');
+    const said = await load({ ...roomy(root), ASMLIFT_CANDCACHE_MAX_MB: capOf(0.5) }, (m) => {
+      let out = '';
+      const spy = vi.spyOn(process.stderr, 'write').mockImplementation((c: string | Uint8Array) => {
+        out += typeof c === 'string' ? c : Buffer.from(c).toString();
+        return true;
+      });
+      try {
+        m.candCache('t', () => NS_O).warm();
+      } finally {
+        spy.mockRestore();
+      }
+      return out;
+    });
+    expect(said).toContain('over a 0.001953125 MB cap — pruning');
+  });
+
+  describe('concurrent opens, in real processes', () => {
+    const CHILD = new URL('./candcache-prune-child.ts', import.meta.url).pathname;
+    const run = (root: string, cap: string, args: object): Promise<string> =>
+      new Promise((resolve, reject) => {
+        const child = spawn(process.execPath, [...TSX_ONLY, CHILD, JSON.stringify(args)], {
+          env: {
+            ...process.env,
+            ASMLIFT_CANDCACHE: '1',
+            ASMLIFT_CANDCACHE_DIR: root,
+            ASMLIFT_CANDCACHE_MAX_MB: cap,
+            ASMLIFT_CANDCACHE_SAMPLE: '0',
+          },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        let out = '';
+        let err = '';
+        child.stdout.on('data', (d: Buffer) => (out += d.toString()));
+        child.stderr.on('data', (d: Buffer) => (err += d.toString()));
+        child.on('error', reject);
+        child.on('close', (code) => (code === 0 ? resolve(out.trim()) : reject(new Error(`exit ${code}: ${err}`))));
+      });
+    /** Namespace `ns` holding `n` objects whose bytes say which key they are, aged past every window
+     *  and with no lease: the process that wrote it has gone. (This one is still alive, and to a
+     *  child its lease is a live holder.) */
+    const seed = async (root: string, ns: string, n: number): Promise<void> => {
+      await load(roomy(root), (m) => {
+        const c = m.candCache('t', () => ns);
+        for (let k = 0; k < n; k++) {
+          c.put(`k${k}`, 'f', object(`${ns.slice(0, 4)}-${k}`));
+        }
+      });
+      rmSync(join(root, 'ns', ns.slice(0, 16), '.live'), { recursive: true, force: true });
+      age(root, ns);
+      for (let k = 0; k < n; k++) {
+        setAge(keyPath(root, ns, `k${k}`, 'o'), 3 * H);
+      }
+    };
+    const until = async (p: string): Promise<void> => {
+      while (!existsSync(p)) {
+        await new Promise((r) => setTimeout(r, 20));
+      }
+    };
+    const leftovers = (root: string): string[] =>
+      ['pruning', 'trash'].flatMap((d) => (existsSync(join(root, d)) ? readdirSync(join(root, d)) : []));
+
+    test('a pruner opening beside a reader that holds its namespace evicts nothing it serves', async () => {
+      const root = scratch();
+      await seed(root, NS_A, 40);
+      await seed(root, NS_C, 40);
+      const ready = join(root, 'ready');
+      const reader = run(root, '4096', { role: 'reader', ns: NS_A, keys: 40, holdMs: 1500, ready });
+      await until(ready);
+      const pruned = JSON.parse(await run(root, '0', { role: 'pruner', ns: NS_O })) as Record<string, number>;
+      const read = JSON.parse(await reader) as { hits: number; misses: number; bad: string[] };
+      expect(read.bad).toEqual([]);
+      expect(read.misses, 'every key the reader asked for was served').toBe(0);
+      expect(pruned.prunedKeys, "the idle namespace's keys, and only those").toBe(40);
+      expect(entriesIn(root, NS_A).length).toBe(40);
+      expect(entriesIn(root, NS_C).length).toBe(0);
+      expect(leftovers(root)).toEqual([]);
+    });
+
+    test('readers and pruners started together: every answer served is the right bytes, to the end', async () => {
+      // No ordering at all: a pruner may get its mark down before a reader's lease, or after.
+      // Either way a reader may MISS (a cold store) and must never be served a path that a
+      // pruner then deletes, or the wrong bytes.
+      const root = scratch();
+      for (let round = 0; round < 3; round++) {
+        await seed(root, NS_A, 60);
+        await seed(root, NS_B, 60);
+        const results = await Promise.all([
+          run(root, '4096', { role: 'reader', ns: NS_A, keys: 60, holdMs: 800 }),
+          run(root, '0', { role: 'pruner', ns: NS_O }),
+          run(root, '4096', { role: 'reader', ns: NS_B, keys: 60, holdMs: 800 }),
+          run(root, '0', { role: 'pruner', ns: NS_C }),
+          run(root, '4096', { role: 'reader', ns: NS_A, keys: 60, holdMs: 800 }),
+        ]);
+        for (const r of [results[0], results[2], results[4]]) {
+          const read = JSON.parse(r) as { hits: number; misses: number; bad: string[] };
+          expect(read.bad, `round ${round}`).toEqual([]);
+        }
+        expect(leftovers(root), `round ${round}: no mark and no trash outlives its pruner`).toEqual([]);
+      }
+    });
   });
 });
 

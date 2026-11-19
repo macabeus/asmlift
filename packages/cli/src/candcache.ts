@@ -47,6 +47,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  rmdirSync,
   statSync,
   utimesSync,
   writeFileSync,
@@ -283,20 +284,29 @@ function report(line: string, counter: 'mismatch' | 'objectCorrupt' = 'mismatch'
 // `pnpm bench run` writes, 72% — and on APFS a 200-byte `.fail` costs a whole allocation block. Measured on one full-bench store: `objects/` 7.57 MB
 // against `du -sm` 156 MB — a cap counting only the first sees 4.9% of the cost and fires after
 // roughly 540 bench runs. So the cost is the distinct object bytes PLUS one block per `ns/` entry.
+//
+// THE DEFAULT IS 20 GB, BECAUSE ONE TREE'S FULL BENCH NO LONGER FITS IN 4. Measured on a shared
+// store after a parallel run's benches (2026-11-19, this module's own accounting): the real tier's
+// agbcc namespace alone is 124k distinct objects, 3,884 MB, plus 408k entries, 1,595 MB — 5.5 GB —
+// and the whole store, every synthetic namespace with it, 6.5 GB. Under a 4 GB cap that store is
+// over the cap on every open, so every open prunes, and the real tier ran cold (5,900-7,450 s
+// against 2,670-3,258 s warm) on 5 of the 8 full benches an audit of that run tabulated. 20 GB holds three such trees (a base and two heads beside
+// it); past that the prune trims the least recently used entries, not whole namespaces.
 const BLOCK_BYTES = 4096;
+const DEFAULT_CAP_MB = 20480;
 const RAW_CAP = process.env.ASMLIFT_CANDCACHE_MAX_MB;
 const CAP_MB = ((): number => {
   if (RAW_CAP === undefined || RAW_CAP.trim() === '') {
-    return 4096;
+    return DEFAULT_CAP_MB;
   }
   const n = Number(RAW_CAP);
   if (!Number.isFinite(n) || n < 0) {
     // NaN silently disabled BOTH the prune and its own over-cap warning: the store then grew
     // without bound with no output at all.
     sayOnUse(
-      `ignoring ASMLIFT_CANDCACHE_MAX_MB=${JSON.stringify(RAW_CAP)} — want a non-negative number of MB; using 4096`,
+      `ignoring ASMLIFT_CANDCACHE_MAX_MB=${JSON.stringify(RAW_CAP)} — want a non-negative number of MB; using ${DEFAULT_CAP_MB}`,
     );
-    return 4096;
+    return DEFAULT_CAP_MB;
   }
   return n;
 })();
@@ -1022,6 +1032,8 @@ export function toolchainFileChain(cmd: string): string[] {
 //   ns/<ns16>/<ab>/<key>.o                      a HARDLINK to the object above
 //   ns/<ns16>/<ab>/<key>.fail                   a negative entry (`rejectionBody`)
 //   ns/<ns16>/.live/<pid>-<rand>                a LEASE: this namespace has a live reader
+//   pruning/<ns16>/<pid>-<rand>                 a MARK: a pruner is deleting in that namespace
+//   trash/<ns16>-<pid>-<rand>                   a namespace a prune emptied, moved away to delete
 //
 // Two levels because the redundancy is 4.51x on LBG and 2.53x on the bench: the same object is
 // reached by many keys. Hardlinks make the second level free, and let a prune that deletes one
@@ -1186,7 +1198,9 @@ function claimNamespace(nsDir: string): void {
   namespaceIsLive(nsDir); // sweeps dead leases; the answer is not the point here
   const p = join(live, LEASE);
   writeFileSync(p, `${process.pid}\n`);
-  leases.push(p);
+  if (!leases.includes(p)) {
+    leases.push(p);
+  }
 }
 
 const heldByUs = (name: string): boolean => leases.some((l) => basename(l) === name);
@@ -1274,62 +1288,238 @@ function storeCost(): { bytes: number; entries: number } {
   } catch {
     /* no objects yet */
   }
-  try {
-    for (const ns of readdirSync(join(ROOT, 'ns'), { withFileTypes: true })) {
-      if (!ns.isDirectory()) {
-        continue;
-      }
-      for (const ab of readdirSync(join(ROOT, 'ns', ns.name), { withFileTypes: true })) {
-        if (!ab.isDirectory() || ab.name.startsWith('.')) {
+  // `trash/` too: a namespace moved there still holds hardlinks, and while it does its objects
+  // are not reapable, so a store with an abandoned one in it costs what it would have in `ns/`.
+  for (const top of ['ns', 'trash']) {
+    try {
+      for (const ns of readdirSync(join(ROOT, top), { withFileTypes: true })) {
+        if (!ns.isDirectory()) {
           continue;
         }
-        entries += readdirSync(join(ROOT, 'ns', ns.name, ab.name)).length;
+        for (const ab of readdirSync(join(ROOT, top, ns.name), { withFileTypes: true })) {
+          if (!ab.isDirectory() || ab.name.startsWith('.')) {
+            continue;
+          }
+          entries += readdirSync(join(ROOT, top, ns.name, ab.name)).length;
+        }
       }
+    } catch {
+      /* no namespaces yet */
     }
-  } catch {
-    /* no namespaces yet */
   }
   return { bytes: bytes + entries * BLOCK_BYTES, entries };
 }
 
-/** Every key file in a namespace, oldest first. */
-function keysOf(nsDir: string): { path: string; at: number }[] {
-  const out: { path: string; at: number }[] = [];
-  for (const ab of readdirSync(nsDir, { withFileTypes: true })) {
-    if (!ab.isDirectory() || ab.name.startsWith('.')) {
+// ---------------------------------------------------------------------------------------------
+// PRUNE MARKS: the other half of the lease. A lease says "a reader is here"; a mark under
+// `pruning/<ns16>/` says "a pruner is deleting here". The marks live OUTSIDE the namespace, so that
+// writing one does not touch the namespace directory's mtime — the grace fence reads that as "a
+// process resolved this recently" — and so that one outlives a prune moving the directory away. The two are written in opposite orders,
+// and that order is the whole argument:
+//
+//   pruner: write its MARK, THEN read the leases — and delete only if it saw none
+//   reader: write its LEASE, THEN read the marks — and serve only once it sees none live
+//
+// Whichever of the two writes lands second, its writer's read sees the other's file. So a pruner
+// never deletes in a namespace a reader has started serving from, and a reader never serves from
+// a namespace a pruner is deleting in: it WAITS, and the pruner, which re-reads the leases of the
+// namespaces it holds every PRUNE_RECHECK_MS, lets go of that one as soon as the lease appears.
+// A pruner never waits for anything, so the two cannot deadlock.
+//
+// A mark names its pid, and a mark whose pid is gone is swept by whoever reads it — that is the
+// test that has to work after a `kill -9` mid-prune. A mark older than STALE_MARK_MS is swept too:
+// a pid can be recycled, and no prune holds a mark for longer than its wall-clock budget (every
+// delete is behind `outOfBudget`, so even a pruner resumed from a suspend stops at its next one).
+const marksOf = (nsDir: string): string => join(ROOT, 'pruning', basename(nsDir));
+const MARK = `${process.pid}-${randomBytes(4).toString('hex')}`;
+const PRUNE_RECHECK_MS = 25;
+/** Sleep this thread without spinning: `namespace()` is synchronous all the way up. */
+const sleepSync = (ms: number): void => {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+};
+
+/** A mark (or a `trash/` entry) older than this is abandoned whatever its pid says: a pid can be
+ *  recycled, and no prune holds either for longer than its wall-clock budget. */
+const staleMarkBefore = (): number => Date.now() - Math.max(24 * 60 * 60 * 1000, 2 * PRUNE_BUDGET_MS);
+
+/** Is a pruner OTHER than this module copy deleting in this namespace? Sweeps dead marks. */
+function prunerHolds(nsDir: string): boolean {
+  const dir = marksOf(nsDir);
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return false;
+  }
+  const staleBefore = staleMarkBefore();
+  let held = false;
+  for (const n of names) {
+    if (n === MARK) {
+      continue; // our own prune is synchronous and over by the time this module reads a namespace
+    }
+    const st = statSync(join(dir, n), { throwIfNoEntry: false });
+    if (st === undefined) {
       continue;
     }
-    for (const f of readdirSync(join(nsDir, ab.name))) {
-      const p = join(nsDir, ab.name, f);
-      const st = statSync(p, { throwIfNoEntry: false });
-      if (st) {
-        out.push({ path: p, at: st.mtimeMs });
-      }
+    const pid = Number(n.split('-')[0]);
+    // Our own pid from a WORKER THREAD is the main thread's prune, which may be running right
+    // now; from the main thread it is a module copy that is gone (`vi.resetModules()`).
+    const alive = pid === process.pid ? !isMainThread : pidAlive(pid);
+    if (alive && st.mtimeMs >= staleBefore) {
+      held = true;
+      continue;
+    }
+    try {
+      rmSync(join(dir, n), { force: true });
+    } catch {
+      /* someone else swept it first */
     }
   }
-  return out.sort((a, b) => a.at - b.at);
+  return held;
 }
 
-// Run ONCE per process, at the first namespace resolution and BEFORE this process claims its
-// lease, and NEVER while candidates are in flight. The unit is a NAMESPACE — one namespace is
-// exactly one toolchain configuration, and a namespace nobody holds is dead weight in full. When
-// the only namespace left is the one this process is about to use, the cap falls back to evicting
-// that namespace's OLDEST-WRITTEN KEYS, which is the only way it can ever fire on a
-// single-toolchain machine: the steady state of this repo is ONE agbcc namespace used by every
-// run, growing by ~640 keys a run forever.
+/** How long a reader waits for a pruner before giving the store up for the process. A pruner lets
+ *  go of a namespace within PRUNE_RECHECK_MS of a lease appearing in it, so the bound is never
+ *  reached by a pruner that is running; past it the store is REFUSED (a cold store), never read. */
+const PRUNER_WAIT_MS = PRUNE_BUDGET_MS + 60 * 1000;
+
+/** The reader's half of the protocol. Hold a lease, then serve only once no live pruner has a mark
+ *  here AND the lease is still where it was written — a pruner that emptied this namespace may
+ *  have moved the directory away, lease and all, between the two reads. */
+function enterNamespace(nsDir: string): void {
+  const deadline = Date.now() + PRUNER_WAIT_MS;
+  for (;;) {
+    claimNamespace(nsDir);
+    if (!prunerHolds(nsDir) && existsSync(join(nsDir, '.live', LEASE))) {
+      return;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`a pruner has held ${nsDir} for over ${PRUNER_WAIT_MS / 1000}s`);
+    }
+    sleepSync(PRUNE_RECHECK_MS);
+  }
+}
+
+/** The pruner's half: write the mark, then read the leases. False — and no mark left behind —
+ *  when a reader is already here. `ignoreOwn` is for the namespace this process is about to use,
+ *  whose lease it already holds. */
+function holdForPrune(nsDir: string, ignoreOwn: boolean): boolean {
+  const dir = marksOf(nsDir);
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, MARK), `${process.pid}\n`);
+  } catch {
+    return false;
+  }
+  if (namespaceIsLive(nsDir, ignoreOwn)) {
+    releasePrune(nsDir);
+    return false;
+  }
+  return true;
+}
+
+function releasePrune(nsDir: string): void {
+  try {
+    rmSync(join(marksOf(nsDir), MARK), { force: true });
+    rmdirSync(marksOf(nsDir)); // only if no other pruner's mark is in it: ENOTEMPTY otherwise
+  } catch {
+    /* another pruner's mark is still there, or the directory is already gone */
+  }
+}
+
+/** Every key file in the namespaces given, with its mtime — which a SERVE refreshes (SERVE_TOUCH_MS),
+ *  so it is the last time a run used the entry, not the time one first wrote it. */
+function entriesOf(nsDirs: readonly string[]): { ns: number; rel: string; at: number }[] {
+  const out: { ns: number; rel: string; at: number }[] = [];
+  nsDirs.forEach((nsDir, ns) => {
+    let abs: string[];
+    try {
+      abs = readdirSync(nsDir, { withFileTypes: true })
+        .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
+        .map((d) => d.name);
+    } catch {
+      return;
+    }
+    for (const ab of abs) {
+      let files: string[];
+      try {
+        files = readdirSync(join(nsDir, ab));
+      } catch {
+        continue;
+      }
+      for (const f of files) {
+        const st = statSync(join(nsDir, ab, f), { throwIfNoEntry: false });
+        if (st?.isFile()) {
+          out.push({ ns, rel: join(ab, f), at: st.mtimeMs });
+        }
+      }
+    }
+  });
+  return out;
+}
+
+/** A namespace a pruner moved to `trash/` and did not live to delete: its pid is gone, or the
+ *  entry is older than any prune runs (the pruner stamps it when it moves it — a rename keeps the
+ *  namespace's own, old, mtime), which is what catches a pid that was recycled. */
+function sweepTrash(): void {
+  const trash = join(ROOT, 'trash');
+  let names: string[];
+  try {
+    names = readdirSync(trash);
+  } catch {
+    return;
+  }
+  const staleBefore = staleMarkBefore();
+  for (const n of names) {
+    const pid = Number(n.split('-')[1]);
+    const at = statSync(join(trash, n), { throwIfNoEntry: false })?.mtimeMs ?? 0;
+    if ((pid === process.pid ? isMainThread : !pidAlive(pid)) || at < staleBefore) {
+      rmSync(join(trash, n), { recursive: true, force: true });
+    }
+  }
+}
+
+// Run ONCE per process, at the first namespace resolution — AFTER this process claims its lease,
+// so a sibling opening the same namespace sees it — and NEVER while candidates are in flight.
 //
-// LEASES are the liveness test there, and the ONLY one. A wall-clock "the namespace has not been
-// resolved for an hour" test cannot work on the namespace this process is about to use, because
-// resolving it is what just touched it — asked that way the branch is dead by construction (it
-// evicted 0 of 300 keys against a 0.5 MB cap while printing that everything left was younger than
-// the window), and a cap that provably cannot fire is the silent half of a loud-failure rule. What
-// makes eviction safe is not age: it is that no OTHER process holds this namespace, that `get` is
-// miss-on-race, and that `reapUnlinked` leaves objects younger than its own grace window alone.
+// THE UNIT IS AN ENTRY, AND THE ORDER IS LAST USE, ACROSS EVERY NAMESPACE. The unit used to be a
+// whole namespace, oldest-resolved first, and on a store shared by parallel worktrees that is the
+// wrong unit twice over. Over the cap, ANY open — a bench shard, a one-off five-compile probe —
+// deleted every idle namespace until the store was under 80% of the cap, so the real tier's one
+// namespace (124k objects and 408k entries, ~5.5 GB by this module's own accounting, measured on a
+// parallel run's store) went whole the first time anyone else opened the store after it went idle,
+// and the next bench on the same tree ran cold: 5,900-7,450 s against 2,670-3,258 s warm, on trees
+// whose output did not change. And when the opener's own namespace was what was left, its keys went
+// OLDEST-WRITTEN first — which on a store that is hit and never rewritten are exactly the keys
+// every run still asks for. A serve now refreshes the entry it serves, so an entry's mtime is the
+// last time a run USED it; the prune deletes the least recently used entries of every namespace no
+// one holds, and only as many as it takes to reach 80% of the cap. A namespace a recent run used
+// keeps what that run used; a namespace left empty is removed.
+//
+// What makes eviction SAFE is not age, it is the protocol above: a namespace with a live lease is
+// never touched, a namespace is deleted in only while this process holds its mark, and a reader
+// waits for the mark to go. `get` is miss-on-race, and `reapUnlinked` leaves objects younger than
+// its own grace window alone. The PRUNE_GRACE_MS window on OTHER namespaces stays as a second
+// fence — one resolved within it is not touched at all. Against a process running an OLDER copy
+// of this module on the same store, which writes no mark and claims its lease only after its own
+// prune, neither of those holds: the window is read once, at the listing, and that process may
+// open the namespace a moment later. What holds there is that every copy stamps the namespace
+// directory before it serves anything, and this prune re-reads that stamp immediately before
+// every unlink (`moved`).
+//
 // A compile worker never prunes: it runs beside sibling workers serving compiles from the store,
 // and the process that started them is where a prune belongs. A worker THREAD is told by
 // `isMainThread`; a worker PROCESS (the benchmark's row compile pool) is a main thread of its own,
 // so it says so with `neverPrune()` before its first compile.
 let pruned = !isMainThread;
+
+/** A TEST SEAM, and nothing else: run between the prune's marks going down and its first unlink —
+ *  the window an opener running an older copy of this module stamps a namespace in — so a test can
+ *  put a stamp there deterministically rather than by timing. */
+let afterMarks: (() => void) | undefined;
+export function setPruneTestHook(hook: (() => void) | undefined): void {
+  afterMarks = hook;
+}
 
 /** This process never prunes the store: it is a compile worker started by a process that does. */
 export function neverPrune(): void {
@@ -1340,6 +1530,7 @@ function pruneOnce(keepNs: string): void {
     return;
   }
   pruned = true;
+  const held: string[] = [];
   try {
     const startedAt = Date.now();
     let overBudget = false;
@@ -1347,6 +1538,7 @@ function pruneOnce(keepNs: string): void {
       overBudget ||= Date.now() - startedAt >= PRUNE_BUDGET_MS;
       return overBudget;
     };
+    sweepTrash();
     let cost = storeCost().bytes;
     if (cost <= CAP_BYTES) {
       return;
@@ -1358,61 +1550,154 @@ function pruneOnce(keepNs: string): void {
       `store costs ${(cost / 1048576).toFixed(0)} MB over a ${CAP_MB} MB cap — pruning ` +
         `(${PRUNE_BUDGET_MS / 1000}s budget)`,
     );
+    const target = CAP_BYTES * 0.8;
     const nsRoot = join(ROOT, 'ns');
     const cutoff = Date.now() - PRUNE_GRACE_MS;
     let heldBack = 0;
     let tooYoung = 0;
-    const namespaces = readdirSync(nsRoot, { withFileTypes: true })
-      .filter((d) => d.isDirectory() && d.name !== keepNs)
-      .map((d) => ({ name: d.name, at: statSync(join(nsRoot, d.name)).mtimeMs }))
-      .filter((d) => {
-        // A namespace resolved within the window may belong to a shard that has not claimed its
-        // lease yet — the only gap the lease cannot cover.
-        if (d.at >= cutoff) {
-          tooYoung += 1;
-          return false;
-        }
-        if (namespaceIsLive(join(nsRoot, d.name))) {
-          heldBack += 1;
-          return false;
-        }
-        return true;
-      })
-      .sort((a, b) => a.at - b.at);
-    for (const ns of namespaces) {
-      if (cost <= CAP_BYTES * 0.8 || outOfBudget()) {
-        break;
+    let keepHeld = false;
+    // Which namespaces may be deleted in. The opener's own is one of them unless ANOTHER process
+    // holds it: its lease is this process's, and nothing here has been served yet.
+    const candidates: string[] = [];
+    // Each candidate's directory mtime as listed. Every opener — this code and every older copy
+    // of it — stamps the directory (`utimesSync` in `namespace()`) BEFORE it claims a lease or
+    // serves anything, so a stamp that has moved since the listing is a process opening that
+    // namespace now. See `moved` below.
+    const stamps: number[] = [];
+    for (const d of readdirSync(nsRoot, { withFileTypes: true })) {
+      if (!d.isDirectory()) {
+        continue;
       }
-      // Re-asked immediately before the delete, not only in the filter above: the filter runs over
-      // every namespace at once and each delete below re-walks the whole store, so a namespace
-      // claimed in between would otherwise be removed under a live reader.
-      if (namespaceIsLive(join(nsRoot, ns.name))) {
+      const dir = join(nsRoot, d.name);
+      const at = statSync(dir, { throwIfNoEntry: false })?.mtimeMs ?? 0;
+      if (d.name === keepNs) {
+        if (namespaceIsLive(dir, true)) {
+          keepHeld = true;
+        } else {
+          candidates.push(dir);
+          stamps.push(at);
+        }
+        continue;
+      }
+      // A namespace resolved within the window may belong to a process that has not claimed its
+      // lease yet: a second fence beside the marks and the re-stamp test below.
+      if (at >= cutoff) {
+        tooYoung += 1;
+        continue;
+      }
+      if (namespaceIsLive(dir)) {
         heldBack += 1;
         continue;
       }
-      rmSync(join(nsRoot, ns.name), { recursive: true, force: true });
-      bump('prunedNamespaces');
-      cost = reapUnlinked() + storeCost().entries * BLOCK_BYTES;
+      candidates.push(dir);
+      stamps.push(at);
     }
-    const keepDir = join(nsRoot, keepNs);
-    let keepHeld = false;
-    if (cost > CAP_BYTES * 0.8 && existsSync(keepDir)) {
-      if (namespaceIsLive(keepDir, true)) {
+    // Read before any mark is written, so no reader waits through the walk. An entry a reader
+    // touches after this read is still deleted in the order read here — that costs a hit, never
+    // an answer, and only if the reader has gone again by the time the mark is written.
+    const entries = entriesOf(candidates).sort((a, b) => a.at - b.at);
+    const usable = candidates.map((dir) => {
+      const ok = holdForPrune(dir, dir === join(nsRoot, keepNs));
+      if (ok) {
+        held.push(dir);
+      } else if (dir === join(nsRoot, keepNs)) {
         keepHeld = true;
       } else {
-        const keys = keysOf(keepDir);
-        let i = 0;
-        while (cost > CAP_BYTES * 0.8 && i < keys.length && !outOfBudget()) {
-          rmSync(keys[i].path, { force: true });
-          bump('prunedKeys');
-          i += 1;
-          if (i % 512 === 0) {
-            cost = reapUnlinked() + storeCost().entries * BLOCK_BYTES;
-          }
-        }
-        cost = reapUnlinked() + storeCost().entries * BLOCK_BYTES;
+        heldBack += 1;
       }
+      return ok;
+    });
+    afterMarks?.();
+    const left = candidates.map(() => 0);
+    for (const e of entries) {
+      left[e.ns] += 1;
     }
+    let lastCheck = Date.now();
+    const letGo = (n: number): void => {
+      usable[n] = false;
+      releasePrune(candidates[n]);
+      if (candidates[n] === join(nsRoot, keepNs)) {
+        keepHeld = true;
+      } else {
+        heldBack += 1;
+      }
+    };
+    /** Let go of every namespace a reader has arrived in since the mark went down. */
+    const recheck = (): void => {
+      lastCheck = Date.now();
+      candidates.forEach((dir, n) => {
+        if (usable[n] && namespaceIsLive(dir, dir === join(nsRoot, keepNs))) {
+          letGo(n);
+        }
+      });
+    };
+    /** Has a process stamped this namespace since the listing? Asked IMMEDIATELY before every
+     *  unlink, not once at the listing and not on the recheck's clock, because a process running
+     *  an older copy of this module writes no lease until after its own prune and never reads a
+     *  mark: the stamp is the only thing it does before serving. Asked here, the stamp lands
+     *  either before the question — and this prune lets go before deleting anything more — or
+     *  after it, when the one unlink in flight precedes that process's whole prune, claim and
+     *  lookup, so what it meets is a miss, never a served path that then vanishes. Measured
+     *  without it: 374 paths served to older-code readers and then unlinked, over 150 readers. */
+    const moved = (n: number): boolean =>
+      (statSync(candidates[n], { throwIfNoEntry: false })?.mtimeMs ?? -1) !== stamps[n];
+    const reapAfter = Date.now() - REAP_GRACE_MS;
+    let i = 0;
+    while (cost > target && i < entries.length && !outOfBudget()) {
+      // The estimate: one block per entry, and the object's bytes once its last key goes. It is
+      // corrected against a fresh walk whenever it says the target is reached.
+      for (; i < entries.length && cost > target && !outOfBudget(); i += 1) {
+        if (Date.now() - lastCheck >= PRUNE_RECHECK_MS) {
+          recheck();
+        }
+        const e = entries[i];
+        if (!usable[e.ns]) {
+          continue;
+        }
+        if (moved(e.ns)) {
+          letGo(e.ns);
+          continue;
+        }
+        const p = join(candidates[e.ns], e.rel);
+        const st = statSync(p, { throwIfNoEntry: false });
+        if (st === undefined) {
+          left[e.ns] -= 1;
+          continue;
+        }
+        rmSync(p, { force: true });
+        bump('prunedKeys');
+        left[e.ns] -= 1;
+        cost -= BLOCK_BYTES;
+        // An `.o` is a hardlink into `objects/`: with `nlink === 2` this was the last key on it,
+        // and its bytes go at the reap below unless it is younger than the reap window.
+        if (e.rel.endsWith('.o') && st.nlink === 2 && st.mtimeMs < reapAfter) {
+          cost -= st.size;
+        }
+      }
+      cost = reapUnlinked() + storeCost().entries * BLOCK_BYTES;
+    }
+    // A namespace this prune emptied goes too — but MOVED away under the mark first, and only with
+    // no lease in it, so a reader that claimed it in between finds its lease gone and claims again
+    // (`enterNamespace`) instead of serving from a directory about to be deleted.
+    candidates.forEach((dir, n) => {
+      if (!usable[n] || left[n] > 0 || dir === join(nsRoot, keepNs) || namespaceIsLive(dir) || moved(n)) {
+        return;
+      }
+      const trash = join(ROOT, 'trash', `${basename(dir)}-${MARK}`);
+      try {
+        mkdirSync(dirname(trash), { recursive: true });
+        renameSync(dir, trash);
+        const now = new Date();
+        utimesSync(trash, now, now); // the rename kept the namespace's old mtime; `sweepTrash` ages by this
+      } catch {
+        /* not moved, or moved and not stamped: the rm below takes it either way, and a sweep ages it out */
+      }
+      if (!existsSync(trash)) {
+        return;
+      }
+      rmSync(trash, { recursive: true, force: true });
+      bump('prunedNamespaces');
+    });
     if (cost > CAP_BYTES) {
       // Say which reason actually applied. A message that asserts a reason it did not measure is
       // a report nobody can act on.
@@ -1431,6 +1716,10 @@ function pruneOnce(keepNs: string): void {
     }
   } catch {
     /* an unreadable store is a cold store, never an error */
+  } finally {
+    for (const dir of held) {
+      releasePrune(dir);
+    }
   }
 }
 
@@ -1484,6 +1773,30 @@ export interface CandCache {
    *  84%, on one full `pnpm bench run`. */
   verifyFail(key: string, symbol: string, rejection: CompilerRejection): void;
 }
+
+/** A stored answer as `lookup` finds it, with the entry's mtime — the last time a run used it. */
+type Found = { obj: string; at: number } | { fail: string; path: string; at: number };
+
+/** How old an entry's mtime may be before a SERVE refreshes it. The prune evicts least recently
+ *  USED first, across namespaces, and an entry's mtime is the only record of use it has: a store
+ *  that is hit and never rewritten otherwise keeps the time the entry was first written, and its
+ *  hottest keys look like its coldest. Refreshed at most once an hour per entry — one `utimes` per
+ *  served entry per run at most, and far less than that within one — and an hour is also the
+ *  grace window below which a namespace is not touched at all, so finer order would buy nothing.
+ *  An `.o` is a hardlink, so this also refreshes its `objects/` inode, which only keeps it out of
+ *  `reapUnlinked` for longer. Best-effort: a store this process cannot write still serves. */
+const SERVE_TOUCH_MS = 60 * 60 * 1000;
+const refresh = (path: string, at: number): void => {
+  const now = Date.now();
+  if (now - at < SERVE_TOUCH_MS) {
+    return;
+  }
+  try {
+    utimesSync(path, now / 1000, now / 1000);
+  } catch {
+    /* an entry pruned or unwritable under us keeps its old age; serving is unaffected */
+  }
+};
 
 /** The inert cache: every call site tests `mode` first, so this is what a REFUSAL and an opt-out
  *  both collapse to. */
@@ -1557,8 +1870,9 @@ export function candCache(label: string, stamp: () => string): CandCache {
       mkdirSync(nsDir, { recursive: true });
       mkdirSync(OBJECTS, { recursive: true });
       utimesSync(nsDir, new Date(), new Date());
-      pruneOnce(resolved);
       claimNamespace(nsDir);
+      pruneOnce(resolved);
+      enterNamespace(nsDir);
     } catch (e) {
       refused = true;
       bump('refused');
@@ -1591,18 +1905,20 @@ export function candCache(label: string, stamp: () => string): CandCache {
    *  through this one reader, so verify mode audits the answer a serve would actually get rather
    *  than the store's raw contents; asked separately, the precedence between an `.o` and a `.fail`
    *  for one key is outside the audit's reach by construction. */
-  const lookup = (n: string, key: string, symbol: string): { obj: string } | { fail: string } | undefined => {
+  const lookup = (n: string, key: string, symbol: string): Found | undefined => {
     try {
       const o = pathFor(n, key, symbol, 'o');
       const st = statSync(o, { throwIfNoEntry: false });
       if (st !== undefined && st.isFile() && st.size > 0) {
-        return { obj: o };
+        return { obj: o, at: st.mtimeMs };
       }
     } catch {
       /* a store being rewritten under us is a MISS: recompiling is always correct */
     }
     try {
-      return { fail: readFileSync(pathFor(n, key, symbol, 'fail'), 'utf8') };
+      const f = pathFor(n, key, symbol, 'fail');
+      const at = statSync(f).mtimeMs;
+      return { fail: readFileSync(f, 'utf8'), path: f, at };
     } catch {
       /* no negative entry, or it vanished — either way, a miss */
     }
@@ -1743,7 +2059,8 @@ export function candCache(label: string, stamp: () => string): CandCache {
   /** Hand a found entry back the way this store answers: an object path, or the stored rejection
    *  as an Error. The counter is bumped HERE, so the two paths that serve an entry (`get`, and
    *  `abandonAudit` taking a withheld answer back) cannot come to count a serve differently. */
-  const serve = (found: { obj: string } | { fail: string }): string | CompilerRejection => {
+  const serve = (found: Found): string | CompilerRejection => {
+    refresh('obj' in found ? found.obj : found.path, found.at);
     if ('obj' in found) {
       bump('hit');
       return found.obj;

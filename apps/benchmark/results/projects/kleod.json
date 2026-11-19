@@ -187,7 +187,7 @@
         },
         "fanNotCompiled": 50968,
         "fanNotCompiledDigest": "af14fc26dfb70953",
-        "rankSeconds": 274.2,
+        "rankSeconds": 275.7,
         "source": "void AthleticChallengeScrollUpdate(void) {\n    s32 v0;\n    u32 v7;\n    s32 v11;\n    s32 v12;\n    s32 v13;\n    s32 v14;\n    s32 v15;\n    s32 v20;\n    s32 v21;\n    s32 v22;\n    s32 v23;\n    s32 v1;\n    s32 v5;\n    s32 v6;\n    s32 v4;\n    s32 v3;\n    s32 v2;\n    s32 v8;\n    s32 v10;\n    s32 v9;\n    s32 v16;\n    s32 v17;\n    s32 v18;\n    s32 v19;\n    if ((0x30 & gAthleticChallengeScrollFlags) == 0) {\n        v0 = ((u16 *)&gBgInfo)[32];\n        if (*(s16 *)&gEntityInfo > (s16)(120 + v0)) {\n            if (*(u16 *)&gEntityInfo - 120 - ((u16 *)&gBgInfo)[32] > 5) {\n                v1 = 2;\n            } else {\n                v1 = 0 & -65536 | 1;\n            }\n            v2 = 16;\n            v3 = gHeldKeys;\n            v4 = 32;\n            if ((v4 & v3) != 0) {\n                v2 = 0;\n                v1 = v1 & -65536;\n            }\n        } else {\n            if (*(s16 *)&gEntityInfo < (s16)(120 + v0)) {\n                if (((u16 *)&gBgInfo)[32] - (*(u16 *)&gEntityInfo - 120) > 5) {\n                    v5 = 0 & -65536;\n                    v6 = 65534;\n                } else {\n                    v5 = 0;\n                    v6 = 65535;\n                }\n                v2 = 32;\n                v1 = v5 | v6;\n                v3 = gHeldKeys;\n                v4 = 16;\n                if ((v4 & v3) != 0) {\n                    v2 = 0;\n                    v1 = v1 & -65536;\n                }\n            } else {\n                v2 = 0;\n                v1 = 0;\n            }\n        }\n    } else {\n        v2 = 0;\n        v1 = 0;\n    }\n    if ((0xc0 & gAthleticChallengeScrollFlags) == 0) {\n        v7 = ((u16 *)&gEntityInfo)[3];\n        if (v7 > 160) {\n            v8 = 68;\n        } else {\n            v8 = 0;\n        }\n        if ((u16)(v8 + v7) > 99) {\n            if ((u16)(v8 + v7 - 100) > 30) {\n                v9 = v2 | 0x80;\n                v1 = v1 & 0xffff;\n                v10 = 0xc0 << 10;\n            } else {\n                v9 = v2 | 0x80;\n                v1 = v1 & 0xffff;\n                v10 = 65536;\n            }\n            v2 = v9;\n            v1 = v1 | v10;\n        } else {\n            if ((u16)(v8 + v7) <= 70) {\n                if ((u16)(v8 + 70 - v7) > 25) {\n                    v9 = (u8)(v2 | 0x40);\n                    v1 = v1 & 0xffff;\n                    v10 = -196608;\n                } else {\n                    v9 = (u8)(v2 | 0x40);\n                    v10 = -65536;\n                }\n                v2 = v9;\n                v1 = v1 | v10;\n            }\n        }\n    }\n    v11 = gAthleticChallengeScrollFlags;\n    v12 = gAthleticChallengeAutoScrollXVelocity;\n    v13 = gAthleticChallengeAutoScrollBaseVelocity.x;\n    v14 = gAthleticChallengeAutoScrollYVelocity;\n    v15 = gAthleticChallengeAutoScrollBaseVelocity.y;\n    gAthleticChallengeAutoScrollXVelocity = v12 + v13 & 0xffff;\n    gAthleticChallengeAutoScrollYVelocity = v14 + v15 & 0xffff;\n    if (gUnk_03005220.unk46 != 0) {\n        v16 = (v2 | v11) & 0x30;\n        v17 = 0;\n    } else {\n        v16 = v2 | v11;\n        v17 = (v1 & -65536 | (u16)(v1 + (v12 + v13 >> 16))) & 0xffff | ((u32)(v1 & -65536 | (u16)(v1 + (v12 + v13 >> 16))) >> 16) + (v14 + v15 >> 16) << 16;\n    }\n    if (v16 != 0) ScrollBg2LevelData(v16, v17);\n    ((u16 *)&gBgInfo)[18] = (u32)((u16 *)&gBgInfo)[32] >> 1;\n    if ((gUnk_03004C20.globalFrameCounter & 3) == 0 && gEnteredCannonGoal == 0) {\n        if ((u32)((u16 *)&gBgInfo)[33] >= gPreviousBg2VOfs) {\n            v18 = ((u16 *)&gBgInfo)[19] + (((u16 *)&gBgInfo)[33] - gPreviousBg2VOfs & 1);\n        } else {\n            v18 = ((u16 *)&gBgInfo)[19] - (gPreviousBg2VOfs - ((u16 *)&gBgInfo)[33] & 1);\n        }\n        ((u16 *)&gBgInfo)[19] = v18;\n        if ((0x80 << 8 & ((u16 *)&gBgInfo)[19]) != 0) {\n            v19 = 0;\n            ((u16 *)&gBgInfo)[19] = v19;\n        } else {\n            if ((u16)((u16 *)&gBgInfo)[19] > 80) {\n                v19 = 80;\n                ((u16 *)&gBgInfo)[19] = v19;\n            }\n        }\n    }\n    gPreviousBg2VOfs = ((u16 *)&gBgInfo)[33];\n    v20 = gSineTable[gBg2Alpha + 64];\n    *(u16 *)&gBg2PA = MultiplyQ8(v20, (s16)ReciprocalQ8(*(s16 *)&gBg2XMag));\n    v21 = gSineTable[gBg2Alpha];\n    *(u16 *)&gBg2PB = MultiplyQ8(v21, (s16)ReciprocalQ8(*(s16 *)&gBg2XMag));\n    v22 = ((u16 *)&gSineTable)[gBg2Alpha];\n    *(u16 *)&gBg2PC = MultiplyQ8((s16)-v22, (s16)ReciprocalQ8(*(s16 *)&gBg2YMag));\n    v23 = gSineTable[gBg2Alpha + 64];\n    *(u16 *)&gBg2PD = MultiplyQ8(v23, (s16)ReciprocalQ8(*(s16 *)&gBg2YMag));\n    gBg2X = (((u16 *)&gBgInfo)[32] + 120 << 8) - *(s16 *)&gBg2PA * 120 - *(s16 *)&gBg2PB * 80;\n    gBg2Y = (((u16 *)&gBgInfo)[33] + 80 << 8) - *(s16 *)&gBg2PC * 120 - *(s16 *)&gBg2PD * 80;\n}\n",
         "score": null,
         "maxScore": null,
@@ -362,7 +362,7 @@
             "withheld": 5
           }
         },
-        "rankSeconds": 1.88,
+        "rankSeconds": 1.93,
         "withheldCandidates": [
           {
             "variations": [
@@ -728,7 +728,7 @@
             "candidates": 744
           }
         },
-        "rankSeconds": 15.93,
+        "rankSeconds": 14.92,
         "symbolsUsed": [
           {
             "name": "BossWaitForNextFrame",
@@ -1363,7 +1363,7 @@
             "candidates": 48
           }
         },
-        "rankSeconds": 2.13,
+        "rankSeconds": 2.15,
         "symbolsUsed": [
           {
             "name": "thunk_HeapAlloc",
@@ -1589,7 +1589,7 @@
             "withheld": 51
           }
         },
-        "rankSeconds": 4.37,
+        "rankSeconds": 4.63,
         "withheldCandidates": [
           {
             "variations": [
@@ -2587,7 +2587,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.1,
+        "rankSeconds": 0.11,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "s32 DivideQ8(s16 num1, u32 num2) {\n    return (s16)((num1 << 8) / (s16)num2);\n}\n",
@@ -2786,7 +2786,7 @@
             "candidates": 180
           }
         },
-        "rankSeconds": 7.46,
+        "rankSeconds": 7.21,
         "symbolsUsed": [
           {
             "name": "gBgTilemapBufs",
@@ -2961,7 +2961,7 @@
             "candidates": 8
           }
         },
-        "rankSeconds": 3.23,
+        "rankSeconds": 3.58,
         "symbolsUsed": [
           {
             "name": "gBgTilemapBufs",
@@ -3165,7 +3165,7 @@
             "candidates": 216
           }
         },
-        "rankSeconds": 15.97,
+        "rankSeconds": 17.69,
         "symbolsUsed": [
           {
             "name": "gBg2XMag",
@@ -3369,7 +3369,7 @@
             "candidates": 27
           }
         },
-        "rankSeconds": 2.15,
+        "rankSeconds": 2.12,
         "symbolsUsed": [
           {
             "name": "gEntityInfo",
@@ -3524,7 +3524,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.21,
+        "rankSeconds": 0.16,
         "symbolsUsed": [
           {
             "name": "gHeldKeys",
@@ -3692,7 +3692,7 @@
             "candidates": 10
           }
         },
-        "rankSeconds": 1.97,
+        "rankSeconds": 1.9,
         "symbolsUsed": [
           {
             "name": "gHeldKeys",
@@ -3872,7 +3872,7 @@
             "candidates": 10
           }
         },
-        "rankSeconds": 2.4,
+        "rankSeconds": 2.54,
         "symbolsUsed": [
           {
             "name": "gObjPalRamPtr",
@@ -4083,7 +4083,7 @@
             "candidates": 3
           }
         },
-        "rankSeconds": 0.25,
+        "rankSeconds": 0.17,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "s32 MultiplyQ8(s16 num1, s16 num2) {\n    s32 v0;\n    s32 w0;\n    v0 = num1 * num2;\n    w0 = v0;\n    if (w0 < 0) w0 += 255;\n    v0 = w0 << 8 >> 16;\n    return v0;\n}\n",
@@ -4400,7 +4400,7 @@
             "withheld": 5760
           }
         },
-        "rankSeconds": 1027.1,
+        "rankSeconds": 1024.61,
         "withheldCandidates": [
           {
             "variations": [
@@ -575770,7 +575770,7 @@
             "candidates": 9
           }
         },
-        "rankSeconds": 0.12,
+        "rankSeconds": 0.13,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "s32 ReciprocalQ8(u32 num1) {\n    s32 w0;\n    s16 result;\n    w0 = 0x80 << 9;\n    result = w0 / (s16)num1;\n    return result;\n}\n",
@@ -575926,7 +575926,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.28,
+        "rankSeconds": 0.27,
         "symbolsUsed": [
           {
             "name": "gBgDataPtrs",
@@ -576396,7 +576396,7 @@
             "withheld": 20
           }
         },
-        "rankSeconds": 7.24,
+        "rankSeconds": 7.21,
         "withheldCandidates": [
           {
             "variations": [
@@ -577060,7 +577060,7 @@
             "candidates": 10
           }
         },
-        "rankSeconds": 3.28,
+        "rankSeconds": 2.94,
         "symbolsUsed": [
           {
             "name": "gEntityInfo",
@@ -577279,7 +577279,7 @@
             "candidates": 864
           }
         },
-        "rankSeconds": 30.84,
+        "rankSeconds": 31.27,
         "symbolsUsed": [
           {
             "name": "gEntityInfo",
@@ -577458,7 +577458,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 0.08,
+        "rankSeconds": 0.06,
         "symbolsUsed": [
           {
             "name": "gUnk_03005400",
@@ -577633,7 +577633,7 @@
             "candidates": 16
           }
         },
-        "rankSeconds": 1.82,
+        "rankSeconds": 1.81,
         "symbolsUsed": [
           {
             "name": "gUnk_03004C20",
@@ -577868,7 +577868,7 @@
             "withheld": 896
           }
         },
-        "rankSeconds": 87.5,
+        "rankSeconds": 84.91,
         "withheldCandidates": [
           {
             "variations": [
@@ -594495,7 +594495,7 @@
             "withheld": 16
           }
         },
-        "rankSeconds": 15.1,
+        "rankSeconds": 14.57,
         "withheldCandidates": [
           {
             "variations": [
@@ -595760,7 +595760,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.05,
+        "rankSeconds": 0.04,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "s32 sub_0804B270(u8 *a0) {\n    return a0[0] + (a0[1] << 8) + (a0[2] << 16) + (a0[3] << 24);\n}\n",
@@ -595927,7 +595927,7 @@
             "candidates": 10
           }
         },
-        "rankSeconds": 1.88,
+        "rankSeconds": 1.86,
         "symbolsUsed": [
           {
             "name": "gUnk_030007C8",
@@ -596083,7 +596083,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 0.11,
+        "rankSeconds": 0.26,
         "symbolsUsed": [
           {
             "name": "gUnk_03004D84",
@@ -596266,7 +596266,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 0.81,
+        "rankSeconds": 0.91,
         "symbolsUsed": [
           {
             "name": "gUnk_03004D84",
@@ -596465,7 +596465,7 @@
             "candidates": 8
           }
         },
-        "rankSeconds": 1.92,
+        "rankSeconds": 2.5,
         "symbolsUsed": [
           {
             "name": "gBgInfo",
@@ -596653,7 +596653,7 @@
             "candidates": 4
           }
         },
-        "rankSeconds": 0.17,
+        "rankSeconds": 0.16,
         "symbolsUsed": [
           {
             "name": "gBgInfo",
@@ -596808,7 +596808,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.12,
+        "rankSeconds": 0.17,
         "symbolsUsed": [
           {
             "name": "gUnk_03004D84",
@@ -596990,7 +596990,7 @@
             "candidates": 46
           }
         },
-        "rankSeconds": 2.22,
+        "rankSeconds": 2.13,
         "symbolsUsed": [
           {
             "name": "gEntityInfo",
@@ -597182,7 +597182,7 @@
             "candidates": 32
           }
         },
-        "rankSeconds": 5.62,
+        "rankSeconds": 5.74,
         "symbolsUsed": [
           {
             "name": "gUnk_030034A0",
@@ -597386,7 +597386,7 @@
             "candidates": 128
           }
         },
-        "rankSeconds": 8.04,
+        "rankSeconds": 7.98,
         "symbolsUsed": [
           {
             "name": "gBgInfo",
@@ -597587,7 +597587,7 @@
             "candidates": 240
           }
         },
-        "rankSeconds": 5.38,
+        "rankSeconds": 5.09,
         "symbolsUsed": [
           {
             "name": "gUnk_030052A4",
@@ -597761,7 +597761,7 @@
             "candidates": 5
           }
         },
-        "rankSeconds": 0.12,
+        "rankSeconds": 0.14,
         "symbolsUsed": [
           {
             "name": "gUnk_03004D84",
@@ -597919,7 +597919,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.7,
+        "rankSeconds": 0.3,
         "symbolsUsed": [
           {
             "name": "gUnk_0300081C",
@@ -598124,7 +598124,7 @@
             "withheld": 64
           }
         },
-        "rankSeconds": 7.99,
+        "rankSeconds": 7.67,
         "withheldCandidates": [
           {
             "variations": [
@@ -599533,7 +599533,7 @@
             "candidates": 3
           }
         },
-        "rankSeconds": 0.11,
+        "rankSeconds": 0.13,
         "symbolsUsed": [
           {
             "name": "REG_BLDY",
@@ -599703,7 +599703,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.15,
+        "rankSeconds": 0.09,
         "symbolsUsed": [
           {
             "name": "gTransitioning",
@@ -599958,7 +599958,7 @@
             "withheld": 1152
           }
         },
-        "rankSeconds": 122.18,
+        "rankSeconds": 119.86,
         "withheldCandidates": [
           {
             "variations": [
@@ -657994,7 +657994,7 @@
             "withheld": 5712
           }
         },
-        "rankSeconds": 540.19,
+        "rankSeconds": 554.65,
         "withheldCandidates": [
           {
             "variations": [
@@ -893489,7 +893489,7 @@
             "candidates": 12
           }
         },
-        "rankSeconds": 3.71,
+        "rankSeconds": 3.94,
         "symbolsUsed": [
           {
             "name": "gBgTilemapBufs",
@@ -893684,7 +893684,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 0.23,
+        "rankSeconds": 0.24,
         "withheldCandidates": [
           {
             "variations": [
@@ -893935,7 +893935,7 @@
             "withheld": 1589
           }
         },
-        "rankSeconds": 147.59,
+        "rankSeconds": 149.65,
         "withheldCandidates": [
           {
             "variations": [
@@ -940755,7 +940755,7 @@
             "candidates": 216
           }
         },
-        "rankSeconds": 45.64,
+        "rankSeconds": 43.76,
         "withheldCandidates": [
           {
             "variations": [
