@@ -1200,9 +1200,12 @@ function sectionMask(lines: readonly GasLine[]): {
   // A subsection gas reads as an expression; only a plain number is read here. Any other spelling
   // (`0+1`, `2*1`, a symbol) keys a subsection of its own, so code under it declines as split
   // across sections instead of being read as subsection 0 (measured: `.subsection 0+1` is 1).
+  // The same text can name a different subsection at each use (`.set S, 0` … `.set S, 1`, measured),
+  // so every such occurrence is a subsection of its own.
+  let opaque = 0;
   const subsection = (expr: string) => {
     const e = expr.trim();
-    return e === '' ? '0' : /^(?:\d+|0x[0-9a-f]+)$/i.test(e) ? String(Number(e)) : `?${e}`;
+    return e === '' ? '0' : /^(?:\d+|0x[0-9a-f]+)$/i.test(e) ? String(Number(e)) : `?${e}#${opaque++}`;
   };
   const named = (name: string, sub: string) => `${name.replace(/^"(.*)"$/, '$1')} ${subsection(sub)}`;
   const out = lines.map((line) => {
@@ -1244,6 +1247,15 @@ function sectionMask(lines: readonly GasLine[]): {
         } else {
           [previous, current] = [current, named(`.${kind}`, sw[2])];
         }
+      } else if (directive !== '' && !keepsSection(directive)) {
+        // Any other directive may move code out of the current section or location (`.struct`,
+        // `.offset`, `.sbss`, `.org`, an `.include`d file's own switches): what follows it is in a
+        // section of its own, so code on both sides of it declines as split across sections.
+        if (depth !== 0) {
+          bodySwitch ??= st.text;
+        } else {
+          [previous, current] = [current, `?.${directive}#${opaque++}`];
+        }
       }
       return { debug: isDebug(), section: current };
     });
@@ -1251,6 +1263,28 @@ function sectionMask(lines: readonly GasLine[]): {
   });
   return { lines: out, bodySwitch };
 }
+
+/** The directives known to leave gas's current section and location where they are (besides the
+ *  section switches {@link sectionMask} models, and {@link LINE_DIRECTIVES}): the zero-byte
+ *  bookkeeping decode skips, and the data, alignment and literal-pool directives that emit bytes
+ *  in place. An allowlist: any other directive counts as a switch to a section of its own. */
+const SECTION_SWITCHES = new Set([
+  'text',
+  'data',
+  'bss',
+  'section',
+  'pushsection',
+  'popsection',
+  'previous',
+  'subsection',
+]);
+const keepsSection = (directive: string): boolean =>
+  (ZERO_BYTE_DIRECTIVES.has(directive) && !SECTION_SWITCHES.has(directive)) ||
+  directive.startsWith('cfi_') ||
+  directive.includes('align') || // read, or refused as an alignment hazard, where it sits
+  /^(?:word|4byte|long|2byte|hword|short|byte|ascii|asciz|string|space|skip|quad|8byte|octa|double|float|single|fill|zero|inst(?:\.[nw])?|(?:b|p2)?align[wl]?|pool|ltorg)$/.test(
+    directive,
+  );
 
 /** A GNU-as listing without its debug and stabs sections: every line all of whose statements gas
  *  assembles into a `.debug_*` or `.stab*` section (and every blank or comment line inside one) is
@@ -1957,22 +1991,6 @@ function decode(
           `and this frontend reads every line as written`,
       );
     }
-    // Decode reads the slice as one run of code, so every instruction in it must be assembled into
-    // one section: `.section .text.foo` / `add r4, #2` / `.text` inside a function puts the `add`
-    // in other bytes (measured), and read in place it was a phantom instruction. Instructions only:
-    // a compiler's `.rodata` or `.data` object between two functions sits in the slice too.
-    const sliceSections = new Set<string | null>();
-    for (let i = sliceStart; i < boundaries[boundaryIdx]; i++) {
-      if (allFlat[i].instr) {
-        sliceSections.add(itemSections[i]);
-      }
-    }
-    if (sliceSections.size > 1) {
-      throw new FrontendUnsupportedError(
-        `cannot lift '${name}': its code is assembled into more than one section ` +
-          `(${[...sliceSections].map((s) => s ?? 'unknown').join(', ')}), so it is not one run of code as written`,
-      );
-    }
     const unreadStatement = unreadStatements.find((u) => inSlice(u.at));
     if (unreadStatement) {
       throw new FrontendUnsupportedError(
@@ -1996,6 +2014,22 @@ function decode(
           (liveHazard.why === 'fill'
             ? `its fill bytes are not a pad encoding this frontend models — they are real instructions`
             : `makes item sizes unknowable`),
+      );
+    }
+    // Decode reads the slice as one run of code, so every instruction in it must be assembled into
+    // one section: `.section .text.foo` / `add r4, #2` / `.text` inside a function puts the `add`
+    // in other bytes (measured), and read in place it was a phantom instruction. Instructions only:
+    // a compiler's `.rodata` or `.data` object between two functions sits in the slice too.
+    const sliceSections = new Set<string | null>();
+    for (let i = sliceStart; i < boundaries[boundaryIdx]; i++) {
+      if (allFlat[i].instr) {
+        sliceSections.add(itemSections[i]);
+      }
+    }
+    if (sliceSections.size > 1) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': its code is assembled into more than one section ` +
+          `(${[...sliceSections].map((s) => s ?? 'unknown').join(', ')}), so it is not one run of code as written`,
       );
     }
     const needsLayout = flat.some(

@@ -107,6 +107,13 @@ const isPlainText = (sw: RegExpMatchArray): boolean => {
   return kind === 'section' ? /^"?\.text"?\s*(?:,|$)/.test(arg) : kind === 'text' && (arg === '' || arg === '0');
 };
 
+// The directives known to leave the section and location where they are: an allowlist, so a
+// directive missing from it reads as a switch to another section.
+const keepsSplatSection = (line: string): boolean =>
+  /^\.(?:set|globl|global|type|size|ent|end|aent|frame|mask|fmask|(?:b|p2)?align|loc|file|ident|option|abicalls|nan|gnu_attribute|module|weak|local|hidden|equ|equiv|eqv|cfi_\w+)\b/i.test(
+    line,
+  );
+
 // A directive that decides which lines gas assembles: conditional assembly, macro definition and
 // repetition (the Thumb frontend's LINE_DIRECTIVES).
 const LINE_DIRECTIVE = /^\.(if\w*|else\w*|endif|rept|irpc?|endr|macro|endm|exitm)\b/i;
@@ -189,9 +196,12 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
   let inOtherSection = false;
   for (const raw of lines.slice(0, sliceFrom)) {
     for (const st of splatStatements(raw) ?? []) {
-      const sw = st.trim().match(SECTION_SWITCH);
+      const t = st.trim();
+      const sw = t.match(SECTION_SWITCH);
       if (sw) {
         inOtherSection = !isPlainText(sw);
+      } else if (t.startsWith('.') && !LABEL_DEF.test(t) && !keepsSplatSection(t)) {
+        inOtherSection = true;
       }
     }
   }
@@ -239,6 +249,11 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': data directive '${line}' in the code stream — skipping it would silently delete its effect`,
         );
+      }
+      // any directive not known to keep the section (`.sbss`, `.struct 0`, `.offset 0`, an
+      // `.include`, measured for the first three) leaves the instructions after it outside `.text`
+      if (!keepsSplatSection(line)) {
+        inOtherSection = true;
       }
       continue;
     }
