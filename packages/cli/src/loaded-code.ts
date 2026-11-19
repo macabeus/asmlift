@@ -15,22 +15,18 @@ import { join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 /** The node flags that run a TypeScript program with `loaded-code-hook.mjs` beneath tsx's loader:
- *  imported first, it is the loader tsx's own reads go through. `ts-transform-hook.mjs`, imported
- *  after tsx, compiles an ES module `.ts` file ahead of tsx without its `keepNames`. */
+ *  imported first, it is the loader tsx's own reads go through. */
 export const loadedCodeArgv = (): string[] => [
   '--import',
   new URL('./loaded-code-hook.mjs', import.meta.url).href,
   '--import',
   pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href,
-  '--import',
-  new URL('./ts-transform-hook.mjs', import.meta.url).href,
 ];
 
 /** `execArgv` with `loadedCodeArgv()` in place of any preload of tsx or of the hook it held, which
  *  a child must load in that order. */
 export function withLoadedCodeArgv(execArgv: readonly string[]): string[] {
-  const preload = (v: string): boolean =>
-    v.includes('tsx') || v.endsWith('loaded-code-hook.mjs') || v.endsWith('ts-transform-hook.mjs');
+  const preload = (v: string): boolean => v.includes('tsx') || v.endsWith('loaded-code-hook.mjs');
   const kept: string[] = [];
   for (let i = 0; i < execArgv.length; i++) {
     const a = execArgv[i];
