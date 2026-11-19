@@ -74,7 +74,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 0.09,
+        "rankSeconds": 1.24,
         "symbolsUsed": [
           {
             "name": "gDefaultFontPalette"
@@ -227,7 +227,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.35,
+        "rankSeconds": 0.52,
         "symbolsUsed": [],
         "outcome": "nonmatch",
         "source": "s32 func_800154A8_160A8(s32 a0, s32 a1) {\n    u8 *v0;\n    s32 v1;\n    if ((a1 & 0xffff) != 0) {\n        v0 = (u8 *)a0;\n        do {\n            *v0 = 0;\n            v0++;\n        } while ((s32)v0 < (a1 & 0xffff) + a0);\n        v1 = (s32)v0 < (a1 & 0xffff) + a0;\n    }\n    return v1;\n}\n",
@@ -425,7 +425,7 @@
             "candidates": 24
           }
         },
-        "rankSeconds": 2.49,
+        "rankSeconds": 9.96,
         "symbolsUsed": [
           {
             "name": "func_8000FED0_10AD0",
@@ -612,7 +612,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.11,
+        "rankSeconds": 0.29,
         "symbolsUsed": [
           {
             "name": "allocateTaskMemory",
@@ -806,7 +806,7 @@
             "candidates": 12
           }
         },
-        "rankSeconds": 2.46,
+        "rankSeconds": 6.17,
         "symbolsUsed": [
           {
             "name": "D_800AFE8C_A71FC",
@@ -982,7 +982,7 @@
             "candidates": 4
           }
         },
-        "rankSeconds": 0.08,
+        "rankSeconds": 0.61,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "void func_8001BD74_1C974(s8 *a0) {\n    if (*a0 == 3) {\n        *a0 = 2;\n    } else {\n        if (*a0 == 8) {\n            *a0 = 7;\n        } else {\n            if (*a0 == 4) *a0 = 0;\n        }\n    }\n}\n",
@@ -1161,7 +1161,7 @@
             "withheld": 8
           }
         },
-        "rankSeconds": 8.06,
+        "rankSeconds": 15.56,
         "withheldCandidates": [
           {
             "variations": [
@@ -1725,7 +1725,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 0.08,
+        "rankSeconds": 0.77,
         "symbolsUsed": [
           {
             "name": "func_80021C58_22858",
@@ -1924,7 +1924,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 0.09,
+        "rankSeconds": 0.95,
         "symbolsUsed": [
           {
             "name": "func_80021DE8_229E8",
@@ -2118,7 +2118,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.1,
+        "rankSeconds": 0.3,
         "symbolsUsed": [
           {
             "name": "func_80028C08_29808",
@@ -2303,7 +2303,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.09,
+        "rankSeconds": 0.33,
         "symbolsUsed": [
           {
             "name": "func_80028DF0_299F0",
@@ -2514,7 +2514,7 @@
             "candidates": 8
           }
         },
-        "rankSeconds": 1.86,
+        "rankSeconds": 2.73,
         "symbolsUsed": [
           {
             "name": "getCurrentAllocation",
@@ -2721,7 +2721,7 @@
             "candidates": 8
           }
         },
-        "rankSeconds": 5.2,
+        "rankSeconds": 12.01,
         "symbolsUsed": [
           {
             "name": "func_8002A4AC_2B0AC",
@@ -2940,7 +2940,7 @@
             "candidates": 8
           }
         },
-        "rankSeconds": 1.77,
+        "rankSeconds": 2.99,
         "symbolsUsed": [
           {
             "name": "distance_2d",
@@ -3144,7 +3144,7 @@
             "candidates": 40
           }
         },
-        "rankSeconds": 3.93,
+        "rankSeconds": 10.27,
         "symbolsUsed": [],
         "outcome": "nonmatch",
         "source": "s32 func_8002ADB4_2B9B4(u32 a0, u32 a1) {\n    s32 v0;\n    s32 v2;\n    s32 v1;\n    if ((s16)a0 != (s16)a1) {\n        v0 = (s16)a0 - (s16)a1;\n        if (v0 < 0) v0 = -v0;\n        if ((s16)v0 >= 4097) {\n            if ((s16)a1 < (s16)a0) {\n                a1 += 8192;\n            } else {\n                a0 += 8192;\n            }\n        }\n        v1 = a0 << 16;\n        v2 = (v1 >> 16) - (s16)a1;\n        if (v2 < 0) v2 = -v2;\n        if ((s16)v2 >= 2731) {\n            a1 += 4096;\n        } else {\n            if ((s16)v2 >= 128) {\n                a1 = a1 + ((-((s16)a1 >= v1 >> 16) | 1) << 7);\n            } else {\n                a1 = a1 + v2 * (-((s16)a1 >= v1 >> 16) | 1) & 0x1fff;\n            }\n        }\n    }\n    return (s16)a1;\n}\n",
@@ -3321,7 +3321,7 @@
             "candidates": 4
           }
         },
-        "rankSeconds": 0.36,
+        "rankSeconds": 1.43,
         "symbolsUsed": [],
         "outcome": "nonmatch",
         "source": "s32 func_8002B4B8_2C0B8(s32 a0, s32 a1) {\n    s32 v0;\n    s32 w0;\n    v0 = (a1 & 0x1fff) - (a0 & 0x1fff) & 0x1fff;\n    w0 = v0;\n    if (w0 >= 4097) w0 = w0 | 0xe000;\n    v0 = (s16)w0;\n    return v0;\n}\n",
@@ -3508,7 +3508,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.33,
+        "rankSeconds": 2.47,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "void func_8002BE94_2CA94(u8 *a0) {\n    s32 *v1;\n    s32 v0;\n    v0 = 0;\n    if (a0[213] > v0) {\n        v1 = (s32 *)a0;\n        do {\n            *v1 = destroySceneModel(*v1);\n            v0++;\n            v1 += 25;\n        } while (v0 < a0[213]);\n    }\n}\n",
@@ -3670,7 +3670,7 @@
             "candidates": 4
           }
         },
-        "rankSeconds": 1.11,
+        "rankSeconds": 1.63,
         "symbolsUsed": [
           {
             "name": "_3F6950_ROM_END"
@@ -3844,7 +3844,7 @@
             "candidates": 4
           }
         },
-        "rankSeconds": 0.31,
+        "rankSeconds": 1.85,
         "symbolsUsed": [
           {
             "name": "EepromSaveData",
@@ -4009,7 +4009,7 @@
             "candidates": 12
           }
         },
-        "rankSeconds": 2.27,
+        "rankSeconds": 4.16,
         "symbolsUsed": [
           {
             "name": "EepromSaveData",
@@ -4185,7 +4185,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 2.52,
+        "rankSeconds": 3.69,
         "symbolsUsed": [
           {
             "name": "D_800AFE8C_A71FC",
@@ -4857,7 +4857,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.39,
+        "rankSeconds": 0.61,
         "symbolsUsed": [
           {
             "name": "approximateCos",
@@ -5037,7 +5037,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.05,
+        "rankSeconds": 0.14,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "void func_8006FEBC_70ABC(u8 *a0) {\n    if (a0 != 0) a0[184] = a0[184] & 0xfe;\n}\n",
@@ -5184,7 +5184,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.04,
+        "rankSeconds": 0.12,
         "symbolsUsed": [],
         "outcome": "nonmatch",
         "source": "s32 func_800B0DC0_1DCF60(s32 *a0) {\n    return *(s32 *)(a0[1] + (u8 *)a0);\n}\n",
@@ -5434,7 +5434,7 @@
             "withheld": 8
           }
         },
-        "rankSeconds": 3.41,
+        "rankSeconds": 8.31,
         "withheldCandidates": [
           {
             "variations": [
@@ -6382,7 +6382,7 @@
             "candidates": 416
           }
         },
-        "rankSeconds": 18.17,
+        "rankSeconds": 36.64,
         "symbolsUsed": [
           {
             "name": "func_8005D308_5DF08",
@@ -6592,7 +6592,7 @@
             "candidates": 40
           }
         },
-        "rankSeconds": 2.5,
+        "rankSeconds": 5.39,
         "symbolsUsed": [
           {
             "name": "func_8005D308_5DF08",
@@ -6802,7 +6802,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 0.12,
+        "rankSeconds": 0.48,
         "symbolsUsed": [
           {
             "name": "func_800B4AFC_1E1BAC",
@@ -6953,7 +6953,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.13,
+        "rankSeconds": 0.32,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "struct Struct0 { u8 _pad0[32]; u16 field_32; u16 field_34; u16 field_36; u16 field_38; u16 field_40; u16 field_42; u16 field_44; u16 field_46; u16 field_48; u16 field_50; s32 field_52; s32 field_56; s32 field_60; s32 field_64; s32 field_68; s32 field_72; s32 field_76; s32 field_80; s32 field_84; u16 field_88; u16 field_90; u16 field_92; u16 field_94; u16 field_96; u16 field_98; s32 field_100; s32 field_104; u16 field_108; u16 field_110; u8 field_112; u8 field_113; };\nvoid func_800B5B7C_1E2C2C(struct Struct0 *a0, u32 a1) {\n    a0->field_32 = 0;\n    a0->field_34 = 0;\n    a0->field_36 = 0;\n    a0->field_38 = 0;\n    a0->field_40 = 0;\n    a0->field_42 = 0;\n    a0->field_44 = 0;\n    a0->field_46 = 0;\n    a0->field_48 = 0;\n    a0->field_50 = 0;\n    a0->field_52 = 0;\n    a0->field_56 = 0;\n    a0->field_60 = 0;\n    a0->field_64 = 0;\n    a0->field_68 = 0;\n    a0->field_72 = 0;\n    a0->field_76 = 0;\n    a0->field_80 = 0;\n    a0->field_84 = 0;\n    a0->field_88 = 0;\n    a0->field_90 = 0;\n    a0->field_92 = 0;\n    a0->field_94 = 0;\n    a0->field_96 = 0;\n    a0->field_98 = 0;\n    a0->field_100 = 0;\n    a0->field_104 = 0;\n    a0->field_108 = 0;\n    a0->field_110 = a1;\n    a0->field_112 = 0;\n    a0->field_113 = 0;\n}\n",
@@ -7117,7 +7117,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.06,
+        "rankSeconds": 0.23,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "void func_800B68F4_1E39A4(s32 *arg0, u32 arg1, u32 arg2, u32 arg3) {\n    arg0[24] = arg1;\n    arg0[21] = arg1;\n    arg0[25] = arg2;\n    arg0[22] = arg2;\n    arg0[26] = arg3;\n    arg0[23] = arg3;\n}\n",
@@ -7333,7 +7333,7 @@
             "candidates": 320
           }
         },
-        "rankSeconds": 19.47,
+        "rankSeconds": 31.5,
         "symbolsUsed": [
           {
             "name": "approximateCos",
@@ -7530,7 +7530,7 @@
             "candidates": 4
           }
         },
-        "rankSeconds": 0.68,
+        "rankSeconds": 1.71,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "s32 func_800B7760_1E4810(s32 *arg0, u32 arg1, u32 arg2) {\n    s32 v0;\n    s32 uninit_v0;\n    if ((s16)arg2 <= 0) {\n        arg0[21] = arg1;\n        arg0[24] = arg1;\n        arg0[27] = 0;\n        return uninit_v0;\n    } else {\n        v0 = arg1 - arg0[21];\n        arg0[24] = arg1;\n        arg0[27] = v0 / (s16)arg2;\n        return v0 / (s16)arg2;\n    }\n}\n",
@@ -7686,7 +7686,7 @@
             "candidates": 8
           }
         },
-        "rankSeconds": 1.97,
+        "rankSeconds": 3.29,
         "symbolsUsed": [],
         "outcome": "nonmatch",
         "source": "s32 func_800B93F0_1E64A0(s32 a0) {\n    s32 result;\n    if (a0 == 0) a0 = 1;\n    if (67108864 / a0 < 16384) {\n        result = 67108864 / a0;\n    } else {\n        result = 16384;\n    }\n    return result;\n}\n",
@@ -7838,7 +7838,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.06,
+        "rankSeconds": 0.13,
         "symbolsUsed": [
           {
             "name": "freeNodeMemory",
@@ -8006,7 +8006,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.06,
+        "rankSeconds": 0.2,
         "symbolsUsed": [
           {
             "name": "D_8008D714_8E314"
@@ -8181,7 +8181,7 @@
             "candidates": 4
           }
         },
-        "rankSeconds": 0.18,
+        "rankSeconds": 1.13,
         "symbolsUsed": [],
         "outcome": "nonmatch",
         "source": "struct Struct0 { s32 field_0; u16 field_4; u16 field_6; u16 field_8; };\nstruct Struct1 { s32 field_0; s32 field_4; u16 field_8; u16 field_10; };\nvoid getTableEntryByU16Index(s32 *a0, u32 a1, struct Struct1 *a2) {\n    s32 v0;\n    struct Struct0 *v1;\n    v0 = a0[1];\n    v1 = (struct Struct0 *)(s32 *)((u8 *)(a0 + 2) + ((a1 & 0xffff) << 4));\n    a2->field_0 = (s32)(s32 *)((u8 *)a0 + v1->field_0);\n    a2->field_4 = (s32)(s32 *)((u8 *)(s32 *)((u8 *)(a0 + 2) + (v0 << 4)) + (v1->field_4 << 5));\n    a2->field_8 = v1->field_6;\n    a2->field_10 = v1->field_8;\n}\n",
@@ -8376,7 +8376,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.11,
+        "rankSeconds": 0.27,
         "symbolsUsed": [
           {
             "name": "cleanupSteppedMatrixController",
@@ -8592,7 +8592,7 @@
             "candidates": 4
           }
         },
-        "rankSeconds": 0.28,
+        "rankSeconds": 2.18,
         "symbolsUsed": [
           {
             "name": "allocateNodeMemory",
@@ -8790,7 +8790,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 0.32,
+        "rankSeconds": 1.2,
         "symbolsUsed": [
           {
             "name": "EepromSaveData",
