@@ -2013,10 +2013,14 @@ function decode(
       // The layout walk lays every item of the slice end to end, so an item gas assembles into
       // another section (a `.data` word, a `.rodata` halfword) would move every offset after it:
       // measured, a `[pc, #4]` load past one read the wrong pool word.
-      const codeSection = [...sliceSections][0];
-      const elsewhere = allFlat
-        .slice(sliceStart, boundaries[boundaryIdx])
-        .findIndex((f, i) => !f.instr && itemSections[sliceStart + i] !== codeSection);
+      // (a slice with no instruction has no section of its own to compare against, and declines below)
+      const codeSection = sliceSections.size === 1 ? [...sliceSections][0] : undefined;
+      const elsewhere =
+        codeSection === undefined
+          ? -1
+          : allFlat
+              .slice(sliceStart, boundaries[boundaryIdx])
+              .findIndex((f, i) => !f.instr && itemSections[sliceStart + i] !== codeSection);
       if (elsewhere !== -1) {
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': raw-encoded input needs byte-accurate layout, but item ${elsewhere} of the ` +
