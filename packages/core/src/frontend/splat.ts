@@ -97,6 +97,16 @@ function splatStatements(line: string): string[] | null {
   return out;
 }
 
+// A section switch, and whether it makes plain `.text` (subsection 0) current. Any other section,
+// or `.text` with a subsection, is "another section" to this reader.
+const SECTION_SWITCH =
+  /^\.(section|text|data|bss|rdata|sdata|rodata|late_rodata|pushsection|popsection|previous|subsection)\b\s*(.*)$/i;
+const isPlainText = (sw: RegExpMatchArray): boolean => {
+  const kind = sw[1].toLowerCase();
+  const arg = sw[2].trim();
+  return kind === 'section' ? /^"?\.text"?\s*(?:,|$)/.test(arg) : kind === 'text' && (arg === '' || arg === '0');
+};
+
 // A directive that decides which lines gas assembles: conditional assembly, macro definition and
 // repetition (the Thumb frontend's LINE_DIRECTIVES).
 const LINE_DIRECTIVE = /^\.(if\w*|else\w*|endif|rept|irpc?|endr|macro|endm|exitm)\b/i;
@@ -125,6 +135,7 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
     }
   }
   let slice = lines;
+  let sliceFrom = 0;
   if (glabels.length > 0) {
     const at = glabels.findIndex((g) => g.sym === name);
     if (at === -1) {
@@ -140,6 +151,7 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
       }
     }
     slice = lines.slice(glabels[at].line, end);
+    sliceFrom = glabels[at].line;
     // A function whose `glabel` sits inside a conditional, macro or repeated body is assembled as
     // the body is (never, under `.if 0`), which this reader does not model.
     let depth = 0;
@@ -172,6 +184,17 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
     }
     return sts;
   });
+  // the section the lines before the slice leave current: a plain `.text` / `.section .text`, or
+  // anything else (not modelled: a stack form before the function reads as another section)
+  let inOtherSection = false;
+  for (const raw of lines.slice(0, sliceFrom)) {
+    for (const st of splatStatements(raw) ?? []) {
+      const sw = st.trim().match(SECTION_SWITCH);
+      if (sw) {
+        inOtherSection = !isPlainText(sw);
+      }
+    }
+  }
   for (const raw of statements) {
     const line = raw.trim();
     if (!line) {
@@ -195,6 +218,20 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
       pending.push(labelDef[1]);
       continue;
     }
+    // Instructions are read as one run of `.text`: one under a `.section .rodata` (or any other
+    // section) is not in the function's code (mips-linux-gnu-as: `.section .rodata` / an addressed
+    // `addiu` / `.text` assembles no `addiu` there). A switch to plain `.text` is read; the stack and
+    // subsection forms are not modelled and decline.
+    const sw = line.match(SECTION_SWITCH);
+    if (sw) {
+      if (/^(?:pushsection|popsection|previous|subsection)$/i.test(sw[1])) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': '${line}' switches section in a way this reader does not model`,
+        );
+      }
+      inOtherSection = !isPlainText(sw);
+      continue;
+    }
     if (line.startsWith('.')) {
       // A data directive in the code stream could hide an instruction/effect — decline; other
       // bookkeeping directives (`.set`, `.align`, `.section`…) are transparent and skipped.
@@ -206,6 +243,11 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
       continue;
     }
     const m = line.match(INSN_LINE);
+    if (m && inOtherSection) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${line}' is assembled into another section than the function's \`.text\``,
+      );
+    }
     if (!m) {
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': unrecognised line in the Splat disassembly: '${line}'`,

@@ -537,6 +537,27 @@ describe('a section switch this frontend cannot place, and code in another secti
     declines(thunk(line), why);
   });
 
+  // 3401 e001 3403 e7f7 3402 3405 e7f4: `.subsection 0+1` is subsection 1, laid out after the
+  // function, so `.LA` falls into the `add r4, #5` below it. Read as subsection 0, `.LA` fell into
+  // `add r4, #3`. Only a plain number is read as a subsection; any other expression keys one of its own.
+  test.each(['0+1', '2*1'])('code under `.subsection %s` declines as split across sections', (expr) => {
+    declines(
+      thunk(`b .LA\n.subsection ${expr}\n.LA: add r4, #2\n.previous`) +
+        `.subsection ${expr}\n\tadd r4, #5\n\tb .Lskip\n`,
+      /is assembled into more than one section \(\.text 0, \.text \?/,
+    );
+  });
+
+  // A `[pc, #4]` load is resolved by laying the slice's items end to end; a word gas assembles into
+  // `.data` (or a halfword into `.rodata`) is not there. Measured: gas loads 11 (y1) and 22 (y2,
+  // unaligned), where the layout read 7 and 11.
+  test.each([
+    ['.data\n.Ld: .word 7\n.text\n.align 2', /another section \(\.data 0\)/],
+    ['.section .rodata\n.Ld: .2byte 7\n.text', /another section \(\.rodata 0\)/],
+  ])('a pc-relative load past data in another section (`%s`) declines', (other, why) => {
+    declines(thunk(`ldr r1, [pc, #4]\nadd r4, r1\nb .Lz\n${other}\n.Lq: .word 11\n.word 22\n.word 33\n.Lz:`), why);
+  });
+
   test('a function with no relay and code in another section declines', () => {
     declines(`${H}\tadd\tr0, #2\n\t.section .text.foo\n\tadd\tr0, #1\n\t.text\n\tbx\tlr\n`, /more than one section/);
   });

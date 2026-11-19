@@ -347,3 +347,13 @@ describe('a directive that decides which Splat lines are assembled declines', ()
     expect(() => decompile('f', asm, MIPS_IDO)).toThrow(/sits inside a conditional, macro or repeated body/);
   });
 });
+
+// mips-linux-gnu-as: an addressed instruction under `.section .rodata` is not in the function's
+// code (`addiu v0,a0,1; nop; jr ra; nop`). Skipped as transparent, the switch let it lift (a0 + 1 + 4).
+test('a Splat instruction in another section than `.text` declines', () => {
+  const asm =
+    'glabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    .section .rodata\n' +
+    '    /* 104 80000104 24420004 */  addiu $v0, $v0, 4\n    .text\n    /* 104 80000104 00000000 */  nop\n' +
+    '    /* 108 80000108 03E00008 */  jr         $ra\n    /* 10C 8000010C 00000000 */   nop\nendlabel f\n';
+  expect(() => decompile('f', asm, MIPS_IDO)).toThrow(/is assembled into another section than the function's `\.text`/);
+});
