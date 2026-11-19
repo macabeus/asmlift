@@ -20233,6 +20233,228 @@ export const SYNTHETIC: SynthSpec[] = [
       h: { params: 2, returnsVoid: true },
     },
   },
+  //  39. stkidx_call / stkidx_five (kl2dct CommonWaitForNextFrame: "stack pointer used as data —
+  //      the store to [sp,#0] is never reloaded"). A frame array read only through a runtime index,
+  //      `a[i]` as `lsl r0, r4, #2 / add r0, r0, sp / ldr r0, [r0]`, on the loop trips a mask bit
+  //      selects, with a call after the loop. No word of the array is reloaded by its offset, so
+  //      only the load through the index, its `indexed-read` event (frontend/stackargs.ts), says
+  //      [sp,#0] is the array's and not a word staged for that call. stkidx_five is the control the base fact guards: `a[i - 1]`
+  //      with `u32 a[2]` at [sp,#4] and a fifth argument staged at [sp,#0], whose read agbcc bases
+  //      at 4, not 0 (`corpus/agbcc-indexed.s`), so `five` keeps its fifth argument. The [sp,#0]
+  //      question is Thumb's (O32 stages from [sp,#16] and PPC from 8, beneath locals their
+  //      frontends route through memory once an address is taken), but the shape is every
+  //      compiler's, so the rows pin it on each. stkidx_call lifts on ido7.1 and gcc2.7.2; kmc and
+  //      mwcc 2.4.2 strength-reduce its `a[i]` into a pointer stepped through the frame (`the
+  //      captured address at [sp,#N) reaches a phi and is then moved by a constant`), a different
+  //      family's decline. The MIPS compilers and mwcc fold stkidx_five's `- 1` into the base, below
+  //      the array (`the captured address at [sp,#N) is below the reserved local area`), and decline.
+  {
+    sym: 'stkidx_call',
+    src:
+      'extern u32 gA, gB;\n' +
+      'extern u8 gMask;\n' +
+      'void use(u32 x, s32 i);\n' +
+      'void rng(void);\n' +
+      'void stkidx_call(void)\n' +
+      '{\n' +
+      '    u32 a[2];\n' +
+      '    s32 i;\n' +
+      '    a[0] = gA;\n' +
+      '    a[1] = gB;\n' +
+      '    for (i = 0; i < 2; i++)\n' +
+      '        if ((gMask >> i) & 1)\n' +
+      '            use(a[i], i);\n' +
+      '    rng();\n' +
+      '}',
+    features: ['variable-index', 'guard-init'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx:
+      'extern u32 gA, gB;\n' +
+      'extern u8 gMask;\n' +
+      'void use(u32 x, s32 i);\n' +
+      'void rng(void);\n' +
+      'void stkidx_call(void);',
+    proto: {
+      stkidx_call: { returnsVoid: true },
+      use: { params: ['u32', 's32'], returnsVoid: true },
+      rng: { params: [], returnsVoid: true },
+    },
+  },
+  {
+    sym: 'stkidx_five',
+    src:
+      'extern u32 gA, gB, gC;\n' +
+      'void five(s32 a, s32 b, s32 c, s32 d, s32 e);\n' +
+      'void stkidx_five(s32 i)\n' +
+      '{\n' +
+      '    u32 a[2];\n' +
+      '    a[0] = gA;\n' +
+      '    a[1] = gB;\n' +
+      '    five(1, 2, 3, a[i - 1], gC);\n' +
+      '}',
+    features: ['variable-index', 'multi-arg'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'extern u32 gA, gB, gC;\nvoid five(s32 a, s32 b, s32 c, s32 d, s32 e);\nvoid stkidx_five(s32 i);',
+    proto: {
+      stkidx_five: { params: ['s32'], returnsVoid: true },
+      five: { params: ['s32', 's32', 's32', 's32', 's32'], returnsVoid: true },
+    },
+  },
+  //  39b. stkidx_below — the CONTROL of item 39's bound, a soundness pin that declines. `u32 *p = a
+  //      - 1` (the 1-based table idiom) with `u32 a[3]` at [sp,#4] bases `p[i]` at [sp,#0], beneath the
+  //      array, and a K&R call takes a fifth argument staged there after the read. The read's base
+  //      proves no local there, so `kr`, which nothing sizes, keeps [sp,#0] as a word it may take,
+  //      and the lift declines rather than drop the fifth argument (frontend/stackargs.ts
+  //      `loadedWordBound` steps down only where every store it clears reaches the read).
+  //      The MIPS compilers and mwcc decline it on their own stack-argument and frame-layout gates.
+  {
+    sym: 'stkidx_below',
+    src:
+      'extern u32 gA, gB, gC;\n' +
+      'int kr();\n' +
+      'int stkidx_below(s32 i)\n' +
+      '{\n' +
+      '    u32 a[3];\n' +
+      '    u32 *p = a - 1;\n' +
+      '    a[0] = gA;\n' +
+      '    a[1] = gB;\n' +
+      '    a[2] = gC;\n' +
+      '    return kr(1, 2, 3, 4, p[i]);\n' +
+      '}',
+    features: ['variable-index', 'multi-arg'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'extern u32 gA, gB, gC;\nint kr();\nint stkidx_below(s32 i);',
+    proto: { stkidx_below: { params: ['s32'] }, kr: { returns: 'int' } },
+  },
+  //  39c. stkidx_byval — the CONTROL of item 39's ceiling, a soundness pin that declines. A struct
+  //      passed by value through a pointer formed below its array, `struct S12 *p = (struct S12 *)(w
+  //      - 1)`: agbcc stages the K&R call's stack word at [sp,#0] FIRST and then loads `p[i]`'s three
+  //      words, based at [sp,#0], into r0..r2 (calls.c `move_block_to_reg`, after every stack store).
+  //      A read with no store between it and a call nothing sizes clears nothing (thumb.ts
+  //      `indexedReadBelow`), so `kr` keeps [sp,#0] as a word it may take and the lift declines
+  //      rather than drop that stack word.
+  {
+    sym: 'stkidx_byval',
+    src:
+      'struct S12 { u32 a, b, c; };\n' +
+      'extern u32 gA, gB, gC, gD;\n' +
+      'extern s32 gI;\n' +
+      'int kr();\n' +
+      'int stkidx_byval(s32 i)\n' +
+      '{\n' +
+      '    u32 w[6];\n' +
+      '    struct S12 *p = (struct S12 *)(w - 1);\n' +
+      '    w[0] = gA;\n' +
+      '    w[1] = gB;\n' +
+      '    w[2] = gC;\n' +
+      '    w[3] = gD;\n' +
+      '    w[4] = gA;\n' +
+      '    w[5] = gB;\n' +
+      '    return kr(p[i], 3, gI);\n' +
+      '}',
+    features: ['variable-index', 'multi-arg'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'struct S12 { u32 a, b, c; };\nextern u32 gA, gB, gC, gD;\nextern s32 gI;\nint kr();\nint stkidx_byval(s32 i);',
+    proto: { stkidx_byval: { params: ['s32'] }, kr: { returns: 'int' } },
+  },
+  //  39d. stkidx_fpspill — the CONTROL of item 39's ceiling over a store agbcc DOES make after a
+  //      call's last staged word: under register pressure reload spills the address an indirect
+  //      call goes through (calls.c `prepare_call_address`) to [sp,#0x48] after the split struct's
+  //      register words are read through `p[i]`, and loads it straight back into r4 for
+  //      `bl _call_via_r4`. No store raises a read's ceiling, and the call nothing sizes leaves it
+  //      none (thumb.ts `clearsBelowFrom`); the read is a pointer's besides. So it clears nothing and
+  //      the lift declines rather than drop the call's stack words. agbcc only: the spill is agbcc's
+  //      register allocation.
+  {
+    sym: 'stkidx_fpspill',
+    src:
+      'struct S12 { u32 a, b, c; };\n' +
+      'extern u32 gA, gB, gC, gD, gE, gF, gT[64];\n' +
+      'extern s32 gI, gK;\n' +
+      'extern int (*gFp)();\n' +
+      'int stkidx_fpspill(s32 i, s32 j, s32 k, s32 l)\n' +
+      '{\n' +
+      '    s32 x0 = gB * l, x1 = gA - l, x2 = gT[i & 63], x3 = gT[i & 63], x4 = gT[l & 63] * k;\n' +
+      '    s32 x5 = gT[l & 63] * k, x6 = gT[l & 63] * k, x7 = gA - l, x8 = gK ^ i;\n' +
+      '    u32 w[8];\n' +
+      '    struct S12 *p = (struct S12 *)(w - 4);\n' +
+      '    w[0] = gA;\n' +
+      '    w[1] = gE;\n' +
+      '    w[2] = gE;\n' +
+      '    w[3] = gC;\n' +
+      '    w[4] = gF;\n' +
+      '    w[5] = gF;\n' +
+      '    w[6] = gD;\n' +
+      '    w[7] = gC;\n' +
+      '    return gFp(gT[k & 63], gT[k & 63], p[i], j ? gI : gK, gT[j & 63]) + x0 + x1 + x2 + x3 + x4 + x5 + x6 + x7 + x8;\n' +
+      '}',
+    features: ['variable-index', 'multi-arg'],
+    toolchains: ['agbcc'],
+    ctx:
+      'struct S12 { u32 a, b, c; };\nextern u32 gA, gB, gC, gD, gE, gF, gT[64];\nextern s32 gI, gK;\n' +
+      'extern int (*gFp)();\nint stkidx_fpspill(s32 i, s32 j, s32 k, s32 l);',
+    proto: { stkidx_fpspill: { params: ['s32', 's32', 's32', 's32'] } },
+  },
+  //  40. dmafill_call (kl2dct sub_0802E340: "stack pointer used as data — the store to [sp,#0] is
+  //      never reloaded"). A DMA fill whose temp's address is stored to the device's source register,
+  //      then a call taking `&w`. agbcc loads the register's address into r0, the same register that
+  //      holds `&w` at the call. Read off the register's NAME the store would publish nothing and
+  //      the temp's word would read as staged for `g`; read per store, a base that holds no frame
+  //      address AT the store, on any path, publishes what it stores (thumb.ts
+  //      `frameAddressReceivers` over `frameAddressesAt`). agbcc only, as item 26.
+  {
+    sym: 'dmafill_call',
+    src:
+      'typedef volatile unsigned int vu32;\n' +
+      '#define DmaFill32(v, dst, n) { vu32 tmp = (vu32)(v); *(vu32 *)0x040000D4 = (u32)&tmp; ((vu32 *)0x040000D4)[1] = (u32)(dst); ((vu32 *)0x040000D4)[2] = 0x85000000 | (n); ((vu32 *)0x040000D4)[2]; }\n' +
+      'extern u8 *gP;\n' +
+      'void g(void);\n' +
+      'void use(u32 *p);\n' +
+      'void dmafill_call(void)\n' +
+      '{\n' +
+      '    u32 w;\n' +
+      '    DmaFill32(0, gP, 0x1a);\n' +
+      '    g();\n' +
+      '    use(&w);\n' +
+      '}',
+    features: ['stack-addr', 'macro'],
+    toolchains: ['agbcc'],
+    ctx: 'extern u8 *gP;\nvoid g(void);\nvoid use(u32 *p);\nvoid dmafill_call(void);',
+    proto: {
+      dmafill_call: { returnsVoid: true },
+      g: { params: [], returnsVoid: true },
+      use: { params: ['u32 *'], returnsVoid: true },
+    },
+  },
+  //  41. dmafill_two (kl2dct AgbMain: "the object at [sp,#0) overlaps the SSA slot at [sp,#0]").
+  //      Two DMA fills in a frame of two words, then a call nothing about the frame declares. The
+  //      first temp sits at [sp,#0] and its address is published. Item 26's [sp,#0] capture licence
+  //      reads "no call takes a stack word" off the declarations, which `g()` does not give, so
+  //      its `str r2, [sp]` would be keyed as an SSA slot under the object. A frame base published
+  //      to memory is the object wherever the measured outgoing area is empty (thumb.ts
+  //      `frameBaseIsTheObject`): agbcc puts such a temp at [sp,#0]
+  //      only where no call takes a stack word, and moves it above a fifth argument otherwise
+  //      (corpus/agbcc-dmafill.s `dfive`). `g` is declared K&R so that nothing says it takes no
+  //      stack word. agbcc only, as item 26.
+  {
+    sym: 'dmafill_two',
+    src:
+      'typedef volatile unsigned int vu32;\n' +
+      '#define DmaFill32(v, dst, n) { vu32 tmp = (vu32)(v); *(vu32 *)0x040000D4 = (u32)&tmp; ((vu32 *)0x040000D4)[1] = (u32)(dst); ((vu32 *)0x040000D4)[2] = 0x85000000 | (n); ((vu32 *)0x040000D4)[2]; }\n' +
+      'extern u8 *gP;\n' +
+      'extern u8 *gQ;\n' +
+      'void g();\n' +
+      'void dmafill_two(void)\n' +
+      '{\n' +
+      '    DmaFill32(0, gP, 0x1a);\n' +
+      '    DmaFill32(0, gQ, 0xa);\n' +
+      '    g();\n' +
+      '}',
+    features: ['macro'],
+    toolchains: ['agbcc'],
+    ctx: 'extern u8 *gP;\nextern u8 *gQ;\nvoid g();\nvoid dmafill_two(void);',
+    proto: { dmafill_two: { returnsVoid: true }, g: { returnsVoid: true } },
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────

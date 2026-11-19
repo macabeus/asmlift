@@ -642,8 +642,10 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '',
       );
       expect(bounded).not.toBe(unionAtBase);
+      // (the published frame base is the object's at any frame size, so the word store and the
+      // byte load are two widths through one object rather than an object over a slot)
       expect(() => decompile('g5', bounded, ARMV4T_AGBCC)).toThrow(
-        'the object at [sp,#0) overlaps the SSA slot at [sp,#0] — one byte, two models',
+        'the accesses through the captured address disagree on width (4 vs 1)',
       );
     });
 
@@ -2034,12 +2036,12 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         );
       });
 
-      // THE BASE CLAUSE IS WHOLE-FUNCTION, as the audit's `taint` is. A capture taken in the entry
-      // block is not HELD when a later block stores through it, so a block-local base test would
-      // accept here (`r2` neither sp nor held in `.L2`). The base is tested against every register
-      // that holds a frame address anywhere (`registersThatMayHoldAFrameAddress`), so the licence
-      // refuses it itself: the address is written into this frame, and nothing outside it has been
-      // handed it.
+      // THE BASE CLAUSE CROSSES BLOCKS, as the audit's per-value `taint` does. A capture taken in
+      // the entry block is not HELD when a later block stores through it, so a block-local base
+      // test would accept here (`r2` neither sp nor held in `.L2`). The base is tested against
+      // every register that may hold a frame address at the store on some path from the entry
+      // (`frameAddressesAt`), so the licence refuses it itself: the address is written into this
+      // frame, and nothing outside it has been handed it.
       test('a base captured in an earlier block is the frame, and publishes nothing', () => {
         const crossBlock =
           'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr4, [sp]\n\tmov\tr2, sp\n\tcmp\tr0, #0\n\tbeq\t.L2\n' +
@@ -2051,7 +2053,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       // stored through a base captured in an EARLIER block is no escape, so it ends no pending
       // word. Read block-locally it would, and the decline would say the store to [sp,#0] on every
       // path to `five` is "not stored on every path to the call" — a false fact.
-      test('…and the escape event reads the same whole-function base clause', () => {
+      test('…and the escape event reads the same cross-block base clause', () => {
         const intoFrame =
           'f:\n\tpush\t{r5, lr}\n\tadd\tsp, sp, #-0x10\n\tadd\tr5, sp, #0x8\n\tcmp\tr0, #0\n\tbeq\t.L1\n' +
           '\tmov\tr1, #0\n.L1:\n\tstr\tr1, [sp]\n\tmov\tr0, sp\n\tstr\tr0, [r5]\n\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n' +

@@ -31,6 +31,7 @@ const BEHAVIORS: Record<string, CompilerBehaviors> = {
     outgoingAreaNeverLoadedFrom: 0,
     oneWordFrameIsTheCapturedObject: true,
     escapedFrameAddressNamesALocal: true,
+    stagedStackWordReachesOnlyItsCall: true,
     // CallBehaviors
     eightByteReturnScratch: 'r2',
     callThunks: {

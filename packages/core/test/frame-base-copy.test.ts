@@ -1098,7 +1098,11 @@ describe('the frame base is a capture where no call takes a stack word', () => {
     expect(src).toMatch(/sp0 = 4660;\n.*= &sp0;\n[\s\S]*\[2\] = -2063597560;\n.*\[2\];\n    sp4 = 61442;\n.*= &sp4;/);
   });
 
-  test('a call nothing sizes may take [sp,#0] as a stack word, and keeps it a slot', () => {
+  // A call nothing sizes may take a stack word, but not this one: the frame base is PUBLISHED by a
+  // word store and no word is staged for a call, so [sp,#0] is a local (thumb.ts `frameBaseIsTheObject`,
+  // corpus/agbcc-dmafill.s `dfive`); a word staged there after the publish still refuses
+  // (frame-dmafill-probes.test.ts).
+  test('a call nothing sizes beside a published frame base leaves [sp,#0] the local', () => {
     expect(() => liftVoid(DMA_FILL_WH)).not.toThrow();
     // the same function opening with a call to `h`, which nothing declares
     const called = DMA_FILL_WH.replace(
@@ -1106,8 +1110,8 @@ describe('the frame base is a capture where no call takes a stack word', () => {
       '\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tbl\th\n',
     ).replace('\tadd\tsp, sp, #0x8\n\tbx\tlr\n', '\tadd\tsp, sp, #0x8\n\tpop\t{r0}\n\tbx\tr0\n');
     expect(called).not.toContain('\tbx\tlr\n');
-    expect(() => liftVoid(called)).toThrow(/overlaps the SSA slot at \[sp,#0\] — one byte, two models/);
-    // …and declared with no argument it takes no stack word: the frame base is a capture again
+    expect(liftVoid(called).source).toMatch(/h\(\);\n    sp0 = 4660;\n.*= &sp0;/);
+    // …and declared with no argument it takes no stack word: the frame base is a capture there too
     expect(liftVoid(called, { h: { params: 0, returnsVoid: true } }).source).toMatch(
       /h\(\);\n    sp0 = 4660;\n.*= &sp0;/,
     );

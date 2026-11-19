@@ -15,7 +15,7 @@
  *  that matter — a sub-word or register-offset access is not a slot, and one anywhere turns the
  *  whole word-slot model off at the same gate this analysis's `blocker` feeds, so no access that
  *  could alias a licensed word is ever silently missing from the events. */
-export type StackArgsEvent<C> = StackArgsSlot | StackArgsCall<C> | StackArgsEscape;
+export type StackArgsEvent<C> = StackArgsSlot | StackArgsCall<C> | StackArgsEscape | StackArgsIndexedRead;
 
 /** A whole-word access to a reserved frame slot at `off`, which must lie inside `[0, localArea)`. */
 export interface StackArgsSlot {
@@ -34,6 +34,30 @@ export interface StackArgsSlot {
 export interface StackArgsEscape {
   readonly kind: 'escape';
   readonly off: number;
+}
+
+/** A LOAD THROUGH A RUNTIME INDEX into the frame based at `sp + off` — `lsl r0, r4, #2 / add r0,
+ *  r0, sp / ldr r0, [r0]`, agbcc's `a[i]` — which reads some word from `off` up, and this function
+ *  cannot say which. Like an escape it ends the stores pending from `off` up, but only beneath its
+ *  ceiling (`below`).
+ *
+ *  `off` is the base before the index is added, the object's start or inside it where the source
+ *  indexes the object it names (`corpus/agbcc-indexed.s`). A pointer formed below its array (`u32 *p
+ *  = a - 1`, the 1-based table idiom) bases the read beneath the object, at a word an outgoing
+ *  argument may own, and nothing in the read says so. So it is emitted only under both
+ *  `escapedFrameAddressNamesALocal` and `stagedStackWordReachesOnlyItsCall` (`target.ts` states the
+ *  second and its residue), and a word a later call stages at or above the ceiling stays pending at
+ *  that call. Whether the read also BOUNDS THE AREA, as a load does, is `loadedWordBound`'s question.
+ *
+ *  Unlike an escape it needs no re-proof of the lifted IR (`escapesReliedOn`): it rests on the order
+ *  of the asm's own stores, reads and calls, which the lift does not decide again. */
+export interface StackArgsIndexedRead {
+  readonly kind: 'indexed-read';
+  readonly off: number;
+  /** The read ends and clears only the words beneath this offset: a call whose stack words
+   *  nothing states exactly may follow it, and states no word at or above this one (`target.ts` `stagedStackWordReachesOnlyItsCall`).
+   *  Absent, no such call follows it. */
+  readonly below?: number;
 }
 
 /** A call, and what its callee's DECLARATION says it takes on the stack. `declared` is the block
@@ -104,6 +128,10 @@ export interface OutgoingArgs<C> {
 
 const isCallEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsCall<C> => ev.kind === 'call';
 const isSlotEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsSlot => ev.kind === 'store' || ev.kind === 'load';
+/** An event that hands the words from its offset up to a reader this analysis cannot see by
+ *  offset: an escaped address's receiver, or this function's own load through a runtime index. */
+const readsFromUp = <C>(ev: StackArgsEvent<C>): ev is StackArgsEscape | StackArgsIndexedRead =>
+  ev.kind === 'escape' || ev.kind === 'indexed-read';
 
 /** THE LOWEST FRAME WORD THIS FUNCTION LOADS AT OR ABOVE `from`, or `Infinity` when it loads none
  *  or nothing states `from`. The Thumb frontend calls it once per lift and hands the number to both
@@ -118,9 +146,20 @@ const isSlotEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsSlot => ev.kind =
  *
  *  Only a load in a live block counts: a load that cannot run proves nothing. An ESCAPE does not
  *  count: its receiver MAY read the words, and a bound is a proof, which a read that may not happen
- *  cannot supply. */
+ *  cannot supply.
+ *
+ *  A LOAD THROUGH A RUNTIME INDEX (`indexed-read`) LOWERS IT TO ITS BASE ONLY WHERE NO WORD IT
+ *  WOULD CLEAR IS A STAGED ONE, since its base proves no local: `u32 *p = a - 1` bases `p[i]` at
+ *  [sp,#0] for an `a` at [sp,#4], where a K&R call's fifth argument is staged (`below*`). The proof
+ *  is the store order (`target.ts` `stagedStackWordReachesOnlyItsCall`): a store that reaches, with
+ *  no call on the way, a read based at or beneath its word and ceiled above it is no call's highest
+ *  staged word, and staged words are contiguous from the area's start. So the bound steps down to a
+ *  read's base where EVERY store between that base and the bound so far reaches such a read — an
+ *  array filled, read through an index on some loop trips, then a call — and stops at the first
+ *  base where one does not. */
 export function loadedWordBound<C>(
   blocks: readonly StackArgsBlock<C>[],
+  preds: readonly (readonly number[])[],
   live: ReadonlySet<number>,
   from: number | undefined,
 ): number {
@@ -128,12 +167,64 @@ export function loadedWordBound<C>(
     return Infinity;
   }
   let bound = Infinity;
+  const bases = new Set<number>();
   for (const b of live) {
     for (const ev of blocks[b].events) {
       if (ev.kind === 'load' && ev.off >= from) {
         bound = Math.min(bound, ev.off);
+      } else if (ev.kind === 'indexed-read' && ev.off >= from) {
+        bases.add(ev.off);
       }
     }
+  }
+  const succs = blocks.map((): number[] => []);
+  for (const b of live) {
+    for (const q of preds[b] ?? []) {
+      if (live.has(q)) {
+        succs[q].push(b);
+      }
+    }
+  }
+  // does the event after (b, i) reach, with no call on the way, a read through an index based at
+  // or beneath `word`?
+  const readBackFrom = (b0: number, i0: number, word: number): boolean => {
+    const seen = new Set<number>();
+    const work: Array<[number, number]> = [[b0, i0 + 1]];
+    while (work.length > 0) {
+      const [b, i] = work.pop()!;
+      const evs = blocks[b].events;
+      let ended = false;
+      for (let k = i; k < evs.length && !ended; k++) {
+        const ev = evs[k];
+        if (ev.kind === 'indexed-read' && ev.off <= word && word < (ev.below ?? Infinity)) {
+          return true;
+        }
+        ended = isCallEvent(ev);
+      }
+      if (!ended) {
+        for (const q of succs[b]) {
+          if (!seen.has(q)) {
+            seen.add(q);
+            work.push([q, 0]);
+          }
+        }
+      }
+    }
+    return false;
+  };
+  for (const base of [...bases].sort((x, y) => y - x)) {
+    if (base >= bound) {
+      continue;
+    }
+    const everyStoreReadBack = [...live].every((b) =>
+      blocks[b].events.every(
+        (ev, i) => ev.kind !== 'store' || ev.off < base || ev.off >= bound || readBackFrom(b, i, ev.off),
+      ),
+    );
+    if (!everyStoreReadBack) {
+      break;
+    }
+    bound = base;
   }
   return bound;
 }
@@ -395,10 +486,12 @@ export function analyzeOutgoingArgs<C>({
           may.delete(ev.off);
           must.delete(ev.off);
         } else {
-          // the receiver of the escaped address reads what it was handed, so those words stop
-          // being pending exactly as a reload would end them
+          // the receiver of the escaped address reads what it was handed (an indexed load reads
+          // what its base addresses), so those words stop being pending exactly as a reload would
+          // end them
+          const below = ev.kind === 'indexed-read' ? (ev.below ?? Infinity) : Infinity;
           for (const o of everySlot) {
-            if (o >= ev.off) {
+            if (o >= ev.off && o < below) {
               may.delete(o);
               must.delete(o);
             }
@@ -481,15 +574,18 @@ export function analyzeOutgoingArgs<C>({
   // Under agbcc the two never meet (an address-taken local sits ABOVE the outgoing area, and at
   // [sp,#0] only when no call takes a stack word), so a function that has both is not agbcc's
   // layout and declines.
-  const escapes = [...live].flatMap((b) => asmBlocks[b].events.flatMap((ev) => (ev.kind === 'escape' ? [ev.off] : [])));
-  const lowestEscape = Math.min(Infinity, ...escapes);
+  const escapes = [...live].flatMap((b) => asmBlocks[b].events.filter(readsFromUp));
+  const lowestEscape = Math.min(Infinity, ...escapes.map((ev) => ev.off));
+  const lowestHow = escapes.some((ev) => ev.kind === 'escape' && ev.off === lowestEscape)
+    ? 'escapes this function'
+    : 'is read through a runtime index';
   for (const ev of calls) {
     const offs = blocks.get(ev.call) ?? [];
     const clash = offs.find((o) => o >= lowestEscape);
     if (clash !== undefined) {
       return refuse(
         `callee \`${ev.callee}\` ${ev.declared === null ? `loads ${offs.length} incoming stack words in its body` : `is declared with ${declaredAs(ev, offs)}`}, so [sp,#${clash}] is its outgoing stack argument — ` +
-          `but the frame address [sp,#${lowestEscape}] escapes this function, so the words from there up are an object's, and the two name the same word`,
+          `but the frame address [sp,#${lowestEscape}] ${lowestHow}, so the words from there up are an object's, and the two name the same word`,
       );
     }
   }
