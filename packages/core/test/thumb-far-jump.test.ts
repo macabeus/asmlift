@@ -548,6 +548,25 @@ describe('a section switch this frontend cannot place, and code in another secti
     );
   });
 
+  // 3401 e001 3403 e7f7 3402 3405 e7f4: `.set S, 0` before the function and `.set S, 1` in it make
+  // the same `.subsection S` text two subsections; read as one, `.LA` fell into `add r4, #3`.
+  test('the same subsection expression at two uses keys two subsections, and declines', () => {
+    const asm =
+      '\t.set S, 0\n\t.text\n\t.subsection S\n' +
+      thunk('b .LA\n.set S, 1\n.subsection S\n.LA: add r4, #2\n.previous') +
+      '.subsection S\n\tadd r4, #5\n\tb .Lskip\n';
+    declines(asm, /is assembled into more than one section \(\.text \?S#0, \.text \?S#1/);
+  });
+
+  // 3401 3403: after `.struct 0` (or `.offset 0`) the `add r4, #2` is in the absolute section, not
+  // the code. Any directive not known to keep the section is a section of its own.
+  test.each(['.struct 0', '.offset 0'])('code after `%s` declines as split across sections', (dir) => {
+    declines(
+      thunk(`${dir}\nadd r4, #2\n.text`),
+      /more than one section \(\.text 0, \?\.|is a directive this frontend does not read/,
+    );
+  });
+
   // A `[pc, #4]` load is resolved by laying the slice's items end to end; a word gas assembles into
   // `.data` (or a halfword into `.rodata`) is not there. Measured: gas loads 11 (y1) and 22 (y2,
   // unaligned), where the layout read 7 and 11.

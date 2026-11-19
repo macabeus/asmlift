@@ -357,3 +357,14 @@ test('a Splat instruction in another section than `.text` declines', () => {
     '    /* 108 80000108 03E00008 */  jr         $ra\n    /* 10C 8000010C 00000000 */   nop\nendlabel f\n';
   expect(() => decompile('f', asm, MIPS_IDO)).toThrow(/is assembled into another section than the function's `\.text`/);
 });
+
+// mips-linux-gnu-as: `.sbss`, `.struct 0` and `.offset 0` each move the addressed `addiu` out of
+// `.text` (gas: `addiu v0,a0,1; nop; jr ra; nop`). Any directive the reader does not know to keep
+// the section counts as another section.
+test.each(['.sbss', '.struct 0', '.offset 0'])('a Splat instruction after `%s` declines', (dir) => {
+  const asm =
+    `glabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    ${dir}\n` +
+    '    /* 104 80000104 24420004 */  addiu $v0, $v0, 4\n    .text\n    /* 104 80000104 00000000 */  nop\n' +
+    '    /* 108 80000108 03E00008 */  jr         $ra\n    /* 10C 8000010C 00000000 */   nop\nendlabel f\n';
+  expect(() => decompile('f', asm, MIPS_IDO)).toThrow(/is assembled into another section than the function's `\.text`/);
+});
