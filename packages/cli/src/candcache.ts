@@ -1513,6 +1513,14 @@ function sweepTrash(): void {
 // so it says so with `neverPrune()` before its first compile.
 let pruned = !isMainThread;
 
+/** A TEST SEAM, and nothing else: run between the prune's marks going down and its first unlink —
+ *  the window an opener running an older copy of this module stamps a namespace in — so a test can
+ *  put a stamp there deterministically rather than by timing. */
+let afterMarks: (() => void) | undefined;
+export function setPruneTestHook(hook: (() => void) | undefined): void {
+  afterMarks = hook;
+}
+
 /** This process never prunes the store: it is a compile worker started by a process that does. */
 export function neverPrune(): void {
   pruned = true;
@@ -1599,6 +1607,7 @@ function pruneOnce(keepNs: string): void {
       }
       return ok;
     });
+    afterMarks?.();
     const left = candidates.map(() => 0);
     for (const e of entries) {
       left[e.ns] += 1;

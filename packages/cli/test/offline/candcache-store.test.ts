@@ -623,6 +623,44 @@ describe('across namespaces, the least recently USED entries go first, and only 
     expect(existsSync(mark)).toBe(false);
   });
 
+  test('a namespace STAMPED between the listing and the deletes is let go, with nothing unlinked in it', async () => {
+    // A process running an older copy of this module writes no mark and claims its lease only
+    // after its own prune: the stamp on the namespace directory is the only thing it does before
+    // serving. The hook stands in for that opener arriving after this prune listed the store.
+    const root = scratch();
+    await fill(root, NS_A, keys(10));
+    await fill(root, NS_B, keys(10));
+    for (const k of keys(10)) {
+      setAge(keyPath(root, NS_A, k), 5 * H); // A's keys are the oldest: without the stamp, they go first
+      setAge(keyPath(root, NS_B, k), 4 * H);
+    }
+    ageDir(root, NS_A);
+    ageDir(root, NS_B);
+    const said = await load({ ...roomy(root), ASMLIFT_CANDCACHE_MAX_MB: capOf(0) }, (m) => {
+      let out = '';
+      const spy = vi.spyOn(process.stderr, 'write').mockImplementation((c: string | Uint8Array) => {
+        out += typeof c === 'string' ? c : Buffer.from(c).toString();
+        return true;
+      });
+      m.setPruneTestHook(() => {
+        const now = new Date();
+        utimesSync(join(root, 'ns', NS_A.slice(0, 16)), now, now);
+      });
+      try {
+        m.candCache('t', () => NS_O).warm();
+        expect(m.cacheStats(), "B's ten keys, and none of A's").toEqual({ prunedKeys: 10, prunedNamespaces: 1 });
+      } finally {
+        m.setPruneTestHook(undefined);
+        spy.mockRestore();
+      }
+      return out;
+    });
+    expect(present(root, NS_A, keys(10)), 'the stamped namespace is whole').toEqual(keys(10));
+    expect(present(root, NS_B, keys(10))).toEqual([]);
+    expect(readdirSync(join(root, 'pruning')), 'its mark was released').toEqual([]);
+    expect(said).toContain('1 other namespace(s) held by a live process');
+  });
+
   test('a trash/ entry older than any prune is swept even when its pid is alive (a recycled pid)', async () => {
     const root = scratch();
     // pid 1 is init/launchd: alive, and not a pruner.
