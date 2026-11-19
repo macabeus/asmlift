@@ -151,7 +151,8 @@ test('a preheader op the body reads runs ahead of the `for`', () => {
 test('a derived param whose two edges apply different ops stays a variable the `for` steps second', () => {
   // `lo - 3` in, `(i + 1) + 3` back: the param is no one function of the IV, so the fold leaves it,
   // and the `for` steps it after the IV from the IV's new value (A SECOND COUNTER):
-  // `sw_forjt_skew`'s `for (i = lo, j = lo << 3; i <= hi; i++, j = i << 2)`
+  // the source `for (i = lo, j = lo << 3; i <= hi; i++, j = i << 2)` of `sw_forjt_skew`, its `j`
+  // init ahead of the `for`
   const r = judged(srFor({ entryDerived: '%2: s32 = sub %0, %3' }));
   expect(r.src).toMatch(/(\w+) = a0 - (\w+);\n\s*for \((\w+) = a0; a1 >= \3; \3 = \3 \+ 1, \1 = \3 \+ \2\) \{/);
   agrees(r);

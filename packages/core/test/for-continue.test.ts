@@ -9,7 +9,7 @@
 // `for` takes a guard that is its test, a guard whose exit edge passes a relay block, an exit that
 // takes the IV, no guard where its first test folds to true, an update the header computes, and a
 // second update ordered after the first where it reads it, three steps sorted on the old values they
-// read, and the init clause the counter the test reads. It refuses a guard that is not the
+// read, and an init clause naming the counter the test reads. It refuses a guard that is not the
 // loop's test, a constant first test that leaves, two updates each reading the other's old value, a
 // latch with an effect, an exit that takes the IV from before its update and an update from a call,
 // and those fixtures lift through the rerun's `while (1)` instead, judged the same way; a relay

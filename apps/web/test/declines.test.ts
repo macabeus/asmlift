@@ -913,7 +913,7 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     'ctr-transfer',
     'far-jump',
     'fp-cond-branch',
-    // `jt_idxreuse:agbcc` was the last row: its dispatch, summed into the pointer register, lifts
+    // `jt_idxreuse:agbcc`'s dispatch, summed into the pointer register, lifts
     // (frontend/thumb.ts `recoverJumpTable`), as `jt_idxreuse_p2:agbcc`'s does.
     'indirect-jump',
     'loop-exit-values',
