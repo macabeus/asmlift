@@ -194,9 +194,18 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
   // the section the lines before the slice leave current: a plain `.text` / `.section .text`, or
   // anything else (not modelled: a stack form before the function reads as another section)
   let inOtherSection = false;
+  // `.set reorder` lets gas fill and move delay slots itself (measured: it inserts a nop after a
+  // `jr`), so a function assembled under it is not the instruction stream written. The reader
+  // reads every slot as written; it declines under an explicit `.set reorder`. A file that never
+  // says `.set noreorder` is read as written too (gas's own default is reorder).
+  let reorder = false;
   for (const raw of lines.slice(0, sliceFrom)) {
     for (const st of splatStatements(raw) ?? []) {
       const t = st.trim();
+      const ro = t.match(/^\.set\s+(no)?reorder\b/i);
+      if (ro) {
+        reorder = ro[1] === undefined;
+      }
       const sw = t.match(SECTION_SWITCH);
       if (sw) {
         inOtherSection = !isPlainText(sw);
@@ -242,6 +251,20 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
       inOtherSection = !isPlainText(sw);
       continue;
     }
+    const ro = line.match(/^\.set\s+(no)?reorder\b/i);
+    if (ro) {
+      reorder = ro[1] === undefined;
+    }
+    // Inside the function, a directive that can emit bytes between instructions: a move of the
+    // location counter (`.set ., .+4`, `. = …`, measured: a nop in the delay slot) or an
+    // alignment (measured: `.balign 16` after a `jr` puts two nops before its delay slot). The
+    // fill is not modelled, so each declines.
+    if (/^\.(?:set|equ|eqv|equiv)\s+\.\s*,/i.test(line) || /^\.\s*=/.test(line) || /^\.\w*align\w*\b/i.test(line)) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${line}' inside the function can emit fill between instructions, which this ` +
+          `reader does not model`,
+      );
+    }
     if (line.startsWith('.')) {
       // A data directive in the code stream could hide an instruction/effect — decline; other
       // bookkeeping directives (`.set`, `.align`, `.section`…) are transparent and skipped.
@@ -258,6 +281,11 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
       continue;
     }
     const m = line.match(INSN_LINE);
+    if (m && reorder) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${line}' is assembled under \`.set reorder\`, where gas fills delay slots itself`,
+      );
+    }
     if (m && inOtherSection) {
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': '${line}' is assembled into another section than the function's \`.text\``,
