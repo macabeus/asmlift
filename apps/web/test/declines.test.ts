@@ -956,19 +956,22 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   //
   // THE OUTGOING PAIR IS THE FRAME-OBJECT AUDIT naming what lies below the local area: a capture
   // there is "an outgoing stack argument word or a saved register", so the marker also carries
-  // `outgoing-stack-args`' phrase, and the decided cause, an address-taken local, wins. All three
-  // are `upd_lcopy` on the three CodeWarrior builds, whose struct copy into a local steps a base
-  // captured a word below the object (`addi r5,r1,4; … stwu r0,8(r5)`).
+  // `outgoing-stack-args`' phrase, and the decided cause, an address-taken local, wins. Three are
+  // `upd_lcopy` on the three CodeWarrior builds, whose struct copy into a local steps a base
+  // captured a word below the object (`addi r5,r1,4; … stwu r0,8(r5)`); five are an indexed read's
+  // base folded below its array: `stkidx_five` on ido7.1, gcc2.7.2kmc, gcc2.7.2 and mwcc 2.4.2, and
+  // `stkidx_below` on mwcc 2.4.2.
   //
   // THE THUMB OUTGOING PAIR is the stack-argument licence's refusal inside the Thumb sp-as-data throw:
   // "stack pointer used as data — … it may be an outgoing stack argument …", and the named cause wins.
-  // Both markers are agbcc controls of an undeclared call its callee's body cannot size:
-  // `stkbody_more` (the body loads fewer words than are staged) and `stkbody_none` (no body).
+  // All five markers are agbcc controls of an undeclared call nothing sizes: `stkbody_more` (the
+  // body loads fewer words than are staged), `stkbody_none` (no body), and the indexed-read
+  // controls `stkidx_below`, `stkidx_byval` and `stkidx_fpspill`, whose read clears no staged word.
   const OVERLAPS: [chain: string, markers: number][] = [
     ['indirect-call > branch-form', 10],
+    ['address-taken-local > outgoing-stack-args', 8],
     ['address-taken-local > stack-frames', 5],
-    ['address-taken-local > outgoing-stack-args', 3],
-    ['outgoing-stack-args > stack-frames', 2],
+    ['outgoing-stack-args > stack-frames', 5],
   ];
 
   test('every marker that more than one class matches is attributed by a listed ordering', () => {
