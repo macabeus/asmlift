@@ -428,8 +428,8 @@ of every store forever.
   live in the OS and are keyed by its build, `sw_vers`), the words of the command, the harness code
   that shapes the compiler's input (on the command path, `@match-kit/compiler` too: it runs the
   command and words a failure) as the process LOADED it — a load hook every bench process registers
-  before tsx (`node --import packages/cli/src/loaded-code-hook.mjs --import tsx --import
-  packages/cli/src/ts-transform-hook.mjs`, in that order, so the first hook sits beneath tsx's
+  before tsx (`loaded-code-hook.mjs`, then tsx, then `ts-transform-hook.mjs`, each one a
+  `node --import` and the two hooks in `packages/cli/src`; in that order, so the first hook sits beneath tsx's
   loader and the last, which compiles an ES module `.ts` file without tsx's `keepNames`, above it)
   hashes the text each module is compiled from, and a process without it refuses a file changed since it started — so a `pnpm
 install` or `git pull` during a run is the next run's namespace and not this one's, the compile
