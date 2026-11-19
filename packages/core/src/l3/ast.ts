@@ -358,7 +358,11 @@ export type Stmt =
   // node never forces a loud-fail.
   // `inc` is a LIST, printed as one comma expression (`i++, j = i << 2`): it runs left to right after
   // the body and on every `continue`, so a later step may read a name an earlier one wrote
-  // (structure.ts `forPlanAt`, A SECOND COUNTER). It is never empty.
+  // (structure.ts `forPlanAt`, A SECOND COUNTER). It is never empty. `init` stays ONE statement, the
+  // counter's (the name `cond` reads): every other stepped name's init is a statement ahead of the
+  // loop, `j = lo << 3; for (i = lo; i <= hi; i++, j = i << 2)` where a source may have written
+  // `for (i = lo, j = lo << 3; …)`. The two run the same, as the init clause runs right after the
+  // statements ahead of it; only the reading differs.
   | { k: 'for'; init: Stmt; cond: Expr; inc: Stmt[]; body: Stmt[] }
   // `break;` / `continue;` — a loop early-exit / next-iteration jump. Emitted ONLY when the target is
   // the innermost enclosing loop (bare C break/continue cannot express a multi-level exit; a deeper
