@@ -508,6 +508,17 @@ test('a dispatch summing into the pointer register leaves the scaled index for t
   expect(elided).toMatch(/case 0:\s*\n\s*return \(a0 << 2\) \+ a3;/);
 });
 
+test('an undeclared call in a case of an elided pointer-sum dispatch does not count the scaled index', () => {
+  // `synthetic:jt_idxcall:agbcc`: the case's `bl h` finds `i << 2` in r0, and `h()` and
+  // `h(i << 2)` compile to the same bytes, so the guessed arity refuses (`CallSite.scaledIndex`)
+  const asm = ptrSum('', '\tpush\t{lr}\n\tbl\th\n\tmov\tr0, #4\n\tpop\t{r1}\n\tbx\tr1\n');
+  expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(
+    /still holds the index the jump table's dispatch scaled .* the argument count is not decidable/,
+  );
+  // a declared arity decides it
+  expect(decompile('f', asm, ARMV4T_AGBCC, { prototypes: { h: { params: 0 } } }).source).toMatch(/h\(\);/);
+});
+
 test('a dispatch summing into the pointer register reads the scrutinee from that register before the table load', () => {
   // agbcc's switch on a second parameter: the scrutinee is in r1, which the `ldr r1, .Lp` then
   // overwrites. The `lsl` ran before it, so it is the idiom, not an extra reading a stale register.
