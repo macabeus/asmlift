@@ -7613,14 +7613,16 @@ function structureRanked(
       return null;
     }
     // the counter: the step whose new or old value the test reads, the first in step order where it
-    // reads several, and the first step where it reads none
-    const testReads = (rec: StepRec): boolean => {
+    // reads several, and the first step where it reads none. A read the test makes only through
+    // another step's new value (`j = i + 4` tested as `hi < j`) is that step's: it counts only where
+    // no step is read directly, or the init clause would name `i` and the test `j`.
+    const testReads = (rec: StepRec, through: boolean): boolean => {
       const seen = new Set<Value>();
       const walk = (x: Value): boolean => {
         if (x === rec.arg || x === rec.param || varName.get(x) === rec.name) {
           return true;
         }
-        if (seen.has(x)) {
+        if (seen.has(x) || (!through && stepOrder.some((o) => o !== rec && o.arg === x))) {
           return false;
         }
         seen.add(x);
@@ -7628,7 +7630,8 @@ function structureRanked(
       };
       return walk(lterm.operands[0]);
     };
-    const ivRec = stepOrder.find(testReads) ?? stepOrder[0];
+    const ivRec =
+      stepOrder.find((r) => testReads(r, false)) ?? stepOrder.find((r) => testReads(r, true)) ?? stepOrder[0];
     const iv = ivRec.name;
     const updateNames = new Set(stepOrder.map((r) => r.name));
     const ivInit = initRecs.find((r) => r.name === iv);
