@@ -15,22 +15,15 @@ const PAUSE_HOOK = new URL('./fixtures/pause-hook.mjs', import.meta.url).href;
 
 /** Runs `script` (a .ts file) with `args` under `node <flags>`, the hook's (`loadedCodeArgv`) by
  *  default. With `pause`, the child stops once the module at `pause.at` (a URL) is fetched, and
- *  `pause.edit` runs then. `env` adds to its environment and `cwd` is its working directory.
- *  Resolves with its stdout; rejects when it exits otherwise than 0. */
+ *  `pause.edit` runs then. Resolves with its stdout; rejects when it exits otherwise than 0. */
 export function runChild(
   script: string,
   args: unknown,
-  opts: {
-    flags?: readonly string[];
-    pause?: { at: string; edit: () => void };
-    env?: Record<string, string>;
-    cwd?: string;
-  } = {},
+  opts: { flags?: readonly string[]; pause?: { at: string; edit: () => void } } = {},
 ): Promise<string> {
   const flags = [...(opts.flags ?? loadedCodeArgv()), ...(opts.pause ? ['--import', PAUSE_HOOK] : [])];
   const child = spawn(process.execPath, [...flags, script, JSON.stringify(args)], {
-    env: { ...process.env, ...opts.env, PAUSE_AT: opts.pause?.at ?? '' },
-    cwd: opts.cwd,
+    env: { ...process.env, PAUSE_AT: opts.pause?.at ?? '' },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   let out = '';

@@ -48,9 +48,9 @@ await build({
   // by file:// URL, and the rest are plain runtime dependencies.
   external: ['@match-kit/compiler', '@match-kit/decomp-yaml', '@match-kit/scoring', 'yaml', 'zod'],
   banner: { js: '#!/usr/bin/env node' },
-  // No --keep-names. tsx's transform sets it (`keepNames:!0` in its esbuild options) and wraps every
-  // arrow function in the shim; this bundle has never carried it, and the two loaders otherwise run
-  // the same sources.
+  // No --keep-names, as under tsx, whose hardcoded `keepNames:!0` the repo patches off
+  // (patches/tsx@4.23.1.patch): the shim it adds redefines `name` on every named closure a call
+  // creates, and nothing reads those names.
   define: { __ASMLIFT_BUILD__: JSON.stringify(built) },
   outfile: resolve(pkg, 'dist/asmlift.mjs'),
 });
