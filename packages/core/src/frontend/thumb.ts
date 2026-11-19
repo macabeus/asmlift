@@ -645,49 +645,116 @@ function regListOf(ops: string[]): string[] | null {
   );
 }
 
-/** Split a source line, its `@` comment already cut, into the statements gas assembles from it:
- *  `;` separates statements in gas for ARM, except inside a string (`"a;b"`, with `\"` escapes), as
- *  a character constant (`';`), or inside a `/* … *\/` comment. Two comment forms are read the way
- *  gas reads them (arm-none-eabi-as checked): a `/* … *\/` closed on the line is blank space, and a
- *  `#` that starts a statement (at the line's start, after its labels, or after a `;`) comments out
- *  the rest of the line, `;`s included. A `/*` left open is kept as written to the line's end, as
- *  it was before statements were split: a comment spanning lines is not read here. */
-function splitStatements(line: string): string[] {
-  const out: string[] = [];
-  let cur = '';
-  let inString = false;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (inString) {
-      cur += c;
-      if (c === '\\' && i + 1 < line.length) {
-        cur += line[++i];
-      } else if (c === '"') {
-        inString = false;
+/** One statement of a GNU-as source line, as gas's ARM reader cuts it: comments removed, trimmed.
+ *  `unread` says why this reader's text may not be what gas assembles; such a statement is never
+ *  read as an instruction, a label or a directive, and declines where it sits in a function. */
+interface GasStatement {
+  text: string;
+  unread?: string;
+}
+
+/** A source line read the way gas reads it: its statements, the `@` comment closing it (the only
+ *  comment a fact is read from: the far-jump mark), and whether the line's reading depends on
+ *  another line (`/* … *\/` spanning lines, a string or character constant that reads the line
+ *  break), which makes the line one a caller must not drop on its own. */
+interface GasLine {
+  statements: GasStatement[];
+  comment: string | null;
+  crossesLine: boolean;
+}
+
+/** Labels opening a statement: named ones and gas's numeric local labels (`1:`). */
+const LEADING_LABELS = /^(?:(?:[A-Za-z_.$][\w.$]*|\d+):\s*)+/;
+
+/** Read a GNU-as listing into statements the way gas for ARM does, in ONE left-to-right pass that
+ *  every consumer in this file shares (decode, the debug-section filter, the macro scan), so no
+ *  two of them can disagree about where a comment, string or statement ends. Each rule is gas's
+ *  (arm-none-eabi-as -mthumb -mcpu=arm7tdmi + objdump, measured):
+ *
+ *   • `"…"` is a string, `\` escaping the next character; `@`, `;`, `/*` and `'` inside it are
+ *     text. A string still open at the line's end continues onto the next line (gas warns and
+ *     reads on), so the statement is `unread`.
+ *   • `'` is a character constant: the next character (or `\` and the one after it: `'\101'` is
+ *     `'1'` then `01'`) is the value, and ONE closing `'` right after it is optional and eaten.
+ *     So `#'a'; bx lr` and `#'a; bx lr` both assemble the `bx lr`, `#';` is 59, and `#'@` is 64,
+ *     not a comment. A `'` at the line's end reads the line break as its character and joins the
+ *     next line: `unread`.
+ *   • `/* … *\/` is blank space and may span lines; inside it `@`, `;`, `"` and `#` are text.
+ *   • `@` outside those comments the rest of the line.
+ *   • `#` comments out the rest of the line when it opens a statement: at the line's start, after
+ *     the statement's labels (numeric ones too), after a closed `/* … *\/`, or after a `;`. Elsewhere
+ *     it is an immediate's prefix, and a `/*` after it still opens a comment.
+ *   • `;` separates statements. */
+function readGasLines(asm: string): GasLine[] {
+  const out: GasLine[] = [];
+  let inComment = false;
+  for (const line of asm.split('\n')) {
+    const statements: GasStatement[] = [];
+    let comment: string | null = null;
+    let crossesLine = inComment;
+    let cur = '';
+    let unread: string | undefined;
+    const end = () => {
+      const text = cur.trim();
+      if (text !== '' || unread !== undefined) {
+        statements.push(unread === undefined ? { text } : { text, unread });
       }
-    } else if (c === '"') {
-      inString = true;
-      cur += c;
-    } else if (c === "'" && i + 1 < line.length) {
-      cur += c + line[++i];
-    } else if (c === '/' && line[i + 1] === '*') {
-      const end = line.indexOf('*/', i + 2);
-      if (end === -1) {
-        cur += line.slice(i);
-        break;
-      }
-      cur += ' ';
-      i = end + 1;
-    } else if (c === '#' && /^\s*(?:[A-Za-z_.$][\w.$]*:\s*)*$/.test(cur)) {
-      break;
-    } else if (c === ';') {
-      out.push(cur);
       cur = '';
-    } else {
-      cur += c;
+      unread = undefined;
+    };
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (inComment) {
+        const close = line.indexOf('*/', i);
+        if (close === -1) {
+          break;
+        }
+        cur += ' ';
+        i = close + 1;
+        inComment = false;
+      } else if (c === '"') {
+        let j = i + 1;
+        while (j < line.length && line[j] !== '"') {
+          j += line[j] === '\\' ? 2 : 1;
+        }
+        if (j >= line.length) {
+          cur += line.slice(i);
+          unread ??= 'a string still open at the end of its line, which gas reads on into the next';
+          crossesLine = true;
+          break;
+        }
+        cur += line.slice(i, j + 1);
+        i = j;
+      } else if (c === "'") {
+        let j = i + 1 + (line[i + 1] === '\\' ? 1 : 0);
+        if (j >= line.length) {
+          cur += line.slice(i);
+          unread ??= 'a character constant at the end of its line, which gas reads the line break into';
+          crossesLine = true;
+          break;
+        }
+        j += line[j + 1] === "'" ? 2 : 1;
+        cur += line.slice(i, j);
+        i = j - 1;
+      } else if (c === '/' && line[i + 1] === '*') {
+        inComment = true;
+        i++;
+      } else if (c === '@') {
+        comment = line.slice(i);
+        break;
+      } else if (c === '#' && cur.trimStart().replace(LEADING_LABELS, '').trim() === '') {
+        // a `#` opening the statement: `cur` holds only blank space and labels
+        break;
+      } else if (c === ';') {
+        end();
+      } else {
+        cur += c;
+      }
     }
+    end();
+    crossesLine ||= inComment;
+    out.push({ statements, comment, crossesLine });
   }
-  out.push(cur);
   return out;
 }
 
@@ -1102,26 +1169,144 @@ function withRelayCandidates(
   );
 }
 
-/** A GNU-as listing without its debug and stabs sections: every line from a `.section .debug_*` (or a
- *  `.stab*` section) up to the next section switch is dropped, and every other line is kept verbatim,
- *  so a listing with no debug section comes back unchanged. What agbcc `-g` adds to a `.s` beside
- *  the marker labels in its code (`corpus/agbcc-debug{,-g}.s`). */
+/** For each statement of `lines`, the section gas assembles it into and whether that is a debug or
+ *  stabs section, and the same at each line's end (what a line with no statement sits in). gas's
+ *  section state is a current section, the previous one, and a push stack: `.section`, `.text`,
+ *  `.data` and `.bss` make a section current and the old one previous, `.pushsection` also saves
+ *  both, `.popsection` restores them, `.previous` swaps them, and `.subsection` (or the number
+ *  after `.text`/`.data`) picks the subsection, which gas lays out after the lower ones, so it is
+ *  part of the key. All of them are tracked, by statement: measured, a `.pushsection .text`, a
+ *  `.previous` or a `.text` after a `;` inside a debug section each put the `bx lr` after it back
+ *  into `.text`, where a reader of whole lines or of `.section` alone dropped it with the debug
+ *  rows. A pop with nothing pushed leaves the section unknown (`null`), which reads as not debug.
+ *
+ *  A body gas may not assemble as written (a conditional's, a macro definition's, a repetition's:
+ *  {@link LINE_DIRECTIVES}) is not modelled, so its section switches cannot be applied: measured,
+ *  `.if 0` / `.text ; add r4, #2 ; .section .debug_str` / `.endif` inside a debug section is no
+ *  `add` at all, and applying the switches hid the `.endif` in a debug region where decode never
+ *  saw it. A switch inside such a body is returned as `bodySwitch`, and decode declines the input
+ *  on it (no real input in the benchmark checkouts or kl2dct has one). The directives that open
+ *  and close a body are never masked, so one inside a function always reaches decode's decline. */
+function sectionMask(lines: readonly GasLine[]): {
+  lines: { statements: { debug: boolean; section: string | null }[]; atEnd: boolean }[];
+  bodySwitch: string | null;
+} {
+  let current: string | null = '.text 0';
+  let previous: string | null = null;
+  const stack: [string | null, string | null][] = [];
+  let depth = 0;
+  let bodySwitch: string | null = null;
+  const isDebug = () => current !== null && /^\.(?:debug|stab)/.test(current);
+  // A subsection gas reads as an expression; only a plain number is read here. Any other spelling
+  // (`0+1`, `2*1`, a symbol) keys a subsection of its own, so code under it declines as split
+  // across sections instead of being read as subsection 0 (measured: `.subsection 0+1` is 1).
+  // The same text can name a different subsection at each use (`.set S, 0` … `.set S, 1`, measured),
+  // so every such occurrence is a subsection of its own.
+  let opaque = 0;
+  const subsection = (expr: string) => {
+    const e = expr.trim();
+    return e === '' ? '0' : /^(?:\d+|0x[0-9a-f]+)$/i.test(e) ? String(Number(e)) : `?${e}#${opaque++}`;
+  };
+  const named = (name: string, sub: string) => `${name.replace(/^"(.*)"$/, '$1')} ${subsection(sub)}`;
+  const out = lines.map((line) => {
+    const statements = line.statements.map((st) => {
+      const text = st.unread === undefined ? st.text.replace(LEADING_LABELS, '') : '';
+      const directive = text.match(/^\.([\w.$]+)/)?.[1].toLowerCase() ?? '';
+      if (LINE_DIRECTIVES.test(directive)) {
+        if (/^(?:if\w*|macro|rept|irpc?)$/.test(directive)) {
+          depth++;
+        } else if (/^(?:endif|endm|endr)$/.test(directive)) {
+          depth--;
+        }
+        return { debug: false, section: current };
+      }
+      const sw = text.match(/^\.(section|pushsection|popsection|previous|subsection|text|data|bss)\b\s*(.*)$/i);
+      if (sw && depth !== 0) {
+        bodySwitch ??= st.text;
+      } else if (sw) {
+        const kind = sw[1].toLowerCase();
+        // `name` then its comma-separated arguments; a quoted name keeps its commas
+        const [, name = '', args = ''] = sw[2].match(/^("[^"]*"|[^\s,]*)\s*(?:,(.*))?$/) ?? [];
+        if (kind === 'pushsection') {
+          // `.pushsection name [, subsection] [, flags…]`: a quoted second argument is flags
+          const second = args.split(',')[0]?.trim() ?? '';
+          stack.push([current, previous]);
+          [previous, current] = [current, named(name, second.startsWith('"') ? '' : second)];
+        } else if (kind === 'popsection') {
+          [current, previous] = stack.pop() ?? [null, null];
+        } else if (kind === 'previous') {
+          [current, previous] = [previous, current];
+        } else if (kind === 'subsection') {
+          // gas makes the old subsection the previous one (measured: `.subsection 1` then `.previous`)
+          [previous, current] = [
+            current,
+            current === null ? null : `${current.replace(/ \S+$/, '')} ${subsection(sw[2])}`,
+          ];
+        } else if (kind === 'section') {
+          [previous, current] = [current, named(name, '')];
+        } else {
+          [previous, current] = [current, named(`.${kind}`, sw[2])];
+        }
+      } else if (directive !== '' && !keepsSection(directive)) {
+        // Any other directive may move code out of the current section or location (`.struct`,
+        // `.offset`, `.sbss`, `.org`, an `.include`d file's own switches): what follows it is in a
+        // section of its own, so code on both sides of it declines as split across sections.
+        if (depth !== 0) {
+          bodySwitch ??= st.text;
+        } else {
+          [previous, current] = [current, `?.${directive}#${opaque++}`];
+        }
+      }
+      return { debug: isDebug(), section: current };
+    });
+    return { statements, atEnd: isDebug() };
+  });
+  return { lines: out, bodySwitch };
+}
+
+/** The directives known to leave gas's current section and location where they are (besides the
+ *  section switches {@link sectionMask} models, and {@link LINE_DIRECTIVES}): the zero-byte
+ *  bookkeeping decode skips, and the data, alignment and literal-pool directives that emit bytes
+ *  in place. An allowlist: any other directive counts as a switch to a section of its own. */
+const SECTION_SWITCHES = new Set([
+  'text',
+  'data',
+  'bss',
+  'section',
+  'pushsection',
+  'popsection',
+  'previous',
+  'subsection',
+]);
+const keepsSection = (directive: string): boolean =>
+  (ZERO_BYTE_DIRECTIVES.has(directive) && !SECTION_SWITCHES.has(directive)) ||
+  directive.startsWith('cfi_') ||
+  directive.includes('align') || // read, or refused as an alignment hazard, where it sits
+  /^(?:word|4byte|long|2byte|hword|short|byte|ascii|asciz|string|space|skip|quad|8byte|octa|double|float|single|fill|zero|inst(?:\.[nw])?|(?:b|p2)?align[wl]?|pool|ltorg)$/.test(
+    directive,
+  );
+
+/** A GNU-as listing without its debug and stabs sections: every line all of whose statements gas
+ *  assembles into a `.debug_*` or `.stab*` section (and every blank or comment line inside one) is
+ *  dropped, and every other line is kept verbatim, so a listing with no debug section comes back
+ *  unchanged. What agbcc `-g` adds to a `.s` beside the marker labels in its code
+ *  (`corpus/agbcc-debug{,-g}.s`). A line that mixes the two, or whose reading depends on the next
+ *  line (a comment spanning lines), is kept whole: decode drops debug statements itself, by the
+ *  same reader, so keeping one only costs a decline. */
 export function withoutDebugSections(asm: string): string {
-  let inDebugSection = false;
-  const kept: string[] = [];
-  for (const rawLine of asm.split('\n')) {
-    const sectionSwitch = rawLine
-      .split('@')[0]
-      .trim()
-      .match(/^\.(?:section\s+([^\s,]+)|text\b|data\b|bss\b)/);
-    if (sectionSwitch) {
-      inDebugSection = sectionSwitch[1] !== undefined && /^\.(debug|stab)/.test(sectionSwitch[1]);
-    }
-    if (!inDebugSection) {
-      kept.push(rawLine);
-    }
+  const raw = asm.split('\n');
+  const lines = readGasLines(asm);
+  const mask = sectionMask(lines);
+  if (mask.bodySwitch !== null) {
+    return asm; // decode declines this input; nothing here is dropped on a guess
   }
-  return kept.join('\n');
+  return raw
+    .filter((_, k) => {
+      const { statements, atEnd } = mask.lines[k];
+      const debug = lines[k].statements.length === 0 ? atEnd : statements.every((st) => st.debug);
+      return !debug || lines[k].crossesLine;
+    })
+    .join('\n');
 }
 
 /** The canonical serialisation a witness is compared BY, and the prose it is reported AS. Keeping
@@ -1301,7 +1486,7 @@ function decode(
   // DEBUG OUTPUT IS NEITHER CODE NOR DATA THE CODE READS. agbcc `-g` leaves `.text` byte-identical
   // (`corpus/agbcc-debug{,-g}.s`), so the lift reads exactly the function it reads without `-g`, and
   // two things are dropped:
-  //   • every debug or stabs section (`withoutDebugSections`): the debug rows, their labels, and the
+  //   • every debug or stabs section (`sectionMask`): the debug rows, their labels, and the
   //     data a trailing `.Letext0` label would otherwise head;
   //   • the marker labels `-g` plants in the code stream (`.LFB1`, `.LM3`, `.LBB2`, `.LBE2`, `.LFE1`,
   //     `.Letext0`) that no code line names. A label starts a block, and a block split at a
@@ -1317,63 +1502,134 @@ function decode(
   // first token, the whole line was skipped with the directive, and the `bx lr` it hid let a local
   // call thunk lift as a branch. The mark belongs to the line's last statement, the one its
   // comment follows.
-  const codeLines: string[] = [];
+  //
+  // ONE reader ({@link readGasLines}) cuts the text into gas's statements, and every consumer here
+  // reads its output: the debug-section filter, the macro scan and the decode loop. They used to
+  // read lines three ways (an `@` cut before strings, character constants and `/* … *\/` were
+  // recognised; whole lines classified by their first token), and each disagreement with gas let
+  // a `bx lr` vanish from the text the far-jump lr proof reads. A statement the reader cannot read
+  // as gas does, or that decode cannot classify, is recorded in `unreadStatements` and declines
+  // where it sits in the selected function; it is never skipped.
+  const codeLines: GasStatement[] = [];
+  // the section each of `codeLines` is assembled into (see {@link sectionMask}), and each decoded
+  // instruction's, by allFlat position
+  const codeSections: (string | null)[] = [];
+  const itemSections: (string | null)[] = [];
   const farJumpLines = new Set<number>();
-  for (const rawLine of withoutDebugSections(asm).split('\n')) {
-    const at = rawLine.indexOf('@');
-    const statements = splitStatements(at === -1 ? rawLine : rawLine.slice(0, at))
-      .map((st) => st.trim())
-      .filter((st) => st !== '');
-    for (const [k, st] of statements.entries()) {
-      if (k === statements.length - 1 && at !== -1 && farJumpMark?.test(rawLine.slice(at))) {
-        farJumpLines.add(codeLines.length);
-      }
-      codeLines.push(st);
-    }
-  }
+  const unreadStatements: { at: number; what: string; why: string }[] = [];
   // Every statement that names a macro the input has defined ABOVE it (gas matches macro names
   // case-insensitively, and expands a macro only after its definition). A macro wins over an
   // instruction of the same name, so `.macro nop` / `bx lr` / `.endm` above the function makes a
   // `nop` line inside it a `bx lr`. Its definition can sit outside every slice, so
   // {@link LINE_DIRECTIVES} never sees it: a statement in the slice that names one declines below,
   // as a line this frontend does not read as written. A `nop` above the definition is the
-  // instruction, and reads as one. `.purgem` is not honoured (a purge inside a skipped `.if` would
-  // un-define a macro gas still expands), so a name stays a macro once defined. A macro the input
-  // only `.include`s is not visible here (the residue named on {@link ZERO_BYTE_DIRECTIVES}).
+  // instruction, and reads as one. Definitions are read from EVERY statement, a debug section's
+  // included (gas defines a macro wherever it sits), and a label before `.macro` is the macro's
+  // name (measured: `nop: .macro` defines `nop`, and `m: .macro nop` defines `m`, leaving `nop` the
+  // instruction; `a: b: .macro` counts both labels, which only adds declines). `.purgem` is not
+  // honoured (a purge inside a skipped `.if` would un-define a macro gas still expands), so a name
+  // stays a macro once defined. A macro the input only `.include`s is not visible here (the residue
+  // named on {@link ZERO_BYTE_DIRECTIVES}).
   const macroUses = new Set<number>();
   {
+    const lines = readGasLines(asm);
+    const joined = lines.find((l) => l.crossesLine && l.statements.some((st) => st.unread !== undefined));
+    if (joined) {
+      const st = joined.statements.find((s) => s.unread !== undefined)!;
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${st.text}' is ${st.unread}, so this frontend cannot tell which lines gas assembles`,
+      );
+    }
+    const mask = sectionMask(lines);
+    if (mask.bodySwitch !== null) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${mask.bodySwitch}' switches section inside a conditional, macro or repeated ` +
+          `body, which this frontend does not model, so it cannot tell which section the lines after it are in`,
+      );
+    }
     const defined = new Set<string>();
-    for (const [k, line] of codeLines.entries()) {
-      const md = line.match(/^\.macro\s+([^\s,]+)/i);
-      if (md) {
-        defined.add(md[1].toLowerCase());
-        continue;
-      }
-      const head = line
-        .replace(/^(?:[A-Za-z_.$][\w.$]*:\s*)+/, '')
-        .match(/^[\w.$]+/)?.[0]
-        .toLowerCase();
-      if (head !== undefined && defined.has(head)) {
-        macroUses.add(k);
+    for (const [k, line] of lines.entries()) {
+      for (const [j, st] of line.statements.entries()) {
+        const { debug, section } = mask.lines[k].statements[j];
+        const code = !debug;
+        if (code) {
+          if (j === line.statements.length - 1 && line.comment !== null && farJumpMark?.test(line.comment)) {
+            farJumpLines.add(codeLines.length);
+          }
+          codeLines.push(st);
+          codeSections.push(section);
+        }
+        if (st.unread !== undefined) {
+          continue;
+        }
+        const labels = st.text.match(LEADING_LABELS)?.[0] ?? '';
+        const rest = st.text.slice(labels.length);
+        const md = rest.match(/^\.macro\b\s*([^\s,]*)/i);
+        if (md) {
+          const names = labels === '' ? [md[1]] : [...labels.matchAll(/([^\s:]+)\s*:/g)].map((l) => l[1]);
+          for (const l of names.map((s) => s.trim().toLowerCase())) {
+            if (l !== '') {
+              defined.add(l);
+            }
+          }
+          continue;
+        }
+        // `.macro` after anything but plain labels (a quoted `"nop": .macro` names the macro `nop`)
+        // defines a macro whose name this scan cannot read: the input declines.
+        if (/(?:^|[^\w.$])\.macro\b/i.test(rest)) {
+          throw new FrontendUnsupportedError(
+            `cannot lift '${name}': '${st.text}' defines a macro whose name this frontend does not read`,
+          );
+        }
+        const head = rest.match(/^[\w.$]+/)?.[0].toLowerCase();
+        if (code && head !== undefined && defined.has(head)) {
+          macroUses.add(codeLines.length - 1);
+        }
       }
     }
   }
+  // A statement this pass does not read. Inside the selected function it declines below; one in
+  // the place of a function's own label (right after its start marker) declines here, since the
+  // slice itself would then start at the wrong label.
+  const noteUnread = (what: string, why: string) => {
+    if (pendingFn || pendingArm) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${what}' follows a function-start marker and is a statement this frontend ` +
+          `does not read (${why}), so where that function starts is unknown`,
+      );
+    }
+    unreadStatements.push({ at: flat.length - 1, what, why });
+  };
   const DEBUG_MARKER = /(?<![\w.$])\.L(?:FB|FE|M|BB|BE|etext)\d+\b/g;
   const namedByCode = new Set<string>();
-  for (const line of codeLines) {
-    for (const m of line.replace(/^[A-Za-z_.$][\w.$]*:\s*/, '').matchAll(DEBUG_MARKER)) {
+  for (const { text } of codeLines) {
+    for (const m of text.replace(/^[A-Za-z_.$][\w.$]*:\s*/, '').matchAll(DEBUG_MARKER)) {
       namedByCode.add(m[0]);
     }
   }
   const isDebugMarker = (label: string) => /^\.L(?:FB|FE|M|BB|BE|etext)\d+$/.test(label) && !namedByCode.has(label);
-  for (const [lineNo, line] of codeLines.entries()) {
-    let rest = line;
-    // A label may share the line with what follows it (pret pools: `_08x: .4byte 0x…`) — peel it.
-    const lm = rest.match(/^([A-Za-z_.$][\w.$]*):\s*(.*)$/);
-    if (lm && isDebugMarker(lm[1]) && lm[2] === '') {
+  // each flat item takes the section of the statement that pushed it
+  let lastLine = -1;
+  const tagSections = () => {
+    while (itemSections.length < flat.length) {
+      itemSections.push(lastLine === -1 ? null : codeSections[lastLine]);
+    }
+  };
+  for (const [lineNo, statement] of codeLines.entries()) {
+    tagSections();
+    lastLine = lineNo;
+    if (statement.unread !== undefined) {
+      noteUnread(statement.text, statement.unread);
       continue;
     }
-    if (lm) {
+    let rest = statement.text;
+    // Labels may share the line with what follows them (pret pools: `_08x: .4byte 0x…`), and gas
+    // reads any number of them (`a: b: bx lr` assembles the `bx lr`): peel each.
+    for (let lm = rest.match(/^([A-Za-z_.$][\w.$]*):\s*(.*)$/); lm; lm = rest.match(/^([A-Za-z_.$][\w.$]*):\s*(.*)$/)) {
+      rest = lm[2];
+      if (isDebugMarker(lm[1]) && rest === '') {
+        break;
+      }
       const lab = lm[1];
       if (pendingFn || pendingArm) {
         funcLabels.push(lab);
@@ -1388,10 +1644,9 @@ function decode(
       }
       dataLabels.push(lab);
       flat.push({ label: lab });
-      rest = lm[2];
-      if (!rest) {
-        continue;
-      }
+    }
+    if (!rest) {
+      continue;
     }
     if (macroUses.has(lineNo)) {
       unreadDirectives.push({ at: flat.length - 1, what: rest.match(/^[\w.$]+/)![0].toLowerCase(), lines: true });
@@ -1544,7 +1799,10 @@ function decode(
         continue;
       }
       const dname = rest.match(/^\.([\w.$]+)/)?.[1].toLowerCase() ?? '';
-      if (!ZERO_BYTE_DIRECTIVES.has(dname) && !dname.startsWith('cfi_')) {
+      // `.set ., expr` (and `.equ`/`.eqv`/`.equiv`) moves the location counter, emitting fill, as
+      // `. = expr` does (measured: `.set ., .+2` is a 0x0000 halfword in the code). Not zero-byte.
+      const movesDot = /^\.(?:set|equ|eqv|equiv)\s+(?:\.|"\.")\s*,/i.test(rest); // `"."` is `.` too
+      if (movesDot || (!ZERO_BYTE_DIRECTIVES.has(dname) && !dname.startsWith('cfi_'))) {
         unreadDirectives.push({ at: flat.length - 1, what: rest.split(/\s/)[0], lines: LINE_DIRECTIVES.test(dname) });
       }
       continue; // zero-byte, or recorded in `unreadDirectives`
@@ -1561,6 +1819,7 @@ function decode(
     }
     const m = rest.match(/^(\w+)\s*(.*)$/);
     if (!m) {
+      noteUnread(rest, 'it opens with no label, directive or mnemonic this frontend reads');
       continue;
     }
     dataLabels = []; // a real instruction ends a data run
@@ -1587,6 +1846,7 @@ function decode(
       },
     });
   }
+  tagSections();
   if (
     armLabels.has(name) ||
     (funcLabels.length === 1 && armLabels.has(funcLabels[0]) && !flat.some((f) => f.label === name))
@@ -1734,6 +1994,13 @@ function decode(
           `and this frontend reads every line as written`,
       );
     }
+    const unreadStatement = unreadStatements.find((u) => inSlice(u.at));
+    if (unreadStatement) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${unreadStatement.what}' is a statement this frontend does not read the way the ` +
+          `assembler does (${unreadStatement.why}), so skipping it could silently delete an instruction`,
+      );
+    }
     const liveUnread = unreadDirectives.find((u) => inSlice(u.at) && fillIsReachable(u.at - sliceStart + 1));
     if (liveUnread) {
       throw new FrontendUnsupportedError(
@@ -1752,6 +2019,22 @@ function decode(
             : `makes item sizes unknowable`),
       );
     }
+    // Decode reads the slice as one run of code, so every instruction in it must be assembled into
+    // one section: `.section .text.foo` / `add r4, #2` / `.text` inside a function puts the `add`
+    // in other bytes (measured), and read in place it was a phantom instruction. Instructions only:
+    // a compiler's `.rodata` or `.data` object between two functions sits in the slice too.
+    const sliceSections = new Set<string | null>();
+    for (let i = sliceStart; i < boundaries[boundaryIdx]; i++) {
+      if (allFlat[i].instr) {
+        sliceSections.add(itemSections[i]);
+      }
+    }
+    if (sliceSections.size > 1) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': its code is assembled into more than one section ` +
+          `(${[...sliceSections].map((s) => s ?? 'unknown').join(', ')}), so it is not one run of code as written`,
+      );
+    }
     const needsLayout = flat.some(
       (f, i) => (f.data?.inCode ?? false) || isPcRelLdr(f.instr) || (f.align !== undefined && !sealedFill[i]),
     );
@@ -1764,6 +2047,24 @@ function decode(
     // sits behind a dead `.L` label that the rule above seals. So a clean `bench diff` says NOTHING about any code inside this branch —
     // `thumb-pad-directives.test.ts` is its only gate, and a change here has to be argued there.
     if (needsLayout) {
+      // The layout walk lays every item of the slice end to end, so an item gas assembles into
+      // another section (a `.data` word, a `.rodata` halfword) would move every offset after it:
+      // measured, a `[pc, #4]` load past one read the wrong pool word.
+      // (a slice with no instruction has no section of its own to compare against, and declines below)
+      const codeSection = sliceSections.size === 1 ? [...sliceSections][0] : undefined;
+      const elsewhere =
+        codeSection === undefined
+          ? -1
+          : allFlat
+              .slice(sliceStart, boundaries[boundaryIdx])
+              .findIndex((f, i) => !f.instr && itemSections[sliceStart + i] !== codeSection);
+      if (elsewhere !== -1) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': raw-encoded input needs byte-accurate layout, but item ${elsewhere} of the ` +
+            `function is assembled into another section (${itemSections[sliceStart + elsewhere] ?? 'unknown'}), ` +
+            `so it is not where the layout would put it`,
+        );
+      }
       const sizedNothing = unreadDirectives.find((u) => inSlice(u.at));
       if (sizedNothing) {
         throw new FrontendUnsupportedError(
@@ -7584,7 +7885,8 @@ export const thumbFrontend: Frontend = {
  *  is; nothing in `src` reads it. */
 export const __testing = {
   decode,
-  splitStatements,
+  readGasLines,
+  sectionMask,
   PAD_ENCODINGS,
   isPadInstr,
   factKey,

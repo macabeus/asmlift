@@ -45,6 +45,79 @@ const HILO_OP = /%(hi|lo)\s*\(/i;
 const DATA_DIRECTIVE =
   /^\.(byte|half|hword|short|2byte|word|4byte|long|dword|8byte|quad|float|double|ascii|asciz|string|incbin|space|skip|fill|zero)\b/i;
 
+/** A Splat line cut into the statements gas for MIPS assembles from it (mips-linux-gnu-as
+ *  measured): `;` separates statements and `#` comments out the rest of the line, except inside a
+ *  string, a character constant (`'c`, an optional closing `'`) or a `/* … *\/` comment. Every
+ *  statement is then read on its own, so `.set K, 1; addiu $v0, $v0, 4` or a second instruction
+ *  after an addressed one is an unrecognised line that declines, where reading the line by its
+ *  first token skipped an instruction gas assembles. The `/* ROM VRAM BYTES *\/` prefix is kept on
+ *  its statement, since it is what marks an instruction. Null where the line's reading runs into
+ *  the next one (a comment, string or character constant left open), which this reader does not
+ *  follow. */
+function splatStatements(line: string): string[] | null {
+  const out: string[] = [];
+  let cur = '';
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '/' && line[i + 1] === '*') {
+      const close = line.indexOf('*/', i + 2);
+      if (close === -1) {
+        return null;
+      }
+      cur += line.slice(i, close + 2);
+      i = close + 1;
+    } else if (c === '"') {
+      let j = i + 1;
+      while (j < line.length && line[j] !== '"') {
+        j += line[j] === '\\' ? 2 : 1;
+      }
+      if (j >= line.length) {
+        return null;
+      }
+      cur += line.slice(i, j + 1);
+      i = j;
+    } else if (c === "'") {
+      let j = i + 1 + (line[i + 1] === '\\' ? 1 : 0);
+      if (j >= line.length) {
+        return null;
+      }
+      j += line[j + 1] === "'" ? 2 : 1;
+      cur += line.slice(i, j);
+      i = j - 1;
+    } else if (c === '#') {
+      break;
+    } else if (c === ';') {
+      out.push(cur);
+      cur = '';
+    } else {
+      cur += c;
+    }
+  }
+  out.push(cur);
+  return out;
+}
+
+// A section switch, and whether it makes plain `.text` (subsection 0) current. Any other section,
+// or `.text` with a subsection, is "another section" to this reader.
+const SECTION_SWITCH =
+  /^\.(section|text|data|bss|rdata|sdata|rodata|late_rodata|pushsection|popsection|previous|subsection)\b\s*(.*)$/i;
+const isPlainText = (sw: RegExpMatchArray): boolean => {
+  const kind = sw[1].toLowerCase();
+  const arg = sw[2].trim();
+  return kind === 'section' ? /^"?\.text"?\s*(?:,|$)/.test(arg) : kind === 'text' && (arg === '' || arg === '0');
+};
+
+// The directives known to leave the section and location where they are: an allowlist, so a
+// directive missing from it reads as a switch to another section.
+const keepsSplatSection = (line: string): boolean =>
+  /^\.(?:set|globl|global|type|size|ent|end|aent|frame|mask|fmask|(?:b|p2)?align|loc|file|ident|option|abicalls|nan|gnu_attribute|module|weak|local|hidden|equ|equiv|eqv|cfi_\w+)\b/i.test(
+    line,
+  );
+
+// A directive that decides which lines gas assembles: conditional assembly, macro definition and
+// repetition (the Thumb frontend's LINE_DIRECTIVES).
+const LINE_DIRECTIVE = /^\.(if\w*|else\w*|endif|rept|irpc?|endr|macro|endm|exitm)\b/i;
+
 /** Does this text look like Splat-dialect MIPS? Both signals (`glabel` markers and the
  *  three-word instruction-comment prefix) are unique to Splat — objdump and compiler `.s` carry
  *  neither — so a positive match is unambiguous. */
@@ -69,6 +142,7 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
     }
   }
   let slice = lines;
+  let sliceFrom = 0;
   if (glabels.length > 0) {
     const at = glabels.findIndex((g) => g.sym === name);
     if (at === -1) {
@@ -84,16 +158,83 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
       }
     }
     slice = lines.slice(glabels[at].line, end);
+    sliceFrom = glabels[at].line;
+    // A function whose `glabel` sits inside a conditional, macro or repeated body is assembled as
+    // the body is (never, under `.if 0`), which this reader does not model.
+    let depth = 0;
+    for (const raw of lines.slice(0, glabels[at].line)) {
+      for (const st of splatStatements(raw) ?? []) {
+        const d = st.trim().match(LINE_DIRECTIVE)?.[1].toLowerCase();
+        depth +=
+          d === undefined ? 0 : /^(?:if\w*|macro|rept|irpc?)$/.test(d) ? 1 : /^(?:endif|endm|endr)$/.test(d) ? -1 : 0;
+      }
+    }
+    if (depth !== 0) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': its \`glabel\` sits inside a conditional, macro or repeated body, which this reader ` +
+          `does not model`,
+      );
+    }
   }
 
   // Flatten to instructions, assigning any pending label(s) to the NEXT instruction's address.
   const instrs: DisasmInstr[] = [];
   const labelAddr = new Map<string, number>();
   let pending: string[] = [];
-  for (const raw of slice) {
+  const statements = slice.flatMap((raw) => {
+    const sts = splatStatements(raw);
+    if (sts === null) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${raw.trim()}' leaves a comment, string or character constant open at the end of ` +
+          `its line, so this reader cannot tell which statements gas assembles`,
+      );
+    }
+    return sts;
+  });
+  // the section the lines before the slice leave current: a plain `.text` / `.section .text`, or
+  // anything else (not modelled: a stack form before the function reads as another section)
+  let inOtherSection = false;
+  // `.set reorder` lets gas fill and move delay slots itself (measured: it inserts a nop after a
+  // `jr`), so a function assembled under it is not the instruction stream written. The reader
+  // reads every slot as written; it declines under an explicit `.set reorder`. A file that never
+  // says `.set noreorder` is read as written too (gas's own default is reorder).
+  let reorder = false;
+  for (const raw of lines.slice(0, sliceFrom)) {
+    for (const st of splatStatements(raw) ?? []) {
+      const t = st.trim();
+      // `.set push` / `.set pop` save and restore the reorder state (measured: a `pop` back to
+      // `.set reorder` before the function lets gas fill its delay slot); not modelled.
+      if (/^\.set\s+(?:push|pop)\b/i.test(t)) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': '${t}' saves or restores assembler options this reader does not track`,
+        );
+      }
+      const ro = t.match(/^\.set\s+(no)?reorder\b/i);
+      if (ro) {
+        reorder = ro[1] === undefined;
+      }
+      const sw = t.match(SECTION_SWITCH);
+      if (sw) {
+        inOtherSection = !isPlainText(sw);
+      } else if (t.startsWith('.') && !LABEL_DEF.test(t) && !keepsSplatSection(t)) {
+        inOtherSection = true;
+      }
+    }
+  }
+  for (const raw of statements) {
     const line = raw.trim();
-    if (!line || line.startsWith('#')) {
+    if (!line) {
       continue;
+    }
+    // `.if 0` / an addressed instruction / `.endif` assembles nothing, and a `.macro` body only
+    // where it is invoked (mips-linux-gnu-as measured): read as written, the instruction was
+    // lifted. A directive that decides which lines are assembled declines inside the function.
+    const lineDirective = line.match(LINE_DIRECTIVE);
+    if (lineDirective) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${lineDirective[0]}' inside the function changes which lines are assembled, and ` +
+          `this reader reads every line as written`,
+      );
     }
     if (/^(glabel|endlabel|dlabel|jlabel)\b/.test(line) || /^nonmatching\b/.test(line)) {
       continue; // function/data markers and the objdiff scratch header
@@ -103,6 +244,43 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
       pending.push(labelDef[1]);
       continue;
     }
+    // Instructions are read as one run of `.text`: one under a `.section .rodata` (or any other
+    // section) is not in the function's code (mips-linux-gnu-as: `.section .rodata` / an addressed
+    // `addiu` / `.text` assembles no `addiu` there). A switch to plain `.text` is read; the stack and
+    // subsection forms are not modelled and decline.
+    const sw = line.match(SECTION_SWITCH);
+    if (sw) {
+      if (/^(?:pushsection|popsection|previous|subsection)$/i.test(sw[1])) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': '${line}' switches section in a way this reader does not model`,
+        );
+      }
+      inOtherSection = !isPlainText(sw);
+      continue;
+    }
+    if (/^\.set\s+(?:push|pop)\b/i.test(line)) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${line}' saves or restores assembler options this reader does not track`,
+      );
+    }
+    const ro = line.match(/^\.set\s+(no)?reorder\b/i);
+    if (ro) {
+      reorder = ro[1] === undefined;
+    }
+    // Inside the function, a directive that can emit bytes between instructions: a move of the
+    // location counter (`.set ., .+4`, `. = …`, measured: a nop in the delay slot) or an
+    // alignment (measured: `.balign 16` after a `jr` puts two nops before its delay slot). The
+    // fill is not modelled, so each declines.
+    if (
+      /^\.(?:set|equ|eqv|equiv)\s+(?:\.|"\.")\s*,/i.test(line) ||
+      /^\.\s*=/.test(line) ||
+      /^\.\w*align\w*\b/i.test(line)
+    ) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${line}' inside the function can emit fill between instructions, which this ` +
+          `reader does not model`,
+      );
+    }
     if (line.startsWith('.')) {
       // A data directive in the code stream could hide an instruction/effect — decline; other
       // bookkeeping directives (`.set`, `.align`, `.section`…) are transparent and skipped.
@@ -111,9 +289,24 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
           `cannot lift '${name}': data directive '${line}' in the code stream — skipping it would silently delete its effect`,
         );
       }
+      // any directive not known to keep the section (`.sbss`, `.struct 0`, `.offset 0`, an
+      // `.include`, measured for the first three) leaves the instructions after it outside `.text`
+      if (!keepsSplatSection(line)) {
+        inOtherSection = true;
+      }
       continue;
     }
     const m = line.match(INSN_LINE);
+    if (m && reorder) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${line}' is assembled under \`.set reorder\`, where gas fills delay slots itself`,
+      );
+    }
+    if (m && inOtherSection) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${line}' is assembled into another section than the function's \`.text\``,
+      );
+    }
     if (!m) {
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': unrecognised line in the Splat disassembly: '${line}'`,

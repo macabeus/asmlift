@@ -40,3 +40,19 @@ test('withoutDebugSections drops the debug sections and returns a listing withou
     expect(decompile(sym, stripped, ARMV4T_AGBCC).source).toBe(decompile(sym, plain, ARMV4T_AGBCC).source);
   }
 });
+
+// The section state is gas's, read by statement: a `.text` after a `;`, a `.pushsection .text` and
+// a `.previous` each bring `.text` back inside a debug section (arm-none-eabi-as: the `bx lr`
+// after each one is in `.text`). A line mixing debug and code statements is kept whole, for decode
+// to drop the debug ones by the same reader.
+test('withoutDebugSections keeps what gas assembles outside a debug section', () => {
+  expect(
+    withoutDebugSections(
+      '\t.section .debug_str\n\t.byte 1\n\t.pushsection .text\n\tbx lr\n\t.popsection\n\t.byte 2\n\t.text\n',
+    ),
+  ).toBe('\t.pushsection .text\n\tbx lr\n\t.text\n');
+  expect(withoutDebugSections('\t.section .debug_str\n\t.previous\n\tbx lr\n')).toBe('\t.previous\n\tbx lr\n');
+  expect(withoutDebugSections('\t.section .debug_str\n\t.byte 1; .text\n\tbx lr\n')).toBe(
+    '\t.byte 1; .text\n\tbx lr\n',
+  );
+});

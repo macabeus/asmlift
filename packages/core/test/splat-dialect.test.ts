@@ -296,3 +296,106 @@ test('splat: classifyAsmText names the format so a mis-fed Splat file declines o
   // a Splat file handed to the ARM/agbcc (gnu-as) target declines at the format boundary
   expect(() => decompile('func_8000113C_1D3C', SPLAT_CLAMP, ARMV4T_AGBCC)).toThrow(/looks like Splat/);
 });
+
+// gas for MIPS reads `;` as a statement separator and `#` as a comment (mips-linux-gnu-as
+// -march=vr4300 + objdump: each line below assembles `addiu v0,a0,1; addiu v0,v0,4; jr ra; nop`,
+// a function returning a0 + 5). Read by its first token, the line hid the second `addiu` and
+// lifted `return a0 + 1;`. Every statement is now read on its own, and the unaddressed one declines.
+describe('every statement of a Splat line is read, as gas for MIPS reads it', () => {
+  const fn = (middle: string) =>
+    'glabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1' +
+    middle +
+    '\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 00000000 */   nop\nendlabel f\n';
+  test.each(['\n    .set K, 1; addiu $v0, $v0, 4', '; addiu $v0, $v0, 4'])(
+    'a statement after `;` (`%s`) declines',
+    (middle) => {
+      expect(() => decompile('f', fn(middle), MIPS_IDO)).toThrow(
+        /unrecognised line in the Splat disassembly: 'addiu \$v0, \$v0, 4'/,
+      );
+    },
+  );
+  test('a `;` inside a `#` comment or a `/* … */` comment separates nothing', () => {
+    expect(decompile('f', fn(' # x; addiu $v0, $v0, 4'), MIPS_IDO).source).toContain('return a0 + 1;');
+    expect(decompile('f', fn(' /* x; y */'), MIPS_IDO).source).toContain('return a0 + 1;');
+  });
+  test('a comment left open at the end of a line declines', () => {
+    expect(() => decompile('f', fn(' /* x\n */'), MIPS_IDO)).toThrow(
+      /leaves a comment, string or character constant open/,
+    );
+  });
+});
+
+// mips-linux-gnu-as -march=vr4300: `.if 0` around an addressed instruction, or a `.macro` body
+// nothing invokes, assembles no instruction there (`addiu v0,a0,1; nop; jr ra; nop`, a0 + 1).
+// Read as written, the `addiu $v0, $v0, 4` lifted (a0 + 1 + 4).
+describe('a directive that decides which Splat lines are assembled declines', () => {
+  const body =
+    '    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    OPEN\n' +
+    '    /* 104 80000104 24420004 */  addiu $v0, $v0, 4\n    CLOSE\n' +
+    '    /* 104 80000104 00000000 */  nop\n    /* 108 80000108 03E00008 */  jr         $ra\n' +
+    '    /* 10C 8000010C 00000000 */   nop\n';
+  test.each([
+    ['.if 0', '.endif'],
+    ['.macro m', '.endm'],
+  ])('`%s` … `%s` inside the function declines', (open, close) => {
+    const asm = `glabel f\n${body.replace('OPEN', open).replace('CLOSE', close)}endlabel f\n`;
+    expect(() => decompile('f', asm, MIPS_IDO)).toThrow(/inside the function changes which lines are assembled/);
+  });
+  test('a `glabel` inside `.if 0` declines', () => {
+    const asm =
+      '.if 0\nglabel f\n    /* 108 80000108 03E00008 */  jr         $ra\n    /* 10C 8000010C 24820001 */   addiu      $v0, $a0, 1\nendlabel f\n.endif\n';
+    expect(() => decompile('f', asm, MIPS_IDO)).toThrow(/sits inside a conditional, macro or repeated body/);
+  });
+});
+
+// mips-linux-gnu-as: an addressed instruction under `.section .rodata` is not in the function's
+// code (`addiu v0,a0,1; nop; jr ra; nop`). Skipped as transparent, the switch let it lift (a0 + 1 + 4).
+test('a Splat instruction in another section than `.text` declines', () => {
+  const asm =
+    'glabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    .section .rodata\n' +
+    '    /* 104 80000104 24420004 */  addiu $v0, $v0, 4\n    .text\n    /* 104 80000104 00000000 */  nop\n' +
+    '    /* 108 80000108 03E00008 */  jr         $ra\n    /* 10C 8000010C 00000000 */   nop\nendlabel f\n';
+  expect(() => decompile('f', asm, MIPS_IDO)).toThrow(/is assembled into another section than the function's `\.text`/);
+});
+
+// mips-linux-gnu-as: `.sbss`, `.struct 0` and `.offset 0` each move the addressed `addiu` out of
+// `.text` (gas: `addiu v0,a0,1; nop; jr ra; nop`). Any directive the reader does not know to keep
+// the section counts as another section.
+test.each(['.sbss', '.struct 0', '.offset 0'])('a Splat instruction after `%s` declines', (dir) => {
+  const asm =
+    `glabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    ${dir}\n` +
+    '    /* 104 80000104 24420004 */  addiu $v0, $v0, 4\n    .text\n    /* 104 80000104 00000000 */  nop\n' +
+    '    /* 108 80000108 03E00008 */  jr         $ra\n    /* 10C 8000010C 00000000 */   nop\nendlabel f\n';
+  expect(() => decompile('f', asm, MIPS_IDO)).toThrow(/is assembled into another section than the function's `\.text`/);
+});
+
+// mips-linux-gnu-as: each of these changes the instruction stream between the addressed lines.
+// `.set ., .+4` (or `.equ`) puts a nop in `jr`'s delay slot, `.balign 16` puts two nops there, and
+// `.set reorder` lets gas insert its own delay-slot nop: each machine returns a0 + 1, where the
+// lines as written read a0 + 1 + 4.
+describe('fill or reordering gas adds between Splat instructions declines', () => {
+  const fn = (between: string, before = '') =>
+    `glabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n${before}` +
+    `    /* 104 80000104 03E00008 */  jr         $ra\n${between}` +
+    '    /* 108 80000108 24420004 */  addiu $v0, $v0, 4\nendlabel f\n';
+  test.each(['.set ., .+4', '.equ ., .+4', '.set ".", .+4', '.balign 16', '.align 3'])(
+    '`%s` in the function declines',
+    (dir) => {
+      expect(() => decompile('f', fn(`    ${dir}\n`), MIPS_IDO)).toThrow(/can emit fill between instructions/);
+    },
+  );
+  test('an instruction under `.set reorder` declines', () => {
+    expect(() => decompile('f', fn('', '    .set reorder\n'), MIPS_IDO)).toThrow(/assembled under `\.set reorder`/);
+  });
+  // `.set pop` back to a saved `.set reorder` lets gas move `addiu v0,a0,1` into the slot (a0 + 1)
+  test.each([
+    ['.set reorder\n.set push\n.set noreorder\n.set pop\n', ''],
+    ['', '    .set push\n'],
+  ])('`.set push` / `.set pop` declines (%#)', (before, inside) => {
+    expect(() => decompile('f', `${before}${fn('', inside)}`, MIPS_IDO)).toThrow(/saves or restores assembler options/);
+  });
+  test('`.set reorder` before the function carries into it', () => {
+    expect(() => decompile('f', `.set reorder\n${fn('')}`, MIPS_IDO)).toThrow(/assembled under `\.set reorder`/);
+    expect(decompile('f', `.set reorder\n.set noreorder\n${fn('')}`, MIPS_IDO).source).toContain('a0 + 1 + 4');
+  });
+});
