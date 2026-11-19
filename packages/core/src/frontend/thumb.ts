@@ -4348,10 +4348,57 @@ function measureThumbFrame({
       }
     }
   }
+  // …AND ONLY A READ IN agbcc'S OWN `a[i]` SPELLING: the index added to sp itself (`lsl r0, r4, #2
+  // / add r0, r0, sp`), then the array's offset (`add r0, #8`), so the base is where agbcc put the
+  // array. An index added to a frame address held in a register (`mov r4, sp` or `add r4, sp, #4`,
+  // then `add r2, r2, r4`) is a pointer's, and a pointer the source forms below its array (`(struct
+  // S12 *)(w - 1)`) bases its read beneath the array, on words a call's declaration may leave
+  // unstated; no event clears from such a base. Traced back within the read's block: `mov` copies
+  // and constant `add`s carry it, anything else ends it.
+  const indexAddedToSp = (b: number, i: number, r: string): boolean => {
+    const instrs = asmBlocks[b].instrs;
+    let want = r;
+    for (let k = i - 1; k >= 0; k--) {
+      const ins = instrs[k];
+      if (!mayWriteReg(ins, want)) {
+        continue;
+      }
+      const [d, s1, s2] = ins.ops.map((o) => (o === undefined ? o : reg(o)));
+      if (d !== want) {
+        return false;
+      }
+      if (/^movs?$/.test(ins.mnemonic) && s2 === undefined && s1 !== undefined && !isSpReg(s1)) {
+        want = s1;
+        continue;
+      }
+      if (/^adds?$/.test(ins.mnemonic)) {
+        const [src, by] = s2 === undefined ? [d, s1] : [s1, s2];
+        if (src === undefined || by === undefined) {
+          return false;
+        }
+        if (isSpReg(src) || isSpReg(by)) {
+          // `add rD, sp, #k` is a capture, not an index added to sp
+          return !(isSpReg(src) ? by : src).startsWith('#') && !(isSpReg(by) && isSpReg(src));
+        }
+        if (by.startsWith('#')) {
+          want = src;
+          continue;
+        }
+      }
+      return false;
+    }
+    return false;
+  };
   const indexedReadBelow = new Map<Instr, number>();
   for (const b of entryReachable) {
     asmBlocks[b].instrs.forEach((ins, i) => {
-      if (indexedReadOf.has(ins)) {
+      const base = ins.ops[1] === undefined ? undefined : parseAddr(ins.ops[1]);
+      if (
+        indexedReadOf.has(ins) &&
+        base !== undefined &&
+        base.regOff === undefined &&
+        indexAddedToSp(b, i, reg(base.base))
+      ) {
         indexedReadBelow.set(ins, clearsBelowFrom(b, i + 1, clearsBelowAtStart));
       }
     });
@@ -4373,6 +4420,7 @@ function measureThumbFrame({
       // `indexedReadBelow`
       const indexedAt = escapesHere && indexedReadsHere ? indexedReadOf.get(ins) : undefined;
       if (indexedAt !== undefined) {
+        // a read not in the `a[i]` spelling has no ceiling recorded, and clears nothing
         const below = indexedReadBelow.get(ins) ?? -Infinity;
         return below <= indexedAt
           ? []

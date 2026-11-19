@@ -20361,9 +20361,10 @@ export const SYNTHETIC: SynthSpec[] = [
   //      call's last staged word: under register pressure reload spills the address an indirect
   //      call goes through (calls.c `prepare_call_address`) to [sp,#0x48] after the split struct's
   //      register words are read through `p[i]`, and loads it straight back into r4 for
-  //      `bl _call_via_r4`. A word the function loads back raises no read's ceiling (thumb.ts
-  //      `loadedFrameWords`), so the read clears nothing and the lift declines rather than drop
-  //      the call's stack words. agbcc only: the spill is agbcc's register allocation.
+  //      `bl _call_via_r4`. No store raises a read's ceiling, and the call nothing sizes leaves it
+  //      none (thumb.ts `clearsBelowFrom`); the read is a pointer's besides. So it clears nothing and
+  //      the lift declines rather than drop the call's stack words. agbcc only: the spill is agbcc's
+  //      register allocation.
   {
     sym: 'stkidx_fpspill',
     src:
