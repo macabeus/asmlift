@@ -97,6 +97,10 @@ function splatStatements(line: string): string[] | null {
   return out;
 }
 
+// A directive that decides which lines gas assembles: conditional assembly, macro definition and
+// repetition (the Thumb frontend's LINE_DIRECTIVES).
+const LINE_DIRECTIVE = /^\.(if\w*|else\w*|endif|rept|irpc?|endr|macro|endm|exitm)\b/i;
+
 /** Does this text look like Splat-dialect MIPS? Both signals (`glabel` markers and the
  *  three-word instruction-comment prefix) are unique to Splat — objdump and compiler `.s` carry
  *  neither — so a positive match is unambiguous. */
@@ -136,6 +140,22 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
       }
     }
     slice = lines.slice(glabels[at].line, end);
+    // A function whose `glabel` sits inside a conditional, macro or repeated body is assembled as
+    // the body is (never, under `.if 0`), which this reader does not model.
+    let depth = 0;
+    for (const raw of lines.slice(0, glabels[at].line)) {
+      for (const st of splatStatements(raw) ?? []) {
+        const d = st.trim().match(LINE_DIRECTIVE)?.[1].toLowerCase();
+        depth +=
+          d === undefined ? 0 : /^(?:if\w*|macro|rept|irpc?)$/.test(d) ? 1 : /^(?:endif|endm|endr)$/.test(d) ? -1 : 0;
+      }
+    }
+    if (depth !== 0) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': its \`glabel\` sits inside a conditional, macro or repeated body, which this reader ` +
+          `does not model`,
+      );
+    }
   }
 
   // Flatten to instructions, assigning any pending label(s) to the NEXT instruction's address.
@@ -156,6 +176,16 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
     const line = raw.trim();
     if (!line) {
       continue;
+    }
+    // `.if 0` / an addressed instruction / `.endif` assembles nothing, and a `.macro` body only
+    // where it is invoked (mips-linux-gnu-as measured): read as written, the instruction was
+    // lifted. A directive that decides which lines are assembled declines inside the function.
+    const lineDirective = line.match(LINE_DIRECTIVE);
+    if (lineDirective) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${lineDirective[0]}' inside the function changes which lines are assembled, and ` +
+          `this reader reads every line as written`,
+      );
     }
     if (/^(glabel|endlabel|dlabel|jlabel)\b/.test(line) || /^nonmatching\b/.test(line)) {
       continue; // function/data markers and the objdiff scratch header

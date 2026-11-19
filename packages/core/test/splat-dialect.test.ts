@@ -324,3 +324,26 @@ describe('every statement of a Splat line is read, as gas for MIPS reads it', ()
     );
   });
 });
+
+// mips-linux-gnu-as -march=vr4300: `.if 0` around an addressed instruction, or a `.macro` body
+// nothing invokes, assembles no instruction there (`addiu v0,a0,1; nop; jr ra; nop`, a0 + 1).
+// Read as written, the `addiu $v0, $v0, 4` lifted (a0 + 1 + 4).
+describe('a directive that decides which Splat lines are assembled declines', () => {
+  const body =
+    '    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    OPEN\n' +
+    '    /* 104 80000104 24420004 */  addiu $v0, $v0, 4\n    CLOSE\n' +
+    '    /* 104 80000104 00000000 */  nop\n    /* 108 80000108 03E00008 */  jr         $ra\n' +
+    '    /* 10C 8000010C 00000000 */   nop\n';
+  test.each([
+    ['.if 0', '.endif'],
+    ['.macro m', '.endm'],
+  ])('`%s` … `%s` inside the function declines', (open, close) => {
+    const asm = `glabel f\n${body.replace('OPEN', open).replace('CLOSE', close)}endlabel f\n`;
+    expect(() => decompile('f', asm, MIPS_IDO)).toThrow(/inside the function changes which lines are assembled/);
+  });
+  test('a `glabel` inside `.if 0` declines', () => {
+    const asm =
+      '.if 0\nglabel f\n    /* 108 80000108 03E00008 */  jr         $ra\n    /* 10C 8000010C 24820001 */   addiu      $v0, $a0, 1\nendlabel f\n.endif\n';
+    expect(() => decompile('f', asm, MIPS_IDO)).toThrow(/sits inside a conditional, macro or repeated body/);
+  });
+});
