@@ -265,6 +265,37 @@ export { DefaultAcceptsMemoMisuse, DefaultAcceptsMemo } from './default-accepts-
 export { hasDivergentSharedRet } from './return-joins';
 export { functionPostDominators } from './cfg';
 
+/** Whether any loop could be a `for` whose update steps a SECOND NAME (`forPlanAt`'s A SECOND
+ *  COUNTER) — what `rank.ts` gates enumeration of `/for-steps` on. `forPlanAt` reads only a loop
+ *  structured as `while (1)` (`foreverLoops`), and its update is the copies the back edge writes,
+ *  stepping several names only where that edge hands two or more of the header's params a value
+ *  other than their own. So the loop needs both:
+ *  - a back edge (into a block that dominates its source) whose arguments differ from the header's
+ *    params in two or more places;
+ *  - a way out other than one bottom test: an exit edge from a block that is not a latch, or two
+ *    exit edges. A loop whose one exit edge leaves from its latch's `cond_br` back into the header
+ *    is the `do-while` reading's (`doWhileLoops`), which the `while (1)` readings never ask.
+ *  An OVER-approximation, the safe direction for a gate that only decides whether to enumerate:
+ *  `forShapeOf` and `forPlanAt`'s gates can still refuse the loop, and a stride
+ *  (`strideDerivedParams`) among those params is no step at all. It asks no latch shape beyond the
+ *  back edge: a raise pass after the shared lift can fold an empty `br` latch into the block that
+ *  tests (raise/latch.ts), and such a loop's exit leaves from a block that is no latch here, so it
+ *  is kept. Measured where it pays: `kleod:sub_0803F68C:agbcc`'s one stepping loop is a `do-while`
+ *  of four params, and enumerating `/for-steps` beside `/for-continue` there raised the row's peak
+ *  heap by about 11% (2.07 to 2.30 GB peak RSS) with every setting skipped by the OFF witness. */
+export function hasSecondCounterLoop(fn: Fn): boolean {
+  const dom = dominators(fn);
+  return [...analyzeLoops(fn, dom).byHeader.values()].some(
+    (nl) =>
+      (nl.exitEdges.length > 1 || nl.exitEdges.some((e) => !nl.latches.includes(e.from))) &&
+      nl.latches.some((latch) =>
+        latch.ops[latch.ops.length - 1].successors.some(
+          (sx) => sx.block === nl.header && sx.args.filter((a, i) => a !== sx.block.params[i]).length > 1,
+        ),
+      ),
+  );
+}
+
 /** THE COPY BUDGET: how many times one structuring may enter a region, per block of the function,
  *  before `structure()` stops it. A region both arms of an `if` reach with no join between them is
  *  written into each arm, and a chain of such `if`s doubles it per link — sub_0800D188 entered

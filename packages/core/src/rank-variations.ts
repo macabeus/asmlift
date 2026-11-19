@@ -51,7 +51,7 @@ import {
   hasLoopSharedPureValue,
   hasMergeFeedHome,
 } from './structure/analysis';
-import { edgeCopyOrdersDiffer, hasParamRootedMerge } from './structure/structure';
+import { edgeCopyOrdersDiffer, hasParamRootedMerge, hasSecondCounterLoop } from './structure/structure';
 import type { VariationName } from './variation-tokens';
 
 /** The STRUCTURE VARIATIONS — the boolean candidate dimensions crossed into every enumeration
@@ -464,6 +464,7 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
     flag: 'forSteps',
     name: 'for-steps',
     options: (on) => ({ stepSecondCounters: on }),
+    sharedGate: (sharedLift) => hasSecondCounterLoop(sharedLift),
     offWitness: 'onForStepsOffered',
     beside: 'forContinue',
     strip: true,

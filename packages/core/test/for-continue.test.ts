@@ -14,6 +14,8 @@
 // latch with an effect, an exit that takes the IV from before its update and an update from a call,
 // and those fixtures lift through the rerun's `while (1)` instead, judged the same way; a relay
 // something else enters refuses it too, and that fixture declines.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -21,7 +23,10 @@ import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { readabilityRewrites } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
-import { structure } from '../src/structure/structure';
+import { enumerateCandidates } from '../src/rank';
+import { hasSecondCounterLoop, structure } from '../src/structure/structure';
+import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation } from '../src/variation-tokens';
 import { irAgreement } from './helpers';
 
 const SEEDS = Array.from({ length: 2000 }, (_, i) => i + 1);
@@ -510,4 +515,44 @@ test('/for-steps spells a second counter `/for-continue` alone leaves as `while 
     expect(r.agreement.disagree).toBe(0);
     expect(r.agreement.judged).toBe(SEEDS.length);
   }
+});
+
+// THE ENUMERATION GATE (rank-variations.ts, `/for-steps`' `sharedGate`, structure.ts
+// `hasSecondCounterLoop`): a function with no loop that both steps two of its header's params on a
+// back edge and leaves other than by one bottom test enumerates no `/for-steps` setting at all. Its OFF sibling's witness would skip every one of them
+// anyway, but the settings themselves cost heap on a large function (a near-limit real row's peak
+// rose by about 11% with the fan unchanged).
+test('/for-steps is enumerated only where a back edge steps two header params', () => {
+  const gateOn = (ir: string): boolean => {
+    const fn = parse(ir);
+    verify(fn);
+    return hasSecondCounterLoop(fn);
+  };
+  expect(gateOn(tailRetSteps)).toBe(true);
+  // one counter, and a `while (1)` with no params, step nothing a second time
+  expect(gateOn(tailRet)).toBe(false);
+  expect(gateOn(foreverJt)).toBe(false);
+  // two steps, but the loop's one way out is its bottom test: the `do-while` reading's, never asked
+  // as a `for`
+  const doWhileSteps = `fn dws {
+^bb0(%0: s32, %1: s32):
+  br ^bb1(%0, %0)
+^bb1(%2: s32, %3: s32):
+  %4: s32 = call %3 {target="k"}
+  %5: s32 = const {value=1}
+  %6: s32 = add %2, %5
+  %7: s32 = add %3, %6
+  %8: u32 = icmp_slt %6, %1
+  cond_br %8, ^bb1(%6, %7), ^bb2()
+^bb2():
+  ret
+}`;
+  expect(gateOn(doWhileSteps)).toBe(false);
+  // a function with no loop reports the variation as gated, and no candidate carries it
+  const asm = readFileSync(join(import.meta.dirname, 'corpus/agbcc-clamp0.s'), 'utf8');
+  const sym = (/^\s*\.global\s+(\w+)/m.exec(asm) ?? /^(\w+):/m.exec(asm))![1];
+  const gated: string[] = [];
+  const cands = enumerateCandidates(sym, asm, ARMV4T_AGBCC, { onVariationGated: (v) => gated.push(v) });
+  expect(gated).toContain('for-steps');
+  expect(cands.some((c) => hasVariation(c.variations, 'for-steps'))).toBe(false);
 });
