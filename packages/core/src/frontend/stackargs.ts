@@ -55,8 +55,7 @@ export interface StackArgsIndexedRead {
   readonly kind: 'indexed-read';
   readonly off: number;
   /** The read ends and clears only the words beneath this offset: a call whose stack words
-   *  nothing states exactly may follow it, and every path to one stores a word at or above it on
-   *  the way that the function never loads back, which that call staged after the read (`target.ts` `stagedStackWordReachesOnlyItsCall`).
+   *  nothing states exactly may follow it, and states no word at or above this one (`target.ts` `stagedStackWordReachesOnlyItsCall`).
    *  Absent, no such call follows it. */
   readonly below?: number;
 }

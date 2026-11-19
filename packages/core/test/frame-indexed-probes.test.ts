@@ -121,8 +121,8 @@ describe('a read based below its array is no proof of a local', () => {
 // A by-value struct's register words are loaded AFTER the call's stack words are stored (agbcc
 // calls.c `move_block_to_reg`, and the stack part of a struct split between r3 and the stack), so a
 // read through a pointer formed below its array can run between a staged word's store and its call.
-// The read clears nothing above the highest word stored on its way to such a call, and nothing at
-// all where that path stores no word (`thumb.ts` `indexedReadBelow`).
+// With a call nothing sizes ahead of it, the read clears nothing, whatever is stored on the way
+// (`thumb.ts` `indexedReadBelow`).
 describe('a read after a call’s last staged word clears nothing', () => {
   test('agbcc stages the stack words, then loads the struct’s register words through the index', () => {
     for (const [fn, staged] of [
@@ -206,6 +206,54 @@ describe('the staging order is a declared premise', () => {
     );
     const blk2 = spilled(source('blk2'), m3, '\tstr\tr3, [sp, #0x18]\n\tldr\tr3, [sp, #0x18]\n');
     expect(() => decompile('blk2', blk2, ARMV4T_AGBCC, { prototypes: {} })).toThrow(/the store to \[sp,#0\]/);
+  });
+
+  // A store after the read raises no ceiling, however its word is or is not read back: through a
+  // capture in another block, an `ldm` writeback, a register offset, after the call, or never.
+  test('blk1 with any store after the read declines, its word read back or not', () => {
+    const at = (src: string, after: string, text: string): string => {
+      expect(src).toContain(after);
+      return src.replace(after, after + text);
+    };
+    const m3 = '\tmov\tr3, #0x3\n';
+    const bl = '\tbl\tkr\n';
+    const st = '\tstr\tr3, [sp, #0x14]\n';
+    const blk1 = source('blk1');
+    const variants: Record<string, string> = {
+      storeOnly: at(blk1, m3, st),
+      r4AfterCall: at(at(blk1, m3, st), bl, '\tldr\tr1, [r4, #0x14]\n\tadd\tr0, r0, r1\n'),
+      r4CrossBlock: at(blk1, m3, st + '\tb\t.LY\n.LY:\n\tldr\tr3, [r4, #0x14]\n'),
+      capCrossBlock: at(blk1, m3, st + '\tadd\tr3, sp, #0x14\n\tb\t.LY\n.LY:\n\tldr\tr3, [r3]\n'),
+      regOffConst: at(blk1, m3, st + '\tmov\tr3, #0x14\n\tldr\tr3, [r4, r3]\n'),
+      regOffConstSp: at(
+        blk1,
+        m3,
+        st + '\tmov\tr3, sp\n\tmov\tr12, r3\n\tmov\tr3, #0x14\n\tadd\tr3, r12\n\tldr\tr3, [r3]\n',
+      ),
+      subCapture: at(blk1, m3, st + '\tadd\tr3, sp, #0x18\n\tsub\tr3, #0x4\n\tldr\tr3, [r3]\n'),
+      subCapture3: at(blk1, m3, st + '\tadd\tr3, sp, #0x18\n\tsub\tr3, r3, #0x4\n\tldr\tr3, [r3]\n'),
+      ldmWb: at(blk1, m3, st + '\tadd\tr3, sp, #0x14\n\tldmia\tr3!, {r3}\n'),
+      ldmWb2: at(
+        blk1,
+        m3,
+        st + '\tmov\tr12, r0\n\tadd\tr0, sp, #0x10\n\tldmia\tr0!, {r3}\n\tldmia\tr0!, {r3}\n\tmov\tr0, r12\n',
+      ),
+      backEdgeLoadFirst: at(
+        blk1,
+        m3,
+        '\tmov\tr12, r3\n.LX2:\n\tldr\tr3, [sp, #0x14]\n\tstr\tr3, [sp, #0x14]\n\tsub\tr3, r3, #0x1\n\tcmp\tr3, #0\n\tbne\t.LX2\n\tmov\tr3, r12\n',
+      ),
+      capOnly: at(blk1, m3, st + '\tadd\tr3, sp, #0x14\n\tmov\tr3, #0x3\n'),
+      capPublished: at(blk1, m3, st + '\tadd\tr3, sp, #0x14\n\tstr\tr3, [r4, #0x18]\n\tmov\tr3, #0x3\n'),
+      capCrossBlockLdrh: at(blk1, m3, st + '\tadd\tr3, sp, #0x14\n\tb\t.LY\n.LY:\n\tldrh\tr3, [r3]\n'),
+      r4CapCross: at(blk1, m3, st + '\tmov\tr3, r4\n\tb\t.LY\n.LY:\n\tldr\tr3, [r3, #0x14]\n'),
+      r4AfterCallCross: at(at(blk1, m3, st), bl, '\tb\t.LZ\n.LZ:\n\tldr\tr1, [r4, #0x14]\n\tadd\tr0, r0, r1\n'),
+    };
+    for (const [name, src] of Object.entries(variants)) {
+      expect(() => decompile('blk1', src, ARMV4T_AGBCC, { prototypes: {} }), name).toThrow(
+        /stack pointer used as data|address-taken stack local/,
+      );
+    }
   });
 
   test('below3 with its last stack word staged before the read declines: nothing is stored after the read', () => {

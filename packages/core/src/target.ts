@@ -930,12 +930,11 @@ export interface FrameLayoutBehaviors {
   // `indexed-read` event), whose base proves no local: a pointer formed below its array (`u32 *p =
   // a - 1; … p[i]`, the 1-based table idiom) bases the read at a word an outgoing argument may own.
   // The Thumb frontend gives each read a ceiling (`below`): with no call that may take a stack word
-  // after it, none; otherwise the lowest, over the paths to such calls, of the highest word stored
-  // on the way, and no event at all where some path stores nothing. Under this premise a word
-  // beneath the ceiling and stored before the read is no call's highest staged word — that one is
-  // stored after the read, or lies above the ceiling — so the read is read twice:
-  //   • the event ENDS the stores pending from its base up to its ceiling, as an escape does; the
-  //     highest staged word stays pending at its call, and the refusals see the gap beneath it.
+  // after it, none; otherwise the lowest, over the paths to such calls, of the words each one's
+  // declaration states, and no event at all where a call nothing sizes lies ahead. Under this
+  // premise a word beneath the ceiling and stored before the read is staged for no call ahead but
+  // one that states it, which then finds it missing and refuses, so the read is read twice:
+  //   • the event ENDS the stores pending from its base up to its ceiling, as an escape does.
   //   • `loadedWordBound` STEPS THE AREA'S BOUND DOWN to a read's base where every store to a word
   //     it would clear reaches, with no call on the way, a read based at or beneath that word and
   //     ceiled above it; staged words are contiguous from [sp,#0], so the range holds none.
@@ -957,9 +956,9 @@ export interface FrameLayoutBehaviors {
   // having left a BLKmode argument in memory at :587-640, and `emit_push_insn`'s load of the split
   // argument's register words) store nothing before the call but reload's spill of the address
   // an indirect call goes through (`prepare_call_address`, after the struct's loads under register
-  // pressure), which it loads straight back into that register (`fpspill`). A word the function
-  // loads back is a local's, so the ceiling leaves its store out, and a read after the call's last
-  // staged word sees a path that stores nothing, and gets no event. Re-measurable from the committed
+  // pressure), which it loads straight back into that register (`fpspill`). So a store on the way
+  // proves no staged word, and the ceiling reads no store at all: it is the stated words of the
+  // calls ahead, none for a call nothing sizes, and a read with one ahead gets no event. Re-measurable from the committed
   // probes (`scripts/regen-outgoing-area-probes.ts` → `test/corpus/agbcc-indexed.s`, read by
   // `frame-indexed-probes.test.ts`): `below1`..`below6` load `p[i]` as argument 4 before argument
   // 5 is staged, under `?:` too, with argument 6's read after argument 5's store; `blk1`..`blk3`
@@ -967,13 +966,12 @@ export interface FrameLayoutBehaviors {
   //
   // Its RESIDUE is asm whose staged word does not reach its call, or reaches it past another call
   // handed no frame address — hand-written, or from a compiler this is not set on. A store after
-  // the call's last staged word is no residue: one loaded back anywhere in the function raises no
-  // ceiling (`blk1` with `str r3,[sp,#0x14]` / `ldr r3,[sp,#0x14]` before the `bl` declines), and
-  // one never loaded stays pending at the call as a staged word, where the refusals see the gap
-  // beneath it. The price is a read whose only later store is a reloaded local, its calls past a
-  // loop over the array (kl2dct `CommonWaitForNextFrame`): no store stages a word there either,
-  // and it declines. It is no fact of the ISA, so a second compiler of the same ISA states it
-  // rather than inheriting it from `escapedFrameAddressNamesALocal`.
+  // the call's last staged word is no residue: it raises no ceiling, loaded back or not (`blk1`
+  // with a store at [sp,#0x14] before the `bl`, reloaded directly, through a capture in another
+  // block, by an `ldm` writeback, or never, declines). The price is a read with a call nothing
+  // sizes ahead of it, the array's words staged for none (kl2dct `CommonWaitForNextFrame`): it
+  // declines. It is no fact of the ISA, so a second compiler of the same ISA states it rather than
+  // inheriting it from `escapedFrameAddressNamesALocal`.
   stagedStackWordReachesOnlyItsCall?: boolean;
   // WHERE AN O32 FUNCTION KEEPS ITS LOCALS in the one frame `addiu sp,sp,-N` reserves — the area
   // the MIPS frontend hands the frame-object audit as `ownedLocals`/`declaredLocals`. Below it
