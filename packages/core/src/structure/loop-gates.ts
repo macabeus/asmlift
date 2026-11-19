@@ -358,7 +358,8 @@ export interface ForPlanIv {
   readonly strideNameShared: boolean;
   /** a leaf of a stride's G is neither named nor an operand-free op that reads no memory */
   readonly strideLeafReread: boolean;
-  /** the test reads the name the update writes, other than through its back-edge value */
+  /** the test reads a name the update steps (the counter or a second counter), other than through
+   *  its back-edge value */
   readonly testReadsUpdate: boolean;
   /** the guard is not the test on the entry values, or with no guard the test does not fold to stay
    *  in the loop */
@@ -368,16 +369,20 @@ export interface ForPlanIv {
   readonly exitCopy: boolean;
   /** …or a slot it carries without a copy (one `edgeCopyRecords` records none for) names a value
    *  the `for` writes otherwise ahead of the test: the init's names on the guard's edge (and the
-   *  preheader's), on the latch's the IV past its update, or a latch op it never renders */
+   *  preheader's), on the latch's a stepped name past its update, or a latch op it never renders */
   readonly exitNameRewritten: boolean;
-  /** the code past the loop reads the IV's param itself, not through an exit param (only a loop
-   *  with no guard, whose header dominates its exit, can) */
+  /** the code past the loop reads a stepped name's param itself (the counter's or a second
+   *  counter's), not through an exit param (only a loop with no guard, whose header dominates its
+   *  exit, can) */
   readonly pastReadsIv: boolean;
 }
 
 /** `forPlanAt`'s rules over the IV, its copies and the test. The argument for each is in the THE
- *  LOOP AS A `for` block. Not in the table: the update that is not ONE copy, which every field
- *  reads; and three refusals left inline ahead of the table — init copies that are cyclic or whose
+ *  LOOP AS A `for` block. Not in the table: the order of an update that steps several names (A
+ *  SECOND COUNTER), which every field reads — a cycle in the old values the steps read
+ *  (`stepsInOrder`), the order it finds still reading a name already stepped (`readsStepped`), and
+ *  a stride beside a second counter — each of which leaves the loop `while (1)`; and three
+ *  refusals left inline ahead of the table — init copies that are cyclic or whose
  *  IV init reads another init copy's name (`copySetIsCyclic`, the `init` clause runs after the
  *  copies ahead of the `for`), and a test or update that reads an inner loop's value
  *  (`latchInnerSub`). Nor the scan of the emitted `for` for a read of a stride's name, which only an
@@ -409,7 +414,7 @@ export const FOR_PLAN_IV_GATES: readonly Gate<ForPlanIv>[] = [
   },
   {
     id: 'test-reads-update',
-    why: 'the test runs after the update, so a read of the name it writes would see the next trip',
+    why: 'the test runs after the update, so a read of a name it steps would see the next trip',
     sound: true,
     guardedBy:
       'for-plan-gates.test.ts: without test-reads-update the test reads the updated IV where the asm read the old',
@@ -443,7 +448,7 @@ export const FOR_PLAN_IV_GATES: readonly Gate<ForPlanIv>[] = [
   },
   {
     id: 'past-reads-iv',
-    why: "past a loop with no guard the code reads the IV as the asm left it on the latch's way out, from before the update the `for` runs ahead of its test",
+    why: "past a loop with no guard the code reads a stepped name as the asm left it on the latch's way out, from before the update the `for` runs ahead of its test",
     sound: true,
     guardedBy:
       'for-exit-params.test.ts: without past-reads-iv the code past a guardless loop reads the IV past its update',

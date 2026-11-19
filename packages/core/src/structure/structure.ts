@@ -7118,9 +7118,11 @@ function structureRanked(
   //     keeps `i + 1` from a body that reads it, and the latch hands that register round): the
   //     update runs after the header did on every path, and the test reads it only as the variable
   //     it updates;
-  //   • the update is ONE copy, `inc`, and `g`'s copies into the header name that variable with a
-  //     value that reads no other copy's name, `init`; the rest precede the `for`;
-  //   • the test reads no variable the update writes except through its back-edge value, and no
+  //   • the update is the latch's copies, `inc`, one step per name it writes, in an order where no
+  //     step reads the old value of a name stepped ahead of it (A SECOND COUNTER, at `stepsInOrder`);
+  //     the counter is the step the test reads, and `g`'s copy into the header naming it, with a
+  //     value that reads no other copy's name, is `init`; the rest precede the `for`;
+  //   • the test reads no variable the update steps except through its back-edge value, and no
   //     inner loop's value (`latchInnerSub`);
   //   • a guard's condition is the test read on the loop's entry values (`sameAtEntry`), a load on
   //     either side read through only where it is evaluated at the test; with no guard, that test
@@ -7151,9 +7153,11 @@ function structureRanked(
   // A SIBLING'S STRIDE. IDO keeps `gE[i]` of `for (i = lo; i <= hi; i++)` in a pointer the header
   // takes beside `i`, `gE + (lo << 3)` on entry and stepped by 8 in the latch; raise/unpre.ts
   // `strideDerivedParams` proves it G(i) at every entry, by induction. `while (1)` spells it as the
-  // variable the asm holds, which reads closest to the bytes there, and the `for` cannot: its update
-  // is ONE copy. So the `for` writes the pointer nowhere — no init copy, no update copy — and renders
-  // every read of it as G of the counter's name. That is exact where the name holds the counter and
+  // variable the asm holds, which reads closest to the bytes there. The `for` could step it as a
+  // second name (A SECOND COUNTER, `i++, p += 8`), but that keeps the pointer the compiler made and
+  // not the `gE[i]` the source wrote, a reading choice and no limit of the IR: so the `for` writes the
+  // pointer nowhere — no init copy, no update copy — and renders every read of it as G of the
+  // counter's name. A stride beside a second counter is refused, not combined. That is exact where the name holds the counter and
   // each of G's other leaves holds itself at every read, and where the pointer is read nowhere the
   // `for` does not render G:
   //   • the param and its back-edge value are read by no edge but the back edge's own slot, by no op
