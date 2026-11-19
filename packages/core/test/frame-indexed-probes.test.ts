@@ -221,7 +221,7 @@ describe('the staging order is a declared premise', () => {
     const bl = '\tbl\tkr\n';
     const st = '\tstr\tr3, [sp, #0x14]\n';
     const blk1 = source('blk1');
-    const variants: Record<string, string> = {
+    const shapes: Record<string, string> = {
       storeOnly: at(blk1, m3, st),
       r4AfterCall: at(at(blk1, m3, st), bl, '\tldr\tr1, [r4, #0x14]\n\tadd\tr0, r0, r1\n'),
       r4CrossBlock: at(blk1, m3, st + '\tb\t.LY\n.LY:\n\tldr\tr3, [r4, #0x14]\n'),
@@ -251,7 +251,7 @@ describe('the staging order is a declared premise', () => {
       r4CapCross: at(blk1, m3, st + '\tmov\tr3, r4\n\tb\t.LY\n.LY:\n\tldr\tr3, [r3, #0x14]\n'),
       r4AfterCallCross: at(at(blk1, m3, st), bl, '\tb\t.LZ\n.LZ:\n\tldr\tr1, [r4, #0x14]\n\tadd\tr0, r0, r1\n'),
     };
-    for (const [name, src] of Object.entries(variants)) {
+    for (const [name, src] of Object.entries(shapes)) {
       expect(() => decompile('blk1', src, ARMV4T_AGBCC, { prototypes: {} }), name).toThrow(
         /stack pointer used as data|address-taken stack local/,
       );
