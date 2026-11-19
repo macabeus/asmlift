@@ -3557,6 +3557,13 @@ artifacts of the same corpus read 818 s and 417 s off a warm store, 941 s and 88
 machine. Read a figure beside the cache state AND the load of the run you are planning, not on its
 own.
 
+The cold real tiers of 2026-11-18/19 (5,900-7,450 s against 2,670-3,258 s warm, on trees whose output
+did not change) were the store's eviction, not code: under a 4,096 MB cap the store (6.5 GB, the real
+tier's agbcc namespace 5.5 GB of it) was over the cap on every open, and any open (a bench shard or a
+five-compile probe) deleted every namespace idle for an hour, whole. The store now evicts the least
+recently used keys across namespaces, only as many as the cap needs, and its default cap is 20,480 MB,
+so a tree's next run is warm unless the store held three trees' benches since.
+
 The single row `kleod:PauseMenuScreenHandler:agbcc` is 120 s of that real total — **14% of the
 tier in one row**, over a fan of 30,240 of which 35 are compiled. It is also the row that will strand a shard: in an earlier
 round's first full run it was still ranking 14 minutes after the other fifteen shards had finished.

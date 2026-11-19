@@ -415,7 +415,7 @@ neither gate can see it.
 | anything else                               | OFF, with `[candcache] REFUSED reason=unrecognised-mode` on stderr                                     |
 
 `ASMLIFT_CANDCACHE_DIR` moves the store (default `$TMPDIR/asmlift-candcache`; deleting it makes the
-next run cold), `ASMLIFT_CANDCACHE_MAX_MB` caps it (default 4096), `ASMLIFT_CANDCACHE_SAMPLE` sets the
+next run cold), `ASMLIFT_CANDCACHE_MAX_MB` caps it (default 20480), `ASMLIFT_CANDCACHE_SAMPLE` sets the
 audit's percentage (`0` turns it off), `ASMLIFT_CANDCACHE_SAMPLE_SEED` replays a run's selection,
 `ASMLIFT_CANDCACHE_PRUNE_MS` bounds one prune, and `ASMLIFT_CANDCACHE_TRACE` prints each namespace a
 run resolves. A SET-AND-EMPTY value of any of them is said on stderr and falls back to the default:
@@ -486,8 +486,13 @@ install` or `git pull` during a run is the next run's namespace and not this one
   (`sampledAbandoned`), which is what an unaudited run would have been served.
 - **The store is bounded between runs.** The cap counts the distinct object bytes plus one
   allocation block per stored key, and is enforced once per process before any candidate compiles:
-  whole namespaces no live process holds go first, then the oldest keys of the namespace this run
-  uses. A namespace another process holds is never touched.
+  the least recently used keys go first, across every namespace no other process holds, until the
+  store is under 80% of the cap. A serve refreshes the key it serves (at most once an hour), so a
+  key's age is the last time a run asked for it. A namespace left empty is removed. A namespace
+  another process holds is never touched: a pruner marks a namespace before deleting in it and a
+  reader waits until the mark is gone, so no reader is handed a path a prune then deletes. The
+  default cap holds about three trees' full benches (one tree's real-tier agbcc namespace alone
+  measured 5.5 GB).
 - **Test runs are fenced.** `vitest.config.ts` pins `ASMLIFT_CANDCACHE=0`, `ASMLIFT_CANDCACHE_SAMPLE=0`
   and a throwaway `ASMLIFT_CANDCACHE_DIR` for every suite it runs; the store's own suites set the
   mode themselves. `pnpm test:matching` is the exception: it forces `verify` and audits the shared
