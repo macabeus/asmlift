@@ -492,13 +492,14 @@ const stepsStructured = (spellCountedLoopsFor: boolean, stepSecondCounters: bool
 };
 
 test('/for-steps spells a second counter `/for-continue` alone leaves as `while (1)`', () => {
+  // the default reports the loop as what `/for-steps` changes beside `/for-continue`, not as what
+  // `/for-continue` alone changes: that one builds the default's tree, so its witness is exact
   const plain = stepsStructured(false, false);
   expect(plain.src).toContain('while (1)');
-  expect(plain.offered).toBeGreaterThan(0);
-  expect(plain.steps).toBe(0);
-  // `/for-steps` alone is the default's tree
+  expect([plain.offered, plain.steps > 0]).toEqual([0, true]);
+  // `/for-steps` alone is the default's tree, which is why rank.ts enumerates it only beside
+  // `/for-continue`
   expect(stepsStructured(false, true).src).toBe(plain.src);
-  expect(stepsStructured(false, true).offered).toBeGreaterThan(0);
   const forOnly = stepsStructured(true, false);
   expect(forOnly.src).toBe(plain.src);
   expect([forOnly.offered, forOnly.steps > 0]).toEqual([0, true]);

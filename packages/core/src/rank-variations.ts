@@ -69,7 +69,9 @@ import type { VariationName } from './variation-tokens';
  *  only the structuring itself knows whether the variation can change the tree: the OFF sibling
  *  (the same setting without it, structured earlier in the same pass) runs with that hook, and a
  *  setting whose OFF sibling never fired it is skipped, since it would build that sibling's tree
- *  again. Which of these entries `structure()`'s
+ *  again. `beside` names a variation this one is enumerated only beside: a setting carrying this
+ *  one without that one is not a setting at all, so its OFF sibling is always a setting with that
+ *  one on, and the witness it fires is asked of that structuring alone. Which of these entries `structure()`'s
  *  `assertDefaultAccepts` guard does NOT reset — the ones that cannot unlock a function the default
  *  declines, and so carry a written argument in place of the guard — is stated ONCE, beside that
  *  guard in structure.ts, and derived from the guard's own reset list in
@@ -98,6 +100,7 @@ export interface StructureVariation {
   sharedGate?: (sharedLift: Fn, defs: Map<Value, Op>) => boolean;
   perLiftGate?: (fn: Fn) => boolean;
   offWitness?: 'onTailFallerKept' | 'onForOffered' | 'onForStepsOffered' | 'onCaseCopied';
+  beside?: StructureVariation['flag'];
   strip: boolean;
 }
 export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
@@ -435,7 +438,9 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   //
   // Gated EXACTLY, by its OFF sibling's structuring (`offWitness`): only a `while (1)` loop that passes
   // every one of `forPlanAt`'s checks can change, and the OFF sibling reports meeting one
-  // (`onForOffered`). In the strip closure, and reset by `assertDefaultAccepts`: a first run that
+  // (`onForOffered`) — one stepping a single name, or several where `/for-steps` is on too; a loop
+  // stepping several names under a sibling without `/for-steps` reports `onForStepsOffered` instead,
+  // since `/for-continue` alone keeps it `while (1)`. In the strip closure, and reset by `assertDefaultAccepts`: a first run that
   // spells every such loop `for` can structure a function the default (with its own reruns) refuses.
   {
     flag: 'forContinue',
@@ -449,15 +454,18 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   // alone keeps such a loop `while (1)`. Both are one asm, and neither reading wins everywhere:
   // agbcc's `synthetic:brk2sw` scores better with the inner loop's comma update, `brk2out_sw` with
   // its `while (1)`. Only meaningful beside `/for-continue`: a loop the default's declined run asks
-  // (`ForRanking`) takes its second counter without it. Gated EXACTLY by its OFF sibling
-  // (`onForStepsOffered`), which fires only under `spellCountedLoopsFor`, so `/for-steps` alone is
-  // always its sibling's tree; `onForOffered` fires for such a loop too, so the pair is reached
-  // through that skipped sibling. In the strip closure, as `/for-continue` is.
+  // (`ForRanking`) takes its second counter without it, so `/for-steps` alone would always be its
+  // sibling's tree and is not enumerated (`beside`). Gated EXACTLY by its OFF sibling, the same
+  // setting with `/for-continue` alone, which reports a loop it keeps `while (1)` for its second
+  // counter (`onForStepsOffered`). Where that sibling was skipped as the default's tree, it carries
+  // the default's witnesses, and the default reports such a loop as `onForStepsOffered` too (not
+  // `onForOffered`, which it would not change alone). In the strip closure, as `/for-continue` is.
   {
     flag: 'forSteps',
     name: 'for-steps',
     options: (on) => ({ stepSecondCounters: on }),
     offWitness: 'onForStepsOffered',
+    beside: 'forContinue',
     strip: true,
   },
   // `/case-goto` — TWO ARMS ENTERING ONE CASE'S BODY AS A `goto` TO ITS LABEL WHERE THE DEFAULT
