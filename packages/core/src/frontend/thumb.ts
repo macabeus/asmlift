@@ -1946,10 +1946,11 @@ function decode(
     }
     // Decode reads the slice as one run of code, so every instruction in it must be assembled into
     // one section: `.section .text.foo` / `add r4, #2` / `.text` inside a function puts the `add`
-    // in other bytes (measured), and read in place it was a phantom instruction.
+    // in other bytes (measured), and read in place it was a phantom instruction. Instructions only:
+    // a compiler's `.rodata` or `.data` object between two functions sits in the slice too.
     const sliceSections = new Set<string | null>();
     for (let i = sliceStart; i < boundaries[boundaryIdx]; i++) {
-      if (allFlat[i].instr || allFlat[i].data?.inCode || allFlat[i].align) {
+      if (allFlat[i].instr) {
         sliceSections.add(itemSections[i]);
       }
     }
