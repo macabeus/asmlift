@@ -368,3 +368,24 @@ test.each(['.sbss', '.struct 0', '.offset 0'])('a Splat instruction after `%s` d
     '    /* 108 80000108 03E00008 */  jr         $ra\n    /* 10C 8000010C 00000000 */   nop\nendlabel f\n';
   expect(() => decompile('f', asm, MIPS_IDO)).toThrow(/is assembled into another section than the function's `\.text`/);
 });
+
+// mips-linux-gnu-as: each of these changes the instruction stream between the addressed lines.
+// `.set ., .+4` (or `.equ`) puts a nop in `jr`'s delay slot, `.balign 16` puts two nops there, and
+// `.set reorder` lets gas insert its own delay-slot nop: each machine returns a0 + 1, where the
+// lines as written read a0 + 1 + 4.
+describe('fill or reordering gas adds between Splat instructions declines', () => {
+  const fn = (between: string, before = '') =>
+    `glabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n${before}` +
+    `    /* 104 80000104 03E00008 */  jr         $ra\n${between}` +
+    '    /* 108 80000108 24420004 */  addiu $v0, $v0, 4\nendlabel f\n';
+  test.each(['.set ., .+4', '.equ ., .+4', '.balign 16', '.align 3'])('`%s` in the function declines', (dir) => {
+    expect(() => decompile('f', fn(`    ${dir}\n`), MIPS_IDO)).toThrow(/can emit fill between instructions/);
+  });
+  test('an instruction under `.set reorder` declines', () => {
+    expect(() => decompile('f', fn('', '    .set reorder\n'), MIPS_IDO)).toThrow(/assembled under `\.set reorder`/);
+  });
+  test('`.set reorder` before the function carries into it', () => {
+    expect(() => decompile('f', `.set reorder\n${fn('')}`, MIPS_IDO)).toThrow(/assembled under `\.set reorder`/);
+    expect(decompile('f', `.set reorder\n.set noreorder\n${fn('')}`, MIPS_IDO).source).toContain('a0 + 1 + 4');
+  });
+});

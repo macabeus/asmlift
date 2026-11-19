@@ -1,7 +1,7 @@
 {
   "generatedBy": "pnpm regen:declines-census (scripts/regen-decline-census.ts) — do not hand-edit",
-  "distinctMessages": 326,
-  "residueTotal": 130,
+  "distinctMessages": 328,
+  "residueTotal": 132,
   "residueByFile": [
     {
       "file": "frontend/thumb.ts",
@@ -101,10 +101,12 @@
     },
     {
       "file": "frontend/splat.ts",
-      "count": 13,
+      "count": 15,
       "messages": [
+        "cannot lift 'X': 'X' inside the function can emit fill between instructions, which this reader does not model",
         "cannot lift 'X': 'X' inside the function changes which lines are assembled, and this reader reads every line as written",
         "cannot lift 'X': 'X' is assembled into another section than the function's \\`.text\\`",
+        "cannot lift 'X': 'X' is assembled under \\`.set reorder\\`, where gas fills delay slots itself",
         "cannot lift 'X': 'X' leaves a comment, string or character constant open at the end of its line, so this reader cannot tell which statements gas assembles",
         "cannot lift 'X': 'X' switches section in a way this reader does not model",
         "cannot lift 'X': branch/jump target 'X' is not a local label in this function (tail call / cross-function branch not modelled)",

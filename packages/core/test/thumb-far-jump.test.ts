@@ -567,6 +567,20 @@ describe('a section switch this frontend cannot place, and code in another secti
     );
   });
 
+  // `.set ., .+2` moves the location counter: gas emits a 0x0000 halfword (`movs r0, r0`, which
+  // sets the flags `beq` reads: 2900 0000 d001). Skipped as a zero-byte `.set`, the lift branched
+  // on `cmp r1, #0`. After a return it is fill a pc-relative load reads (gas loads 0, not 9).
+  test.each(['.set', '.equ', '.eqv'])('`%s ., .+2` moves the location counter, and declines', (dir) => {
+    const g = (body: string) =>
+      decompile('g', `\t.text\n\t.thumb\n\t.thumb_func\n\t.global g\ng:\n${body}`, ARMV4T_AGBCC);
+    expect(() =>
+      g(`\tcmp r1, #0\n\t${dir} ., .+2\n\tbeq .L1\n\tmov r0, #1\n\tbx lr\n.L1:\tmov r0, #2\n\tbx lr\n`),
+    ).toThrow(new RegExp(`'\\${dir}' is a directive this frontend does not read, where control can reach its bytes`));
+    expect(() => g(`\tldr r0, [pc, #0]\n\tbx lr\n\t${dir} ., .+4\n\t.word 9\n\t.word 10\n`)).toThrow(
+      /raw-encoded input needs byte-accurate layout/,
+    );
+  });
+
   // A `[pc, #4]` load is resolved by laying the slice's items end to end; a word gas assembles into
   // `.data` (or a halfword into `.rodata`) is not there. Measured: gas loads 11 (y1) and 22 (y2,
   // unaligned), where the layout read 7 and 11.
