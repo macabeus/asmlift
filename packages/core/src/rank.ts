@@ -100,6 +100,7 @@ import {
   STACKED_SUBSETS,
   STRUCTURE_VARIATIONS,
   StackedMemberThrew,
+  type StackedMemo,
   type StructureVariation,
   UNFOLDED_HOISTS,
   applyStacked,
@@ -1401,6 +1402,7 @@ export function enumerateCandidates(
           // which moves only const or pure-read assigns and so cannot lift a read of a base local
           // above its init.
           const firedSets = new Set<string>();
+          const stackedMemo: StackedMemo = new WeakMap();
           for (const subset of STACKED_SUBSETS) {
             // ONE TRY PER SHAPE — a shape is its own candidate and fails as its own candidate.
             // Sharing the respell variation's outer try would let a throw deriving one subset
@@ -1408,7 +1410,7 @@ export function enumerateCandidates(
             // A throw past applyStacked is reported under the fired set, the candidate's own name.
             let shapeVariations: readonly Variation[] = [];
             try {
-              const shaped = applyStacked(subset, alt);
+              const shaped = applyStacked(subset, alt, stackedMemo);
               if (shaped !== null && firstFired(firedSets, shaped.variations)) {
                 shapeVariations = shaped.variations;
                 assertDerivedContracts(alt, shaped.out, minted());
@@ -1441,11 +1443,12 @@ export function enumerateCandidates(
     // same footing as the others: the default inline spelling stays in the list, so the differ
     // referees and this can never cost a match.
     const firedSets = new Set<string>();
+    const stackedMemo: StackedMemo = new WeakMap();
     for (const subset of STACKED_SUBSETS) {
       // the truthful variations need the pass to RUN first, so this bypasses respell's
       // variations-then-thunk shape: same try posture, variations from the fired members
       try {
-        const shaped = applyStacked(subset, sfn);
+        const shaped = applyStacked(subset, sfn, stackedMemo);
         if (shaped !== null && firstFired(firedSets, shaped.variations)) {
           // the ONE call whose variations already name shapes — say so, rather than making `respell`
           // read them back out of the variations it was handed

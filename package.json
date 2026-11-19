@@ -35,5 +35,10 @@
   },
   "dependencies": {
     "@asmlift/cli": "workspace:*"
+  },
+  "pnpm": {
+    "patchedDependencies": {
+      "tsx@4.23.1": "patches/tsx@4.23.1.patch"
+    }
   }
 }

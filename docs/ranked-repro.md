@@ -465,18 +465,22 @@ hours to a full run you intend to compare against something.
 
 ## The loader is part of the number
 
-Two loaders run the same sources. `npx tsx packages/cli/src/main.ts` reads and transforms every
-file on every run, and its transform wraps every arrow function in esbuild's `--keep-names` shim,
-which the enumerator's per-candidate closures then pay for on every candidate.
-`packages/cli/dist/asmlift.mjs` is those same sources bundled once without it, and it is what the
-command above runs. Both produce the same candidates and the same scores; the `[score]` diff below
-is the check, and it is cheap.
+Two loaders run the same sources. `npx tsx packages/cli/src/main.ts` transforms every file through
+tsx (from its disk cache when the file is unchanged); `packages/cli/dist/asmlift.mjs` is those same
+sources bundled once, and it is what the command above runs. Neither carries esbuild's `keepNames`
+any more: the bundle never did, and tsx runs patched with it off (`patches/tsx@4.23.1.patch`,
+pinned by `packages/cli/test/offline/tsx-keepnames.test.ts`). Both produce the same candidates and
+the same scores; the `[score]` diff below is the check, and it is cheap.
 
-Measured back to back on the LoadBGTilemapData command below — one machine, other work running on
-it, `--jobs 6`, 26880 candidates: **620s under tsx against 484s bundled**, of which the ENUMERATION
-(the only phase a loader touches — the candidate compiles are subprocesses) was **207s against
-118s**. Both printed the same `[ranked]` line, the same 26880 `[score]` lines and the same stdout
-byte for byte. The ratio is the machine's, not the code's: re-time on your own log.
+The gap measured below is HISTORY: it was taken while tsx still had `keepNames` on, which wrapped
+every named function a module creates in a `__name` call that redefines its `name` — paid per
+closure the enumerator binds per candidate. Back to back on the LoadBGTilemapData command below —
+one machine, other work running on it, `--jobs 6`, 26880 candidates: **620s under tsx against 484s
+bundled**, of which the ENUMERATION (the only phase a loader touches — the candidate compiles are
+subprocesses) was **207s against 118s**. Both printed the same `[ranked]` line, the same 26880
+`[score]` lines and the same stdout byte for byte. That gap has not been re-measured under the
+patched tsx, so do not read it as what tsx costs now; and the ratio is the machine's, not the
+code's: re-time on your own log.
 
 **A bundle is only as fresh as its last build, and `dist/` is gitignored** — nothing rebuilds it for
 you, nothing commits it, and an old one runs exactly as happily as a new one. So rebuild before any
