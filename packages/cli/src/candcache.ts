@@ -1488,7 +1488,8 @@ function sweepTrash(): void {
 // never touched, a namespace is deleted in only while this process holds its mark, and a reader
 // waits for the mark to go. `get` is miss-on-race, and `reapUnlinked` leaves objects younger than
 // its own grace window alone. The PRUNE_GRACE_MS window on OTHER namespaces stays as a second
-// fence: one resolved within it is not touched at all.
+// fence — one resolved within it is not touched at all — and it is the only fence against a
+// process running an older copy of this module on the same store, which writes no mark.
 //
 // A compile worker never prunes: it runs beside sibling workers serving compiles from the store,
 // and the process that started them is where a prune belongs. A worker THREAD is told by
@@ -1548,7 +1549,9 @@ function pruneOnce(keepNs: string): void {
         continue;
       }
       // A namespace resolved within the window may belong to a process that has not claimed its
-      // lease yet — the mark protocol already covers that gap; this is the second fence.
+      // lease yet. The mark protocol covers that gap for a reader running this code; for one
+      // running an older copy of this module, which writes no mark and claims its lease only after
+      // its own prune, this fence is the one that holds.
       if ((statSync(dir, { throwIfNoEntry: false })?.mtimeMs ?? 0) >= cutoff) {
         tooYoung += 1;
         continue;
