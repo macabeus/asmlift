@@ -378,11 +378,21 @@ describe('fill or reordering gas adds between Splat instructions declines', () =
     `glabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n${before}` +
     `    /* 104 80000104 03E00008 */  jr         $ra\n${between}` +
     '    /* 108 80000108 24420004 */  addiu $v0, $v0, 4\nendlabel f\n';
-  test.each(['.set ., .+4', '.equ ., .+4', '.balign 16', '.align 3'])('`%s` in the function declines', (dir) => {
-    expect(() => decompile('f', fn(`    ${dir}\n`), MIPS_IDO)).toThrow(/can emit fill between instructions/);
-  });
+  test.each(['.set ., .+4', '.equ ., .+4', '.set ".", .+4', '.balign 16', '.align 3'])(
+    '`%s` in the function declines',
+    (dir) => {
+      expect(() => decompile('f', fn(`    ${dir}\n`), MIPS_IDO)).toThrow(/can emit fill between instructions/);
+    },
+  );
   test('an instruction under `.set reorder` declines', () => {
     expect(() => decompile('f', fn('', '    .set reorder\n'), MIPS_IDO)).toThrow(/assembled under `\.set reorder`/);
+  });
+  // `.set pop` back to a saved `.set reorder` lets gas move `addiu v0,a0,1` into the slot (a0 + 1)
+  test.each([
+    ['.set reorder\n.set push\n.set noreorder\n.set pop\n', ''],
+    ['', '    .set push\n'],
+  ])('`.set push` / `.set pop` declines (%#)', (before, inside) => {
+    expect(() => decompile('f', `${before}${fn('', inside)}`, MIPS_IDO)).toThrow(/saves or restores assembler options/);
   });
   test('`.set reorder` before the function carries into it', () => {
     expect(() => decompile('f', `.set reorder\n${fn('')}`, MIPS_IDO)).toThrow(/assembled under `\.set reorder`/);

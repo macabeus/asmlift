@@ -202,6 +202,13 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
   for (const raw of lines.slice(0, sliceFrom)) {
     for (const st of splatStatements(raw) ?? []) {
       const t = st.trim();
+      // `.set push` / `.set pop` save and restore the reorder state (measured: a `pop` back to
+      // `.set reorder` before the function lets gas fill its delay slot); not modelled.
+      if (/^\.set\s+(?:push|pop)\b/i.test(t)) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': '${t}' saves or restores assembler options this reader does not track`,
+        );
+      }
       const ro = t.match(/^\.set\s+(no)?reorder\b/i);
       if (ro) {
         reorder = ro[1] === undefined;
@@ -251,6 +258,11 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
       inOtherSection = !isPlainText(sw);
       continue;
     }
+    if (/^\.set\s+(?:push|pop)\b/i.test(line)) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${line}' saves or restores assembler options this reader does not track`,
+      );
+    }
     const ro = line.match(/^\.set\s+(no)?reorder\b/i);
     if (ro) {
       reorder = ro[1] === undefined;
@@ -259,7 +271,11 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
     // location counter (`.set ., .+4`, `. = …`, measured: a nop in the delay slot) or an
     // alignment (measured: `.balign 16` after a `jr` puts two nops before its delay slot). The
     // fill is not modelled, so each declines.
-    if (/^\.(?:set|equ|eqv|equiv)\s+\.\s*,/i.test(line) || /^\.\s*=/.test(line) || /^\.\w*align\w*\b/i.test(line)) {
+    if (
+      /^\.(?:set|equ|eqv|equiv)\s+(?:\.|"\.")\s*,/i.test(line) ||
+      /^\.\s*=/.test(line) ||
+      /^\.\w*align\w*\b/i.test(line)
+    ) {
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': '${line}' inside the function can emit fill between instructions, which this ` +
           `reader does not model`,

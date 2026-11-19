@@ -1,7 +1,7 @@
 {
   "generatedBy": "pnpm regen:declines-census (scripts/regen-decline-census.ts) — do not hand-edit",
-  "distinctMessages": 328,
-  "residueTotal": 132,
+  "distinctMessages": 329,
+  "residueTotal": 133,
   "residueByFile": [
     {
       "file": "frontend/thumb.ts",
@@ -79,6 +79,28 @@
       ]
     },
     {
+      "file": "frontend/splat.ts",
+      "count": 16,
+      "messages": [
+        "cannot lift 'X': 'X' inside the function can emit fill between instructions, which this reader does not model",
+        "cannot lift 'X': 'X' inside the function changes which lines are assembled, and this reader reads every line as written",
+        "cannot lift 'X': 'X' is assembled into another section than the function's \\`.text\\`",
+        "cannot lift 'X': 'X' is assembled under \\`.set reorder\\`, where gas fills delay slots itself",
+        "cannot lift 'X': 'X' leaves a comment, string or character constant open at the end of its line, so this reader cannot tell which statements gas assembles",
+        "cannot lift 'X': 'X' saves or restores assembler options this reader does not track",
+        "cannot lift 'X': 'X' switches section in a way this reader does not model",
+        "cannot lift 'X': branch/jump target 'X' is not a local label in this function (tail call / cross-function branch not modelled)",
+        "cannot lift 'X': data directive 'X' in the code stream — skipping it would silently delete its effect",
+        "cannot lift 'X': its \\`glabel\\` sits inside a conditional, macro or repeated body, which this reader does not model",
+        "cannot lift 'X': operand 'X' has a leading-zero magnitude ('X'), which is octal to the assembler and a radix this reader does not model",
+        "cannot lift 'X': relocation operand 'X' — this reader resolves a '%hi'/'%lo' half only against a symbol ('SYM' or 'SYM ± <integer>'), and will not treat one it cannot resolve as arithmetic",
+        "cannot lift 'X': two relocation operands on one instruction ('X' at 0xX): 'X' and 'X'",
+        "cannot lift 'X': unparsable constant expression 'X'",
+        "cannot lift 'X': unrecognised line in the Splat disassembly: 'X'",
+        "symbol 'X' not found in the Splat disassembly (functions present: X)"
+      ]
+    },
+    {
       "file": "frontend/ppc.ts",
       "count": 15,
       "messages": [
@@ -97,27 +119,6 @@
         "cannot lift 'X': the 'X' at 0xX leaves the function for 'X' — a tail call is not modelled",
         "cannot lift 'X': the X reads the link register the X overwrote on some path, with no 'mtlr' since — the return address is lost there",
         "cannot lift 'X': the store to 'X' at 0xX is not the link register's save — X"
-      ]
-    },
-    {
-      "file": "frontend/splat.ts",
-      "count": 15,
-      "messages": [
-        "cannot lift 'X': 'X' inside the function can emit fill between instructions, which this reader does not model",
-        "cannot lift 'X': 'X' inside the function changes which lines are assembled, and this reader reads every line as written",
-        "cannot lift 'X': 'X' is assembled into another section than the function's \\`.text\\`",
-        "cannot lift 'X': 'X' is assembled under \\`.set reorder\\`, where gas fills delay slots itself",
-        "cannot lift 'X': 'X' leaves a comment, string or character constant open at the end of its line, so this reader cannot tell which statements gas assembles",
-        "cannot lift 'X': 'X' switches section in a way this reader does not model",
-        "cannot lift 'X': branch/jump target 'X' is not a local label in this function (tail call / cross-function branch not modelled)",
-        "cannot lift 'X': data directive 'X' in the code stream — skipping it would silently delete its effect",
-        "cannot lift 'X': its \\`glabel\\` sits inside a conditional, macro or repeated body, which this reader does not model",
-        "cannot lift 'X': operand 'X' has a leading-zero magnitude ('X'), which is octal to the assembler and a radix this reader does not model",
-        "cannot lift 'X': relocation operand 'X' — this reader resolves a '%hi'/'%lo' half only against a symbol ('SYM' or 'SYM ± <integer>'), and will not treat one it cannot resolve as arithmetic",
-        "cannot lift 'X': two relocation operands on one instruction ('X' at 0xX): 'X' and 'X'",
-        "cannot lift 'X': unparsable constant expression 'X'",
-        "cannot lift 'X': unrecognised line in the Splat disassembly: 'X'",
-        "symbol 'X' not found in the Splat disassembly (functions present: X)"
       ]
     },
     {

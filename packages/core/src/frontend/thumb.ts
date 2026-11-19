@@ -1801,7 +1801,7 @@ function decode(
       const dname = rest.match(/^\.([\w.$]+)/)?.[1].toLowerCase() ?? '';
       // `.set ., expr` (and `.equ`/`.eqv`/`.equiv`) moves the location counter, emitting fill, as
       // `. = expr` does (measured: `.set ., .+2` is a 0x0000 halfword in the code). Not zero-byte.
-      const movesDot = /^\.(?:set|equ|eqv|equiv)\s+\.\s*,/i.test(rest);
+      const movesDot = /^\.(?:set|equ|eqv|equiv)\s+(?:\.|"\.")\s*,/i.test(rest); // `"."` is `.` too
       if (movesDot || (!ZERO_BYTE_DIRECTIVES.has(dname) && !dname.startsWith('cfi_'))) {
         unreadDirectives.push({ at: flat.length - 1, what: rest.split(/\s/)[0], lines: LINE_DIRECTIVES.test(dname) });
       }

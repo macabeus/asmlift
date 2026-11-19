@@ -570,6 +570,14 @@ describe('a section switch this frontend cannot place, and code in another secti
   // `.set ., .+2` moves the location counter: gas emits a 0x0000 halfword (`movs r0, r0`, which
   // sets the flags `beq` reads: 2900 0000 d001). Skipped as a zero-byte `.set`, the lift branched
   // on `cmp r1, #0`. After a return it is fill a pc-relative load reads (gas loads 0, not 9).
+  // the quoted `"."` names the location counter too (measured: the same 0x0000 halfword)
+  test('`.set ".", .+2` moves the location counter, and declines', () => {
+    const asm =
+      '\t.text\n\t.thumb\n\t.thumb_func\n\t.global g\ng:\n\tcmp r1, #0\n\t.set ".", .+2\n\tbeq .L1\n' +
+      '\tmov r0, #1\n\tbx lr\n.L1:\tmov r0, #2\n\tbx lr\n';
+    expect(() => decompile('g', asm, ARMV4T_AGBCC)).toThrow(/'\.set' is a directive this frontend does not read/);
+  });
+
   test.each(['.set', '.equ', '.eqv'])('`%s ., .+2` moves the location counter, and declines', (dir) => {
     const g = (body: string) =>
       decompile('g', `\t.text\n\t.thumb\n\t.thumb_func\n\t.global g\ng:\n${body}`, ARMV4T_AGBCC);
