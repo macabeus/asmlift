@@ -85,9 +85,11 @@ describe('so a word staged beneath an indexed read is still an argument, and the
   });
 
   // `p[0].x` at [sp,#4] lies below the read's base (`p[i].y`, [sp,#8]) and nothing reads it by its
-  // offset: a dead member and a sixth argument are the same code there
+  // offset: a dead member and a sixth argument are the same code there. agbcc spells `p[i].y` as the
+  // member's address plus the index (`add r1, sp, #8 / add r1, r1, r0`), a pointer's spelling, so
+  // the read clears nothing at all and every word above [sp,#0] is asked.
   test('members: a word below the read’s base is still asked', () => {
-    expect(() => lift('members', FIVE)).toThrow(/\[sp,#4\] also reaches the call unread/);
+    expect(() => lift('members', FIVE)).toThrow(/\[sp,#4\], [^]*also reaches the call unread/);
   });
 });
 
@@ -286,6 +288,41 @@ describe('the staging order is a declared premise', () => {
     for (const [name, src, prototypes] of cases) {
       expect(() => decompile('blk1', src, ARMV4T_AGBCC, { prototypes }), name).toThrow(/stack pointer used as data/);
     }
+  });
+
+  // A typed list with fewer words than the asm stages: a plain call refuses it (the staged word is
+  // never reloaded, or lies outside the declared block), and so does the same call after a read
+  // through a pointer formed below its array, which clears nothing.
+  test('a declaration that leaves a staged word unstated refuses, plainly or after a pointer read', () => {
+    const typed = (n: number) => ({ kr: { params: words(n), returns: 'int' } });
+    for (const [fn, n] of [
+      ['blk1', 4],
+      ['blk2', 4],
+      ['blk3', 5],
+    ] as const) {
+      expect(() => decompile(fn, source(fn), ARMV4T_AGBCC, { prototypes: typed(n) }), `${fn} typed${n}`).toThrow(
+        /stack pointer used as data/,
+      );
+    }
+    const f = (body: string) =>
+      `f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n${body}\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n` +
+      `\t.align\t2, 0\n.L9:\n\t.word\tgI\n\t.word\tgK\n`;
+    const args = '\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\tkr\n';
+    const one = f('\tldr\tr0, .L9\n\tldr\tr0, [r0]\n\tstr\tr0, [sp]\n' + args);
+    const two = f(
+      '\tldr\tr0, .L9\n\tldr\tr0, [r0]\n\tstr\tr0, [sp]\n\tldr\tr0, .L9+4\n\tldr\tr0, [r0]\n\tstr\tr0, [sp, #0x4]\n' +
+        args,
+    );
+    const lift1 = (src: string, n: number | null) =>
+      decompile('f', src, ARMV4T_AGBCC, { prototypes: n === null ? {} : typed(n) }).source;
+    for (const n of [null, 2, 4, 6]) {
+      expect(() => lift1(one, n), `one word, typed${n}`).toThrow(/stack pointer used as data/);
+    }
+    expect(lift1(one, 5)).toContain('kr(1, 2, 3, 4, gI)');
+    for (const n of [null, 2, 4, 5]) {
+      expect(() => lift1(two, n), `two words, typed${n}`).toThrow(/stack pointer used as data/);
+    }
+    expect(lift1(two, 6)).toContain('kr(1, 2, 3, 4, gI, gK)');
   });
 
   test('below3 with its last stack word staged before the read declines: nothing is stored after the read', () => {

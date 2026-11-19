@@ -929,6 +929,13 @@ export interface FrameLayoutBehaviors {
   // premise a load through a runtime index into the frame rests on (`frontend/stackargs.ts`, the
   // `indexed-read` event), whose base proves no local: a pointer formed below its array (`u32 *p =
   // a - 1; … p[i]`, the 1-based table idiom) bases the read at a word an outgoing argument may own.
+  // Only a read in agbcc's own `a[i]` spelling clears anything: the index added to sp itself, then
+  // the array's offset, which bases it at the array (`im1`, `six1`..`six3`). An index added to a frame
+  // address held in a register is a pointer's (`mov r4, sp` or `add r4, sp, #4`, then `add r2, r2,
+  // r4`), and a pointer formed below its array bases its read on words a declaration may leave
+  // unstated (`blk1`/`blk2` under a 4-word `kr`, `blk3` under a 5-word one), so it clears nothing
+  // and those keep the refusal a plain call gets. A struct member's array (`p[i].y`, `add r1, sp,
+  // #8 / add r1, r1, r0`) has the pointer's spelling and clears nothing either.
   // The Thumb frontend gives each read a ceiling (`below`): with no call that may take a stack word
   // after it, none; otherwise the lowest, over the paths to such calls, of the words each one's
   // declaration states, and no event at all where a call nothing sizes lies ahead. Under this
@@ -968,7 +975,10 @@ export interface FrameLayoutBehaviors {
   // handed no frame address — hand-written, or from a compiler this is not set on. A store after
   // the call's last staged word is no residue: it raises no ceiling, loaded back or not (`blk1`
   // with a store at [sp,#0x14] before the `bl`, reloaded directly, through a capture in another
-  // block, by an `ldm` writeback, or never, declines). The price is a read with a call nothing
+  // block, by an `ldm` writeback, or never, declines). Hand-written asm spelling a pointer's read
+  // below its array as `add r2, r2, sp` is read as an array at sp: under a declaration leaving a
+  // word staged there unstated, it lifts with that word as the array's, faithful to the asm under
+  // the declaration where a plain call refuses it. The price is a read with a call nothing
   // sizes ahead of it, the array's words staged for none (kl2dct `CommonWaitForNextFrame`): it
   // declines. It is no fact of the ISA, so a second compiler of the same ISA states it rather than
   // inheriting it from `escapedFrameAddressNamesALocal`.
