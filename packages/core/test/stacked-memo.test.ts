@@ -1,13 +1,13 @@
 // A STACKED MEMBER RUNS ONCE PER INPUT TREE, NOT ONCE PER SUBSET HOLDING IT.
 //
 // rank.ts derives every STACKED_SUBSETS entry onto each source (rank-variations.ts `applyStacked`),
-// and a member sits in up to two dozen of the subsets. The members are pure functions of their
-// input tree, so both loops share a `StackedMemo` keyed by the member and the input tree's identity.
+// and a member sits in many of the subsets. The members are pure functions of their input tree, so
+// each of the two loops keeps a `StackedMemo` keyed by the member and the input tree's identity.
 // Three facts pin it: every subset's result is the one it gets without the memo (the same fired
 // members and the same tree, a throw reported under the same steps), a member never sees one
 // input twice in a loop — enumeration-wide, with the real members, through enumerateCandidates —
 // and nothing writes to a tree a member returned, which a hit hands to every later subset and
-// member holding it where each subset once derived its own.
+// member holding it.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test, vi } from 'vitest';
