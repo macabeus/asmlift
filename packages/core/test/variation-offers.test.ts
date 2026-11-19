@@ -130,6 +130,17 @@ describe('every gate reference resolves', () => {
     expect(bad).toEqual([]);
   });
 
+  // rank.ts doubles a `beside` variation only over settings already carrying the one it names, so a
+  // reorder that put it first would drop its candidates; enumeration throws on that, and this pins the table.
+  test('a structure variation enumerated beside another comes after it in the table', () => {
+    const at = new Map(STRUCTURE_VARIATIONS.map((v, i) => [v.flag, i]));
+    const bad = STRUCTURE_VARIATIONS.flatMap((v, i) =>
+      v.beside !== undefined && !((at.get(v.beside) ?? Infinity) < i) ? [`${v.name} beside ${v.beside}`] : [],
+    );
+    expect(bad).toEqual([]);
+    expect(STRUCTURE_VARIATIONS.some((v) => v.beside !== undefined)).toBe(true);
+  });
+
   // The structure and stacked variations are table entries whose gate or pass is a value, so the
   // pointer is checked against the entry itself rather than against a name in a source file.
   test("a structure variation points at its entry's gate, or at the table where that gate is written inline", async () => {
