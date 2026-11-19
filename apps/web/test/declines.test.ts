@@ -913,6 +913,9 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     'ctr-transfer',
     'far-jump',
     'fp-cond-branch',
+    // `jt_idxreuse:agbcc` was the last row: its dispatch, summed into the pointer register, lifts
+    // (frontend/thumb.ts `recoverJumpTable`), as `jt_idxreuse_p2:agbcc`'s does.
+    'indirect-jump',
     'loop-exit-values',
     // `cmn_field`/`cmn_eq` MATCH on agbcc, and `cmn_ult` declines under `cmn-carry`. What is left
     // (`tst`, arithmetic flags, a call) is hand-written asm.
