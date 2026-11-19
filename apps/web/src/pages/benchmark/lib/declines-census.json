@@ -1,17 +1,18 @@
 {
   "generatedBy": "pnpm regen:declines-census (scripts/regen-decline-census.ts) — do not hand-edit",
-  "distinctMessages": 318,
-  "residueTotal": 122,
+  "distinctMessages": 323,
+  "residueTotal": 127,
   "residueByFile": [
     {
       "file": "frontend/thumb.ts",
-      "count": 38,
+      "count": 41,
       "messages": [
         "cannot lift 'X': 'X X' branches to 'X', which this asm defines as a data label — not modelled",
         "cannot lift 'X': 'X X' calls through a register that holds no function's address — not modelled",
         "cannot lift 'X': 'X X' loads a word that is not X's own into X, which is then used as a value — a pop is read as restoring each register it names, so the copy it makes is not modelled",
         "cannot lift 'X': 'X X' loads a word that is not X's own save into callee-saved X, and X reaches a return so, unrestored — the caller sees the write, which no C statement spells",
         "cannot lift 'X': 'X X' targets a label inside this function and not a declared function, and is not a relay this frontend lowers to the branch it stands for — read as a call it would return into a block",
+        "cannot lift 'X': 'X' defines a macro whose name this frontend does not read",
         "cannot lift 'X': 'X' emits fill into the code stream and fillits fill bytes are not a pad encoding this frontend models — they are real instructionsmakes item sizes unknowable",
         "cannot lift 'X': 'X' follows a function-start marker and is a statement this frontend does not read (X), so where that function starts is unknown",
         "cannot lift 'X': 'X' in the code stream spells an instruction by its encoding, which this frontend does not decode (skipping it would silently delete its effect)",
@@ -20,6 +21,7 @@
         "cannot lift 'X': 'X' is a directive this frontend does not read, where control can reach its bytes — it may emit an instruction (skipping it would silently delete its effect)",
         "cannot lift 'X': 'X' is a label here but not a function (the function is 'X')",
         "cannot lift 'X': 'X' is a statement this frontend does not read the way the assembler does (X), so skipping it could silently delete an instruction",
+        "cannot lift 'X': 'X' switches section inside a conditional, macro or repeated body, which this frontend does not model, so it cannot tell which section the lines after it are in",
         "cannot lift 'X': ARM-mode function (arm_func_start) — this frontend lifts Thumb only",
         "cannot lift 'X': alignment padding depends on the function's base alignment, which this input does not determine — base X and base X both decode consistently but disagree: base X has X, base X has X",
         "cannot lift 'X': block 'X' interleaves raw data (.X) with instructions",
@@ -29,6 +31,7 @@
         "cannot lift 'X': control falls through into the ARM-mode function 'X'",
         "cannot lift 'X': data label 'X' used as a register — not modelled",
         "cannot lift 'X': indirect/computed jump 'X X' is not a return through the caller's lr — on some path what it jumps to is not lr, nor the frame word the prologue saved lr in — jump tables / computed gotos / register tail calls not supported",
+        "cannot lift 'X': its code is assembled into more than one section (X), so it is not one run of code as written",
         "cannot lift 'X': multi-value raw halfword directive mixing branches is not supported",
         "cannot lift 'X': neither base alignment fits — X",
         "cannot lift 'X': no base alignment (0 or 2 mod 4) puts every literal pool word on a 4-byte boundary once alignment fill is accounted forcannot lift 'X': literal pools at inconsistent alignments — cannot determine the function's base alignment",
@@ -115,11 +118,13 @@
     },
     {
       "file": "frontend/splat.ts",
-      "count": 9,
+      "count": 11,
       "messages": [
+        "cannot lift 'X': 'X' inside the function changes which lines are assembled, and this reader reads every line as written",
         "cannot lift 'X': 'X' leaves a comment, string or character constant open at the end of its line, so this reader cannot tell which statements gas assembles",
         "cannot lift 'X': branch/jump target 'X' is not a local label in this function (tail call / cross-function branch not modelled)",
         "cannot lift 'X': data directive 'X' in the code stream — skipping it would silently delete its effect",
+        "cannot lift 'X': its \\`glabel\\` sits inside a conditional, macro or repeated body, which this reader does not model",
         "cannot lift 'X': operand 'X' has a leading-zero magnitude ('X'), which is octal to the assembler and a radix this reader does not model",
         "cannot lift 'X': relocation operand 'X' — this reader resolves a '%hi'/'%lo' half only against a symbol ('SYM' or 'SYM ± <integer>'), and will not treat one it cannot resolve as arithmetic",
         "cannot lift 'X': two relocation operands on one instruction ('X' at 0xX): 'X' and 'X'",

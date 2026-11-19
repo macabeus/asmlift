@@ -494,3 +494,58 @@ describe('every statement in the function is read the way gas reads it, or the f
     ]);
   });
 });
+
+// Bodies gas may not assemble as written, and code in another section. Each LINE was assembled with
+// arm-none-eabi-as -mthumb -mcpu=arm7tdmi and read back with objdump; the halfwords from .Lthunk
+// are in each row. Read as written, each lifted a phantom instruction or hid the thunk's `bx lr`.
+describe('a section switch this frontend cannot place, and code in another section, decline', () => {
+  const thunk = (line: string, prefix = '') =>
+    `${prefix}${H}\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tcmp\tr4, #0\n\tbeq\t.Lskip\n\tbl\t.Lthunk\n\tadd\tr4, #7\n` +
+    '.Lskip:\n\tadd\tr0, r4, #0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+    `.Lthunk:\n\tadd\tr4, #1\n${line}\n\tadd\tr4, #3\n\tb\t.Lskip\n`;
+  const declines = (asm: string, why: RegExp) => {
+    expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(FrontendUnsupportedError);
+    expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(why);
+  };
+  const DBG = '.section .debug_str,"MS",%progbits,1';
+  const IN_BODY = /switches section inside a conditional, macro or repeated body/;
+
+  // 3401 3403 each: the body is never assembled, so there is no `add r4, #2`. Applying the body's
+  // `.text` hid the closing directive in a debug region, and the `add` lifted.
+  test.each([
+    ['.if 0', '.endif'],
+    ['.macro mm', '.endm'],
+    ['.rept 0', '.endr'],
+    ['.ifdef NOPE', '.endif'],
+  ])('a `.text` inside `%s` … `%s` opened in a debug section declines', (open, close) => {
+    declines(thunk(`${DBG}\n${open}\n.text ; add r4, #2 ; ${DBG}\n${close}\n.text`), IN_BODY);
+    declines(thunk(`${DBG}\n${open}\n.text\nadd r4, #2\n${DBG}\n${close}\n.text`), IN_BODY);
+  });
+
+  // 3401 4770 3403: the macro's `.text` runs where it is invoked, inside the debug section.
+  test('a macro whose body switches to `.text`, invoked in a debug section, declines', () => {
+    declines(thunk(`${DBG}\ntotext\nbx lr\n.text`, '.macro totext\n.text\n.endm\n'), IN_BODY);
+  });
+
+  // 3401 3403: the `add r4, #2` is assembled into `.text.foo` (or `.text 1`, laid out after
+  // subsection 0), not between the `add`s around it.
+  test.each([
+    ['\t.section .text.foo\n\tadd r4, #2\n\t.text', /\(\.text 0, \.text\.foo 0\)/],
+    ['\t.text 1\n\tadd r4, #2\n\t.text 0', /\(\.text 0, \.text 1\)/],
+  ])('code in another section (`%s`) declines', (line, why) => {
+    declines(thunk(line), /is assembled into more than one section/);
+    declines(thunk(line), why);
+  });
+
+  test('a function with no relay and code in another section declines', () => {
+    declines(`${H}\tadd\tr0, #2\n\t.section .text.foo\n\tadd\tr0, #1\n\t.text\n\tbx\tlr\n`, /more than one section/);
+  });
+
+  // 3401 4770 3403: a quoted label names the macro `nop`, which this frontend does not read.
+  test('a macro defined under a quoted label declines the input', () => {
+    declines(
+      thunk('\tnop', '"nop": .macro\n\tbx lr\n\t.endm\n'),
+      /defines a macro whose name this frontend does not read/,
+    );
+  });
+});
