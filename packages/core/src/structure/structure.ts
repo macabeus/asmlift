@@ -7866,13 +7866,18 @@ function structureRanked(
     }
     // A SECOND COUNTER is a reading of its own: a loop no declined run asked steps several names
     // only under `stepSecondCounters` (rank.ts `/for-steps`), so `/for-continue` keeps the reading
-    // that spells such a loop `while (1)` beside its single-counter `for` loops. Such a loop still
-    // reports itself `offered`: rank.ts skips a setting whose OFF sibling never fired the witness,
-    // and records the skipped one with that sibling's witnesses, so `/for-continue/for-steps` is
-    // structured only where `/for-steps` (the default's tree) reports `/for-continue`'s witness.
+    // that spells such a loop `while (1)` beside its single-counter `for` loops. With the option
+    // off, such a loop is what `/for-steps` changes and `/for-continue` alone does not, so the
+    // default reports it as `onForStepsOffered`: rank.ts records a `/for-continue` it skipped as the
+    // default's tree with the default's witnesses, and `/for-continue/for-steps` is structured only
+    // where that set holds `/for-steps`' witness (`/for-steps` is enumerated only beside it).
     const stepsUnasked = stepOrder.length > 1 && !stepSecondCounters && !forRank.asked.has(h);
     if (offered) {
-      hooks.onForOffered?.();
+      if (stepsUnasked) {
+        hooks.onForStepsOffered?.();
+      } else {
+        hooks.onForOffered?.();
+      }
       return null;
     }
     if (stepsUnasked) {

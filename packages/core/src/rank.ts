@@ -1058,13 +1058,17 @@ export function enumerateCandidates(
       opts.onVariationGated?.(variation.name);
       continue;
     }
+    // a variation enumerated only `beside` another doubles only the settings carrying that one
+    const besideOf = variation.beside;
     structureSettings = [
       ...structureSettings,
-      ...structureSettings.map((s) => {
-        const on: StructureSetting = { ...s, variations: [...s.variations, variation.name] };
-        on[variation.flag] = true;
-        return on;
-      }),
+      ...structureSettings
+        .filter((s) => besideOf === undefined || s[besideOf])
+        .map((s) => {
+          const on: StructureSetting = { ...s, variations: [...s.variations, variation.name] };
+          on[variation.flag] = true;
+          return on;
+        }),
     ];
   }
   /** Is this a setting where no structure variation is on, other than `/flip-branch`? The default-setting abort guard's

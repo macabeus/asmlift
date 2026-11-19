@@ -544,18 +544,21 @@ export interface StructureHooks {
    *  latch, the header's params and values from outside the loop, an update whose steps have an
    *  order, and the guard (or the folded first test) read on the entry values — and would be spelled
    *  `for` with `spellCountedLoopsFor` on: the one place that option changes what the structurer
-   *  reads. A loop stepping several names counts too, though `/for-continue` alone leaves it
-   *  `while (1)`: `/for-continue/for-steps` reads it, and rank.ts records `/for-steps` alone, which
-   *  is the default's tree, with the default's witnesses. A structuring with that option off that never fires it builds the same tree as the same
-   *  options with it on, so rank.ts skips `/for-continue` on its sibling. Not fired by
+   *  reads. A loop stepping several names counts only under `stepSecondCounters`: without it
+   *  `/for-continue` alone leaves that loop `while (1)`, and it fires `onForStepsOffered` instead. A
+   *  structuring with that option off that never fires it builds the same tree as the same options
+   *  with it on, so rank.ts skips `/for-continue` on its sibling. Not fired by
    *  `assertDefaultAccepts`' structuring. */
   onForOffered?: () => void;
-  /** Fired each time a loop `spellCountedLoopsFor` asks, and no declined run asked (`ForRanking`),
-   *  passes every check of `forPlanAt` with an update that steps several names, and stays
-   *  `while (1)` because `stepSecondCounters` is off: the one place that option changes what the
-   *  structurer reads. A structuring with it off that never fires this builds the same tree as the
-   *  same options with it on, so rank.ts skips `/for-steps` on its sibling. Not fired by
-   *  `assertDefaultAccepts`' structuring. */
+  /** Fired each time a loop no declined run asked (`ForRanking`) passes every check of `forPlanAt`
+   *  with an update that steps several names, and stays `while (1)` because `stepSecondCounters` is
+   *  off: the one place that option changes what the structurer reads, beside
+   *  `spellCountedLoopsFor`. Fired with `spellCountedLoopsFor` off too, in place of `onForOffered`:
+   *  rank.ts enumerates `/for-steps` only beside `/for-continue`, and records a `/for-continue` it
+   *  skipped as its sibling's tree with that sibling's witnesses, so a sibling without either option
+   *  answers for what `/for-steps` would change under `/for-continue`. A structuring with it off
+   *  that never fires this builds the same tree as the same options with it on, so rank.ts skips
+   *  `/for-steps` on its sibling. Not fired by `assertDefaultAccepts`' structuring. */
   onForStepsOffered?: () => void;
   /** Fired each time `bound-plus-one-counter-wraps` is the rule that refuses a reading of a latch's
    *  `!=` test: the one refusal of `forPlanAt` that reads how the signedness pin declared the
