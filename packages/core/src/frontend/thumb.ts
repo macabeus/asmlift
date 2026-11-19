@@ -4308,16 +4308,16 @@ function measureThumbFrame({
   // …AND HOW HIGH WHAT IT READS MAY CLEAR, under `stagedStackWordReachesOnlyItsCall` (`target.ts`
   // says why). A read may run between a staged word's store and its call — agbcc loads a by-value
   // struct's register words there (`kr(p[i], 3, gI)` stores gI at [sp,#0], then loads `p[i]` from
-  // [sp,#0] up into r0..r2) — so its ceiling (`below`) is the lowest, over the paths from it to a
-  // call, of the stack words that call's declaration states: none for a call nothing declares or
-  // sizes, so a read with one ahead clears nothing. A store on the way raises no ceiling: a store
-  // after the read is a staged word only if nothing reads it back, and a read back can hide past a
-  // block, a call or a capture's writeback (agbcc's own reload spills an indirect call's address
-  // there and loads it straight back, `fpspill`), so the ceiling does not ask. A call a typed
-  // parameter list declares ends a path unbounded: a word it takes that the read clears is missing
-  // at the call and refuses there. A call handed a frame address does not end one: it may be a
-  // block copy into the area (`add r0, sp, #4 / … / bl memcpy`). `Infinity` where no call follows
-  // the read; at or below the read's base, and the read is no event, where one nothing sizes does.
+  // [sp,#0] up into r0..r2) — so its ceiling (`below`) is the lowest, over EVERY call reachable from
+  // it, of the stack words that call's declaration states: none for a call nothing declares or
+  // sizes, so a read with one anywhere ahead clears nothing. A call a typed parameter list declares
+  // bounds nothing, as a word it takes that the read clears is missing at the call and refuses
+  // there, but it ends no path either: a word staged for a later call may have been stored before
+  // it. A store on the way raises no ceiling: a store after the read is a staged word only if
+  // nothing reads it back, and a read back can hide past a block, a call or a capture's writeback
+  // (agbcc's own reload spills an indirect call's address there and loads it straight back,
+  // `fpspill`), so the ceiling does not ask. `Infinity` where no call that bounds it lies ahead; at
+  // or below the read's base, and the read is no event, where one nothing sizes does.
   const isCall = (ins: Instr): boolean => ins.mnemonic === 'bl' || ins.mnemonic === 'blx';
   // the words a call's declaration states it takes, `Infinity` where a typed parameter list states
   // them exactly, 0 where nothing states them
@@ -4334,16 +4334,8 @@ function measureThumbFrame({
   };
   // the ceiling from instruction `i` of block `b`, given the ceiling at each block's start
   const clearsBelowFrom = (b: number, i: number, atStart: readonly number[]): number => {
-    let ceiling = Infinity;
-    for (const ins of asmBlocks[b].instrs.slice(i)) {
-      if (isCall(ins)) {
-        ceiling = Math.min(ceiling, statedStackEnd(ins));
-        if (!escapedOffsetOf.has(ins)) {
-          return ceiling;
-        }
-      }
-    }
-    return Math.min(ceiling, ...succs[b].filter((q) => entryReachable.has(q)).map((q) => atStart[q]));
+    const here = asmBlocks[b].instrs.slice(i).filter(isCall).map(statedStackEnd);
+    return Math.min(...here, ...succs[b].filter((q) => entryReachable.has(q)).map((q) => atStart[q]));
   };
   const clearsBelowAtStart = asmBlocks.map(() => Infinity);
   for (let changed = true; changed;) {

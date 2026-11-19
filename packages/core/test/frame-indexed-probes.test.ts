@@ -256,6 +256,38 @@ describe('the staging order is a declared premise', () => {
     }
   });
 
+  // A call a typed list declares bounds nothing, but it ends no path: kr, which nothing sizes,
+  // still lies ahead, and gI at [sp,#0] may be staged for it.
+  test('blk1 with a typed call between the read and kr declines', () => {
+    const before = (src: string, at: string, text: string): string => {
+      expect(src).toContain(at);
+      return src.replace(at, text + at);
+    };
+    const bl = '\tbl\tkr\n';
+    const save = '\tmov\tr8, r0\n\tmov\tr9, r1\n\tmov\tr10, r2\n\tmov\tr11, r3\n';
+    const restore = '\tmov\tr0, r8\n\tmov\tr1, r9\n\tmov\tr2, r10\n\tmov\tr3, r11\n';
+    const consts = '\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n';
+    const v0 = { params: [], returnsVoid: true };
+    const cases: [string, string, Record<string, object>][] = [
+      ['typedFooBeforeKr', before(source('blk1'), bl, save + '\tbl\tfoo\n' + restore), { foo: v0 }],
+      [
+        'typedFooArgsBeforeKr',
+        before(source('blk1'), bl, save + '\tbl\tfoo\n' + restore),
+        { foo: { params: words(4), returnsVoid: true } },
+      ],
+      ['fooThenConstKr', before(source('blk1'), bl, '\tbl\tfoo\n' + consts), { foo: v0 }],
+      ['twoTypedBeforeKr', before(source('blk1'), bl, save + '\tbl\tfoo\n\tbl\tbar\n' + restore), { foo: v0, bar: v0 }],
+      [
+        'typedThenCountKr',
+        before(source('blk1'), bl, save + '\tbl\tfoo\n' + restore),
+        { foo: v0, kr: { params: 5, returns: 'int' } },
+      ],
+    ];
+    for (const [name, src, prototypes] of cases) {
+      expect(() => decompile('blk1', src, ARMV4T_AGBCC, { prototypes }), name).toThrow(/stack pointer used as data/);
+    }
+  });
+
   test('below3 with its last stack word staged before the read declines: nothing is stored after the read', () => {
     const staged = '\tldr\tr0, .L36+0xc\n\tldr\tr0, [r0]\n\tstr\tr0, [sp]\n';
     const read = '\tlsl\tr0, r0, #0x2\n\tadd\tr0, r0, r2\n\tldr\tr3, [r0]\n';
