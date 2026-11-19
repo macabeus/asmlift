@@ -1288,20 +1288,24 @@ function storeCost(): { bytes: number; entries: number } {
   } catch {
     /* no objects yet */
   }
-  try {
-    for (const ns of readdirSync(join(ROOT, 'ns'), { withFileTypes: true })) {
-      if (!ns.isDirectory()) {
-        continue;
-      }
-      for (const ab of readdirSync(join(ROOT, 'ns', ns.name), { withFileTypes: true })) {
-        if (!ab.isDirectory() || ab.name.startsWith('.')) {
+  // `trash/` too: a namespace moved there still holds hardlinks, and while it does its objects
+  // are not reapable, so a store with an abandoned one in it costs what it would have in `ns/`.
+  for (const top of ['ns', 'trash']) {
+    try {
+      for (const ns of readdirSync(join(ROOT, top), { withFileTypes: true })) {
+        if (!ns.isDirectory()) {
           continue;
         }
-        entries += readdirSync(join(ROOT, 'ns', ns.name, ab.name)).length;
+        for (const ab of readdirSync(join(ROOT, top, ns.name), { withFileTypes: true })) {
+          if (!ab.isDirectory() || ab.name.startsWith('.')) {
+            continue;
+          }
+          entries += readdirSync(join(ROOT, top, ns.name, ab.name)).length;
+        }
       }
+    } catch {
+      /* no namespaces yet */
     }
-  } catch {
-    /* no namespaces yet */
   }
   return { bytes: bytes + entries * BLOCK_BYTES, entries };
 }
@@ -1334,6 +1338,10 @@ const sleepSync = (ms: number): void => {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 };
 
+/** A mark (or a `trash/` entry) older than this is abandoned whatever its pid says: a pid can be
+ *  recycled, and no prune holds either for longer than its wall-clock budget. */
+const staleMarkBefore = (): number => Date.now() - Math.max(24 * 60 * 60 * 1000, 2 * PRUNE_BUDGET_MS);
+
 /** Is a pruner OTHER than this module copy deleting in this namespace? Sweeps dead marks. */
 function prunerHolds(nsDir: string): boolean {
   const dir = marksOf(nsDir);
@@ -1343,7 +1351,7 @@ function prunerHolds(nsDir: string): boolean {
   } catch {
     return false;
   }
-  const staleBefore = Date.now() - Math.max(24 * 60 * 60 * 1000, 2 * PRUNE_BUDGET_MS);
+  const staleBefore = staleMarkBefore();
   let held = false;
   for (const n of names) {
     if (n === MARK) {
@@ -1450,7 +1458,9 @@ function entriesOf(nsDirs: readonly string[]): { ns: number; rel: string; at: nu
   return out;
 }
 
-/** A namespace a pruner moved to `trash/` and did not live to delete. */
+/** A namespace a pruner moved to `trash/` and did not live to delete: its pid is gone, or the
+ *  entry is older than any prune runs (the pruner stamps it when it moves it — a rename keeps the
+ *  namespace's own, old, mtime), which is what catches a pid that was recycled. */
 function sweepTrash(): void {
   const trash = join(ROOT, 'trash');
   let names: string[];
@@ -1459,9 +1469,11 @@ function sweepTrash(): void {
   } catch {
     return;
   }
+  const staleBefore = staleMarkBefore();
   for (const n of names) {
     const pid = Number(n.split('-')[1]);
-    if (pid === process.pid ? isMainThread : !pidAlive(pid)) {
+    const at = statSync(join(trash, n), { throwIfNoEntry: false })?.mtimeMs ?? 0;
+    if ((pid === process.pid ? isMainThread : !pidAlive(pid)) || at < staleBefore) {
       rmSync(join(trash, n), { recursive: true, force: true });
     }
   }
@@ -1488,8 +1500,12 @@ function sweepTrash(): void {
 // never touched, a namespace is deleted in only while this process holds its mark, and a reader
 // waits for the mark to go. `get` is miss-on-race, and `reapUnlinked` leaves objects younger than
 // its own grace window alone. The PRUNE_GRACE_MS window on OTHER namespaces stays as a second
-// fence — one resolved within it is not touched at all — and it is the only fence against a
-// process running an older copy of this module on the same store, which writes no mark.
+// fence — one resolved within it is not touched at all. Against a process running an OLDER copy
+// of this module on the same store, which writes no mark and claims its lease only after its own
+// prune, neither of those holds: the window is read once, at the listing, and that process may
+// open the namespace a moment later. What holds there is that every copy stamps the namespace
+// directory before it serves anything, and this prune re-reads that stamp immediately before
+// every unlink (`moved`).
 //
 // A compile worker never prunes: it runs beside sibling workers serving compiles from the store,
 // and the process that started them is where a prune belongs. A worker THREAD is told by
@@ -1514,6 +1530,7 @@ function pruneOnce(keepNs: string): void {
       overBudget ||= Date.now() - startedAt >= PRUNE_BUDGET_MS;
       return overBudget;
     };
+    sweepTrash();
     let cost = storeCost().bytes;
     if (cost <= CAP_BYTES) {
       return;
@@ -1525,7 +1542,6 @@ function pruneOnce(keepNs: string): void {
       `store costs ${(cost / 1048576).toFixed(0)} MB over a ${CAP_MB} MB cap — pruning ` +
         `(${PRUNE_BUDGET_MS / 1000}s budget)`,
     );
-    sweepTrash();
     const target = CAP_BYTES * 0.8;
     const nsRoot = join(ROOT, 'ns');
     const cutoff = Date.now() - PRUNE_GRACE_MS;
@@ -1535,24 +1551,29 @@ function pruneOnce(keepNs: string): void {
     // Which namespaces may be deleted in. The opener's own is one of them unless ANOTHER process
     // holds it: its lease is this process's, and nothing here has been served yet.
     const candidates: string[] = [];
+    // Each candidate's directory mtime as listed. Every opener — this code and every older copy
+    // of it — stamps the directory (`utimesSync` in `namespace()`) BEFORE it claims a lease or
+    // serves anything, so a stamp that has moved since the listing is a process opening that
+    // namespace now. See `moved` below.
+    const stamps: number[] = [];
     for (const d of readdirSync(nsRoot, { withFileTypes: true })) {
       if (!d.isDirectory()) {
         continue;
       }
       const dir = join(nsRoot, d.name);
+      const at = statSync(dir, { throwIfNoEntry: false })?.mtimeMs ?? 0;
       if (d.name === keepNs) {
         if (namespaceIsLive(dir, true)) {
           keepHeld = true;
         } else {
           candidates.push(dir);
+          stamps.push(at);
         }
         continue;
       }
       // A namespace resolved within the window may belong to a process that has not claimed its
-      // lease yet. The mark protocol covers that gap for a reader running this code; for one
-      // running an older copy of this module, which writes no mark and claims its lease only after
-      // its own prune, this fence is the one that holds.
-      if ((statSync(dir, { throwIfNoEntry: false })?.mtimeMs ?? 0) >= cutoff) {
+      // lease yet: a second fence beside the marks and the re-stamp test below.
+      if (at >= cutoff) {
         tooYoung += 1;
         continue;
       }
@@ -1561,6 +1582,7 @@ function pruneOnce(keepNs: string): void {
         continue;
       }
       candidates.push(dir);
+      stamps.push(at);
     }
     // Read before any mark is written, so no reader waits through the walk. An entry a reader
     // touches after this read is still deleted in the order read here — that costs a hit, never
@@ -1582,21 +1604,34 @@ function pruneOnce(keepNs: string): void {
       left[e.ns] += 1;
     }
     let lastCheck = Date.now();
+    const letGo = (n: number): void => {
+      usable[n] = false;
+      releasePrune(candidates[n]);
+      if (candidates[n] === join(nsRoot, keepNs)) {
+        keepHeld = true;
+      } else {
+        heldBack += 1;
+      }
+    };
     /** Let go of every namespace a reader has arrived in since the mark went down. */
     const recheck = (): void => {
       lastCheck = Date.now();
-      candidates.forEach((dir, i) => {
-        if (usable[i] && namespaceIsLive(dir, dir === join(nsRoot, keepNs))) {
-          usable[i] = false;
-          releasePrune(dir);
-          if (dir === join(nsRoot, keepNs)) {
-            keepHeld = true;
-          } else {
-            heldBack += 1;
-          }
+      candidates.forEach((dir, n) => {
+        if (usable[n] && namespaceIsLive(dir, dir === join(nsRoot, keepNs))) {
+          letGo(n);
         }
       });
     };
+    /** Has a process stamped this namespace since the listing? Asked IMMEDIATELY before every
+     *  unlink, not once at the listing and not on the recheck's clock, because a process running
+     *  an older copy of this module writes no lease until after its own prune and never reads a
+     *  mark: the stamp is the only thing it does before serving. Asked here, the stamp lands
+     *  either before the question — and this prune lets go before deleting anything more — or
+     *  after it, when the one unlink in flight precedes that process's whole prune, claim and
+     *  lookup, so what it meets is a miss, never a served path that then vanishes. Measured
+     *  without it: 374 paths served to older-code readers and then unlinked, over 150 readers. */
+    const moved = (n: number): boolean =>
+      (statSync(candidates[n], { throwIfNoEntry: false })?.mtimeMs ?? -1) !== stamps[n];
     const reapAfter = Date.now() - REAP_GRACE_MS;
     let i = 0;
     while (cost > target && i < entries.length && !outOfBudget()) {
@@ -1608,6 +1643,10 @@ function pruneOnce(keepNs: string): void {
         }
         const e = entries[i];
         if (!usable[e.ns]) {
+          continue;
+        }
+        if (moved(e.ns)) {
+          letGo(e.ns);
           continue;
         }
         const p = join(candidates[e.ns], e.rel);
@@ -1632,14 +1671,19 @@ function pruneOnce(keepNs: string): void {
     // no lease in it, so a reader that claimed it in between finds its lease gone and claims again
     // (`enterNamespace`) instead of serving from a directory about to be deleted.
     candidates.forEach((dir, n) => {
-      if (!usable[n] || left[n] > 0 || dir === join(nsRoot, keepNs) || namespaceIsLive(dir)) {
+      if (!usable[n] || left[n] > 0 || dir === join(nsRoot, keepNs) || namespaceIsLive(dir) || moved(n)) {
         return;
       }
       const trash = join(ROOT, 'trash', `${basename(dir)}-${MARK}`);
       try {
         mkdirSync(dirname(trash), { recursive: true });
         renameSync(dir, trash);
+        const now = new Date();
+        utimesSync(trash, now, now); // the rename kept the namespace's old mtime; `sweepTrash` ages by this
       } catch {
+        /* not moved, or moved and not stamped: the rm below takes it either way, and a sweep ages it out */
+      }
+      if (!existsSync(trash)) {
         return;
       }
       rmSync(trash, { recursive: true, force: true });

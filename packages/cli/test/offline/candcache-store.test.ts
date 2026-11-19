@@ -623,6 +623,44 @@ describe('across namespaces, the least recently USED entries go first, and only 
     expect(existsSync(mark)).toBe(false);
   });
 
+  test('a trash/ entry older than any prune is swept even when its pid is alive (a recycled pid)', async () => {
+    const root = scratch();
+    // pid 1 is init/launchd: alive, and not a pruner.
+    const old = join(root, 'trash', `${NS_A.slice(0, 16)}-1-cafe`);
+    const young = join(root, 'trash', `${NS_B.slice(0, 16)}-1-beef`);
+    for (const t of [old, young]) {
+      mkdirSync(join(t, '00'), { recursive: true });
+      writeFileSync(join(t, '00', 'k.fail'), 'x');
+    }
+    setAge(old, 48 * H);
+    await load(roomy(root), (m) => {
+      m.candCache('t', () => NS_O).warm();
+    });
+    expect(existsSync(old), 'abandoned: swept').toBe(false);
+    expect(existsSync(young), 'a live pid and a fresh stamp: a prune may still be deleting it').toBe(true);
+  });
+
+  test('what trash/ still links is part of the cost, so a store holding only that is over its cap', async () => {
+    const root = scratch();
+    const t = join(root, 'trash', `${NS_A.slice(0, 16)}-1-cafe`);
+    mkdirSync(join(t, '00'), { recursive: true });
+    writeFileSync(join(t, '00', 'k.fail'), 'x');
+    const said = await load({ ...roomy(root), ASMLIFT_CANDCACHE_MAX_MB: capOf(0.5) }, (m) => {
+      let out = '';
+      const spy = vi.spyOn(process.stderr, 'write').mockImplementation((c: string | Uint8Array) => {
+        out += typeof c === 'string' ? c : Buffer.from(c).toString();
+        return true;
+      });
+      try {
+        m.candCache('t', () => NS_O).warm();
+      } finally {
+        spy.mockRestore();
+      }
+      return out;
+    });
+    expect(said).toContain('over a 0.001953125 MB cap — pruning');
+  });
+
   describe('concurrent opens, in real processes', () => {
     const CHILD = new URL('./candcache-prune-child.ts', import.meta.url).pathname;
     const run = (root: string, cap: string, args: object): Promise<string> =>
