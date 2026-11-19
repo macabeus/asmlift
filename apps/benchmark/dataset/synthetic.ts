@@ -13722,6 +13722,23 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'extern s32 gArr[];\nvoid jt_idxreuse(s32 i, s32 *p);',
     proto: { jt_idxreuse: { returnsVoid: true } },
   },
+  // jt_idxreuse_p2. jt_idxreuse with the scrutinee as the SECOND parameter: agbcc keeps it in r1,
+  // the register it then loads the table pointer into (`lsl r0, r1, #2; ldr r1, .L; add r1, r0, r1`),
+  // so the `lsl` reads the scrutinee before the idiom overwrites it. frontend/thumb.ts
+  // `recoverJumpTable` used to judge that `lsl` as an extra reading a register the idiom wrote, and
+  // declined; the kept dispatch now writes the scaled index at its entry (jump-table.ts
+  // `enterKeptDispatch`). A Thumb dispatch shape, so agbcc alone.
+  {
+    sym: 'jt_idxreuse_p2',
+    src:
+      'extern s32 gArr[];\nvoid jt_idxreuse_p2(s32 *p, s32 i)\n{\n    switch (i) {\n    case 0: p[i] = 7; break;\n' +
+      '    case 1: p[i] += 9; break;\n    case 2: p[i] -= 3; break;\n    case 3: p[i] = 0; break;\n' +
+      '    case 4: p[i] ^= 5; break;\n    case 5: p[i] |= 0x30; break;\n    case 6: gArr[i] = 1; break;\n    }\n}',
+    features: ['dense'],
+    toolchains: ['agbcc'],
+    ctx: 'extern s32 gArr[];\nvoid jt_idxreuse_p2(s32 *p, s32 i);',
+    proto: { jt_idxreuse_p2: { returnsVoid: true } },
+  },
   // jt_idxloop. The dispatch's scaled index at a case target another edge enters too: mwcc 2.4.2 at
   // -O4,p keeps `slwi r6,r3,2` in r6 into case 0, a do-while its back edge re-enters
   // (`lwzx r0,r4,r6` at the loop's head). frontend/jump-table.ts keeps it there because every path in
@@ -16296,6 +16313,67 @@ export const SYNTHETIC: SynthSpec[] = [
       'void k(s32 x);\n' +
       'void sw_forjt_skew(s32 lo, s32 hi);',
     proto: { sw_forjt_skew: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
+  //      sw_forjt_steps3 steps THREE names in its update, `i += c, c += b, b++`: `i` reads `c`'s
+  //      old value and `c` reads `b`'s, so the one order the comma update can run them in is the
+  //      source's, whatever order the latch writes them (structure.ts `forPlanAt`, A SECOND
+  //      COUNTER, sorted on the old values each step reads), and the `for`'s init clause is `i`'s,
+  //      the counter its test reads.
+  {
+    sym: 'sw_forjt_steps3',
+    src:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void sw_forjt_steps3(s32 lo, s32 hi)\n' +
+      '{\n' +
+      '    s32 i;\n' +
+      '    s32 b;\n' +
+      '    s32 c;\n' +
+      '    for (i = lo, b = 0, c = 1; i <= hi; i += c, c += b, b++) {\n' +
+      '        switch (gE[i].id) {\n' +
+      '        case 1:\n' +
+      '            if (gE[i].u == 1)\n' +
+      '                continue;\n' +
+      '            k(c);\n' +
+      '            break;\n' +
+      '        case 2:\n' +
+      '            if (gE[i].x > 20)\n' +
+      '                continue;\n' +
+      '            k(5);\n' +
+      '            break;\n' +
+      '        case 3:\n' +
+      '            if (gE[i].x < 0)\n' +
+      '                continue;\n' +
+      '            k(b);\n' +
+      '            break;\n' +
+      '        case 4:\n' +
+      '            if (gE[i].x <= 2)\n' +
+      '                continue;\n' +
+      '            k(7);\n' +
+      '            break;\n' +
+      '        case 5:\n' +
+      '            if (gE[i].x == 9)\n' +
+      '                continue;\n' +
+      '            k(8);\n' +
+      '            break;\n' +
+      '        default:\n' +
+      '            continue;\n' +
+      '        }\n' +
+      '        break;\n' +
+      '    }\n' +
+      '    gOut = i;\n' +
+      '}',
+    features: ['branch', 'switch-arms'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void sw_forjt_steps3(s32 lo, s32 hi);',
+    proto: { sw_forjt_steps3: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
   },
   //      sw_forjt_u32 / sw_forjt_lt / sw_forjt_stride read IDO's counted loop as a `for`
   //      (structure.ts THE LATCH TEST AS ITS BOUND and A SIBLING'S STRIDE). ido7.1 tests sw_forjt's
