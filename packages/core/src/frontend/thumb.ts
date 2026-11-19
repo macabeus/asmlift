@@ -1197,7 +1197,14 @@ function sectionMask(lines: readonly GasLine[]): {
   let depth = 0;
   let bodySwitch: string | null = null;
   const isDebug = () => current !== null && /^\.(?:debug|stab)/.test(current);
-  const named = (name: string, sub: string | undefined) => `${name.replace(/^"(.*)"$/, '$1')} ${Number(sub ?? 0)}`;
+  // A subsection gas reads as an expression; only a plain number is read here. Any other spelling
+  // (`0+1`, `2*1`, a symbol) keys a subsection of its own, so code under it declines as split
+  // across sections instead of being read as subsection 0 (measured: `.subsection 0+1` is 1).
+  const subsection = (expr: string) => {
+    const e = expr.trim();
+    return e === '' ? '0' : /^(?:\d+|0x[0-9a-f]+)$/i.test(e) ? String(Number(e)) : `?${e}`;
+  };
+  const named = (name: string, sub: string) => `${name.replace(/^"(.*)"$/, '$1')} ${subsection(sub)}`;
   const out = lines.map((line) => {
     const statements = line.statements.map((st) => {
       const text = st.unread === undefined ? st.text.replace(LEADING_LABELS, '') : '';
@@ -1210,26 +1217,32 @@ function sectionMask(lines: readonly GasLine[]): {
         }
         return { debug: false, section: current };
       }
-      const sw = text.match(
-        /^\.(section|pushsection|popsection|previous|subsection|text|data|bss)\b\s*("[^"]*"|[^\s,]*)\s*(?:,\s*(\d+))?/i,
-      );
+      const sw = text.match(/^\.(section|pushsection|popsection|previous|subsection|text|data|bss)\b\s*(.*)$/i);
       if (sw && depth !== 0) {
         bodySwitch ??= st.text;
       } else if (sw) {
         const kind = sw[1].toLowerCase();
+        // `name` then its comma-separated arguments; a quoted name keeps its commas
+        const [, name = '', args = ''] = sw[2].match(/^("[^"]*"|[^\s,]*)\s*(?:,(.*))?$/) ?? [];
         if (kind === 'pushsection') {
+          // `.pushsection name [, subsection] [, flags…]`: a quoted second argument is flags
+          const second = args.split(',')[0]?.trim() ?? '';
           stack.push([current, previous]);
-          [previous, current] = [current, named(sw[2], sw[3])];
+          [previous, current] = [current, named(name, second.startsWith('"') ? '' : second)];
         } else if (kind === 'popsection') {
           [current, previous] = stack.pop() ?? [null, null];
         } else if (kind === 'previous') {
           [current, previous] = [previous, current];
         } else if (kind === 'subsection') {
-          current = current === null ? null : `${current.replace(/ \d+$/, '')} ${Number(sw[2]) || 0}`;
+          // gas makes the old subsection the previous one (measured: `.subsection 1` then `.previous`)
+          [previous, current] = [
+            current,
+            current === null ? null : `${current.replace(/ \S+$/, '')} ${subsection(sw[2])}`,
+          ];
         } else if (kind === 'section') {
-          [previous, current] = [current, named(sw[2], sw[3])];
+          [previous, current] = [current, named(name, '')];
         } else {
-          [previous, current] = [current, named(`.${kind}`, sw[2] || undefined)];
+          [previous, current] = [current, named(`.${kind}`, sw[2])];
         }
       }
       return { debug: isDebug(), section: current };
@@ -1997,6 +2010,20 @@ function decode(
     // sits behind a dead `.L` label that the rule above seals. So a clean `bench diff` says NOTHING about any code inside this branch —
     // `thumb-pad-directives.test.ts` is its only gate, and a change here has to be argued there.
     if (needsLayout) {
+      // The layout walk lays every item of the slice end to end, so an item gas assembles into
+      // another section (a `.data` word, a `.rodata` halfword) would move every offset after it:
+      // measured, a `[pc, #4]` load past one read the wrong pool word.
+      const codeSection = [...sliceSections][0];
+      const elsewhere = allFlat
+        .slice(sliceStart, boundaries[boundaryIdx])
+        .findIndex((f, i) => !f.instr && itemSections[sliceStart + i] !== codeSection);
+      if (elsewhere !== -1) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': raw-encoded input needs byte-accurate layout, but item ${elsewhere} of the ` +
+            `function is assembled into another section (${itemSections[sliceStart + elsewhere] ?? 'unknown'}), ` +
+            `so it is not where the layout would put it`,
+        );
+      }
       const sizedNothing = unreadDirectives.find((u) => inSlice(u.at));
       if (sizedNothing) {
         throw new FrontendUnsupportedError(
