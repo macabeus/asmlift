@@ -904,9 +904,10 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // `switch-shapes` holds `jt_rndjoinst:agbcc`, the no-body control of the
   // cross-block leftover rows: its K&R call at a nested switch's join counts r0, which the inner
   // default edge brings in as the outer dispatch's marker ("a case of the elided jump table reads").
+  // `branch-likely` is inhabited by `sw_forjt_steps3:gcc2.7.2kmc`, whose switch's bounds branch is a
+  // branch-likely that annuls its delay slot.
   const NO_ROWS = [
     'branch-form',
-    'branch-likely',
     // `cmn_store:agbcc` lifts: its reload is a halfword, never INT_MIN.
     'cmn-int-min',
     'cross-block-flags',
