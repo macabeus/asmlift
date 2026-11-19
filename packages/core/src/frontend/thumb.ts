@@ -4008,33 +4008,7 @@ function measureThumbFrame({
   // register-offset load off a held constant capture (`mov r1, sp / ldr r0, [r1, r2]`) is the same
   // read, based at the capture, where the other register holds no frame address.
   const indexedReadOf = new Map<Instr, number>();
-  // …AND EVERY FRAME WORD THIS FUNCTION LOADS BY ITS OFFSET, at any width: through sp or a held
-  // constant capture, the words of an `ldm` off such a capture included. A word loaded back is a
-  // local's, not a staged word, so its store raises no indexed read's ceiling (`indexedReadBelow`).
-  const loadedFrameWords = new Set<number>();
   heldFrameWalk(asmBlocks, entryReachable, mayWriteReg, (ins, held, indexedAt) => {
-    const constantAt = (r: string): number | undefined => {
-      const o = isSpReg(r) ? 0 : held.get(reg(r));
-      return o !== undefined && Number.isFinite(o) ? o : undefined;
-    };
-    const loadedBytes = (from: number, width: number): void => {
-      for (let w = Math.floor(from / 4) * 4; w < from + width; w += 4) {
-        loadedFrameWords.add(w);
-      }
-    };
-    if (SINGLE_LOAD.test(ins.mnemonic) && ins.ops[1] !== undefined) {
-      const { base, off, regOff } = parseAddr(ins.ops[1]);
-      const at = regOff === undefined ? constantAt(base) : undefined;
-      if (at !== undefined) {
-        loadedBytes(at + off, ins.mnemonic === 'ldr' ? 4 : /h$/.test(ins.mnemonic) ? 2 : 1);
-      }
-    }
-    if (/^ldm/.test(ins.mnemonic) && ins.ops[0] !== undefined) {
-      const at = constantAt(ins.ops[0].replace(/!$/, ''));
-      if (at !== undefined) {
-        loadedBytes(at, 4 * Math.max(1, regListOf(ins.ops.slice(1))?.length ?? 16));
-      }
-    }
     if (SINGLE_LOAD.test(ins.mnemonic) && ins.ops[1] !== undefined) {
       const { base, off, regOff } = parseAddr(ins.ops[1]);
       const captured = (r: string): number | undefined => {
@@ -4335,19 +4309,16 @@ function measureThumbFrame({
   // says why). A read may run between a staged word's store and its call — agbcc loads a by-value
   // struct's register words there (`kr(p[i], 3, gI)` stores gI at [sp,#0], then loads `p[i]` from
   // [sp,#0] up into r0..r2) — so its ceiling (`below`) is the lowest, over the paths from it to a
-  // call whose stack words nothing states exactly, of the highest word stored on the way that the
-  // function never loads back (reload's spill of an indirect call's address is one it does), or that
-  // call's stated words where a count states more. A call a typed parameter list declares ends a
-  // path unbounded: a word it takes that the read clears is missing at the call and refuses there.
-  // A call handed a frame address does not end one: it may be a block copy into the area (`add r0,
-  // sp, #4 / … / bl memcpy`). `Infinity` where no such call follows the read; `-Infinity` where a
-  // path stores nothing before one, and the read is no event.
+  // call, of the stack words that call's declaration states: none for a call nothing declares or
+  // sizes, so a read with one ahead clears nothing. A store on the way raises no ceiling: a store
+  // after the read is a staged word only if nothing reads it back, and a read back can hide past a
+  // block, a call or a capture's writeback (agbcc's own reload spills an indirect call's address
+  // there and loads it straight back, `fpspill`), so the ceiling does not ask. A call a typed
+  // parameter list declares ends a path unbounded: a word it takes that the read clears is missing
+  // at the call and refuses there. A call handed a frame address does not end one: it may be a
+  // block copy into the area (`add r0, sp, #4 / … / bl memcpy`). `Infinity` where no call follows
+  // the read; at or below the read's base, and the read is no event, where one nothing sizes does.
   const isCall = (ins: Instr): boolean => ins.mnemonic === 'bl' || ins.mnemonic === 'blx';
-  // a word store that may be staged: a word this function loads back is a local's (`loadedFrameWords`)
-  const storedWord = (ins: Instr): number | null => {
-    const off = /^str/.test(ins.mnemonic) ? slotAcc(ins) : null;
-    return off !== null && !loadedFrameWords.has(off) ? off : null;
-  };
   // the words a call's declaration states it takes, `Infinity` where a typed parameter list states
   // them exactly, 0 where nothing states them
   const statedStackEnd = (ins: Instr): number => {
@@ -4363,23 +4334,16 @@ function measureThumbFrame({
   };
   // the ceiling from instruction `i` of block `b`, given the ceiling at each block's start
   const clearsBelowFrom = (b: number, i: number, atStart: readonly number[]): number => {
-    let highest = -Infinity;
     let ceiling = Infinity;
-    const instrs = asmBlocks[b].instrs;
-    for (let k = i; k < instrs.length; k++) {
-      const ins = instrs[k];
+    for (const ins of asmBlocks[b].instrs.slice(i)) {
       if (isCall(ins)) {
-        ceiling = Math.min(ceiling, Math.max(highest, statedStackEnd(ins)));
+        ceiling = Math.min(ceiling, statedStackEnd(ins));
         if (!escapedOffsetOf.has(ins)) {
           return ceiling;
         }
       }
-      highest = Math.max(highest, storedWord(ins) ?? -Infinity);
     }
-    return Math.min(
-      ceiling,
-      ...succs[b].filter((q) => entryReachable.has(q)).map((q) => Math.max(highest, atStart[q])),
-    );
+    return Math.min(ceiling, ...succs[b].filter((q) => entryReachable.has(q)).map((q) => atStart[q]));
   };
   const clearsBelowAtStart = asmBlocks.map(() => Infinity);
   for (let changed = true; changed;) {
