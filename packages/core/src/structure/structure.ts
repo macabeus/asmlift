@@ -344,6 +344,7 @@ function assertDefaultAccepts(
     copyEveryTailEntrant: false,
     jumpToSharedCases: false,
     spellCountedLoopsFor: false,
+    stepSecondCounters: false,
   };
   if (memo === undefined) {
     structure(fn, reset, hooks);
@@ -642,6 +643,7 @@ function structureLadder(
           onTailFallerKept: hooks.onTailFallerKept && hold(hooks.onTailFallerKept),
           onCaseCopied: hooks.onCaseCopied && hold(hooks.onCaseCopied),
           onForOffered: hooks.onForOffered && hold(hooks.onForOffered),
+          onForStepsOffered: hooks.onForStepsOffered && hold(hooks.onForStepsOffered),
           onJoinPastReturns: hooks.onJoinPastReturns && hold(hooks.onJoinPastReturns),
         },
         memo,
@@ -775,6 +777,7 @@ function structureRanked(
     copyEveryTailEntrant = false,
     jumpToSharedCases = false,
     spellCountedLoopsFor = false,
+    stepSecondCounters = false,
     switchAllowsNeqCase = true,
     switchBoundCase,
     switchArmsFollowLayout = false,
@@ -930,7 +933,8 @@ function structureRanked(
     copyReturnTails ||
     copyEveryTailEntrant ||
     jumpToSharedCases ||
-    spellCountedLoopsFor
+    spellCountedLoopsFor ||
+    stepSecondCounters
   ) {
     // The observation hooks are this setting's, not the default's: dropped for that run, which also
     // leaves it answerable from `memo`.
@@ -942,6 +946,7 @@ function structureRanked(
         onTailFallerKept: undefined,
         onCaseCopied: undefined,
         onForOffered: undefined,
+        onForStepsOffered: undefined,
         onCounterSignRefused: undefined,
         onJoinPastReturns: undefined,
         onJoinReadsAsCopies: undefined,
@@ -7852,8 +7857,19 @@ function structureRanked(
     ) {
       return null;
     }
+    // A SECOND COUNTER is a reading of its own: a loop no declined run asked steps several names
+    // only under `stepSecondCounters` (rank.ts `/for-steps`), so `/for-continue` keeps the reading
+    // that spells such a loop `while (1)` beside its single-counter `for` loops. Such a loop still
+    // reports itself `offered`: rank.ts skips a setting whose OFF sibling never fired the witness,
+    // and records the skipped one with that sibling's witnesses, so `/for-continue/for-steps` is
+    // structured only where `/for-steps` (the default's tree) reports `/for-continue`'s witness.
+    const stepsUnasked = stepOrder.length > 1 && !stepSecondCounters && !forRank.asked.has(h);
     if (offered) {
       hooks.onForOffered?.();
+      return null;
+    }
+    if (stepsUnasked) {
+      hooks.onForStepsOffered?.();
       return null;
     }
     droppedUndefCopies.push(...exitDrops);

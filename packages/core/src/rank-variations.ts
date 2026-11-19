@@ -91,12 +91,13 @@ export interface StructureVariation {
     | 'siteSense'
     | 'tailCopies'
     | 'forContinue'
+    | 'forSteps'
     | 'caseGoto';
   name: VariationName;
   options: (on: boolean) => Parameters<typeof structureChecked>[1];
   sharedGate?: (sharedLift: Fn, defs: Map<Value, Op>) => boolean;
   perLiftGate?: (fn: Fn) => boolean;
-  offWitness?: 'onTailFallerKept' | 'onForOffered' | 'onCaseCopied';
+  offWitness?: 'onTailFallerKept' | 'onForOffered' | 'onForStepsOffered' | 'onCaseCopied';
   strip: boolean;
 }
 export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
@@ -422,7 +423,8 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
     strip: true,
   },
   // `/for-continue` — A COUNTED LOOP AS `for` WHERE THE DEFAULT LIFTS IT AS `while (1)` (structure.ts
-  // `spellCountedLoopsFor`, `forPlanAt`). A loop whose latch steps one counter and tests it, entered
+  // `spellCountedLoopsFor`, `forPlanAt`). A loop whose latch steps one counter and tests it (and,
+  // with `/for-steps`, other names beside it), entered
   // through the same test, is one asm under both spellings, and the `for` is the one a jump-table arm
   // inside it can `continue` and leave by `break;` after the switch. structure() reaches that `for`
   // on its own only where every `while (1)` structuring declined (`ForRanking`); here it is ranked
@@ -440,6 +442,22 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
     name: 'for-continue',
     options: (on) => ({ spellCountedLoopsFor: on }),
     offWitness: 'onForOffered',
+    strip: true,
+  },
+  // `/for-steps` — A `for` WHOSE UPDATE STEPS A SECOND NAME (structure.ts `stepSecondCounters`,
+  // `forPlanAt`'s A SECOND COUNTER): `for (i = lo; i <= hi; i++, j = i << 2)` where `/for-continue`
+  // alone keeps such a loop `while (1)`. Both are one asm, and neither reading wins everywhere:
+  // agbcc's `synthetic:brk2sw` scores better with the inner loop's comma update, `brk2out_sw` with
+  // its `while (1)`. Only meaningful beside `/for-continue`: a loop the default's declined run asks
+  // (`ForRanking`) takes its second counter without it. Gated EXACTLY by its OFF sibling
+  // (`onForStepsOffered`), which fires only under `spellCountedLoopsFor`, so `/for-steps` alone is
+  // always its sibling's tree; `onForOffered` fires for such a loop too, so the pair is reached
+  // through that skipped sibling. In the strip closure, as `/for-continue` is.
+  {
+    flag: 'forSteps',
+    name: 'for-steps',
+    options: (on) => ({ stepSecondCounters: on }),
+    offWitness: 'onForStepsOffered',
     strip: true,
   },
   // `/case-goto` — TWO ARMS ENTERING ONE CASE'S BODY AS A `goto` TO ITS LABEL WHERE THE DEFAULT
