@@ -1052,7 +1052,16 @@ export function enumerateCandidates(
     STRUCTURE_VARIATIONS.map((variation) => [variation.flag, false]),
   ) as Record<StructureVariation['flag'], boolean>;
   let structureSettings: StructureSetting[] = declRankSettings.map((s) => ({ ...s, ...allStructureVariationsOff }));
+  // `beside` doubles only the settings already carrying the variation it names, so that one must come
+  // earlier in the table: a reorder would otherwise drop all its candidates without a word.
+  const enumerated = new Set<StructureVariation['flag']>();
   for (const variation of STRUCTURE_VARIATIONS) {
+    if (variation.beside !== undefined && !enumerated.has(variation.beside)) {
+      throw new Error(
+        `STRUCTURE_VARIATIONS lists /${variation.name} ahead of the variation it is enumerated beside (${variation.beside})`,
+      );
+    }
+    enumerated.add(variation.flag);
     if (variation.sharedGate !== undefined && !variation.sharedGate(sharedLift, sharedLiftDefs)) {
       opts.onVariationGated?.(variation.name);
       continue;

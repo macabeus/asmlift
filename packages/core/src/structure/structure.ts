@@ -7157,9 +7157,8 @@ function structureRanked(
   // second name (A SECOND COUNTER, `i++, p += 8`), but that keeps the pointer the compiler made and
   // not the `gE[i]` the source wrote, a reading choice and no limit of the IR: so the `for` writes the
   // pointer nowhere — no init copy, no update copy — and renders every read of it as G of the
-  // counter's name. A stride beside a second counter is refused, not combined. That is exact where the name holds the counter and
-  // each of G's other leaves holds itself at every read, and where the pointer is read nowhere the
-  // `for` does not render G:
+  // counter's name. That is exact where the name holds the counter and each of G's other leaves holds
+  // itself at every read, and where the pointer is read nowhere the `for` does not render G:
   //   • the param and its back-edge value are read by no edge but the back edge's own slot, by no op
   //     outside the loop, and not by the test or the counter's update (a pointer test is no counted
   //     loop's; IDO tests the pointer only where the counter is dead, and none is invented here)
@@ -7181,6 +7180,7 @@ function structureRanked(
   //     spelled `gP + (i << 3)` would load `gP` again on every trip, past the calls that may write it
   //     (`stride-leaf-reread`);
   //   • and, checked on the emitted loop, nothing the `for` spells reads the param's name.
+  // A stride beside a second counter is refused, not combined.
   /** The stride's param and its back-edge value stay inside the loop, and off its test and update. */
   const strideStaysInLoop = (
     sd: StrideDerived,
