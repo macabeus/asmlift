@@ -446,3 +446,48 @@ test('/for-continue is not offered where a later check of the `for` refuses it',
   expect(off.offered).toBe(0);
   expect(structured(ir, true).src).toBe(off.src);
 });
+
+// `/for-steps` (rank.ts, `stepSecondCounters`): a loop whose latch also steps a second name is a
+// `for` under `/for-continue` only with it, so `/for-continue` alone keeps that loop's `while (1)`.
+// Its OFF structuring reports the loop only where `/for-continue` asks it. The default reports the
+// loop as `/for-continue`'s, since rank.ts reaches the pair through `/for-steps` alone, which is the
+// default's tree and is recorded with the default's witnesses.
+const tailRetSteps = tailRet
+  .replace('^bb1(%5: s32):', '^bb1(%5: s32, %50: s32):')
+  .replace('^bb1(%0)', '^bb1(%0, %0)')
+  .replace('cond_br %37, ^bb12(), ^bb1(%36)', '%51: s32 = add %50, %36\n  cond_br %37, ^bb12(), ^bb1(%36, %51)')
+  .replace('%34: s32 = call %5 {target="k"}', '%34: s32 = call %50 {target="k"}');
+
+const stepsStructured = (spellCountedLoopsFor: boolean, stepSecondCounters: boolean) => {
+  const fn = parse(tailRetSteps);
+  verify(fn);
+  recoverTypes(fn);
+  let offered = 0,
+    steps = 0;
+  const sfn = structure(
+    fn,
+    { spellCountedLoopsFor, stepSecondCounters },
+    { onForOffered: () => offered++, onForStepsOffered: () => steps++ },
+  );
+  return { src: cBackend.emit(sfn), offered, steps, agreement: irAgreement(tailRetSteps, sfn, SEEDS) };
+};
+
+test('/for-steps spells a second counter `/for-continue` alone leaves as `while (1)`', () => {
+  const plain = stepsStructured(false, false);
+  expect(plain.src).toContain('while (1)');
+  expect(plain.offered).toBeGreaterThan(0);
+  expect(plain.steps).toBe(0);
+  // `/for-steps` alone is the default's tree
+  expect(stepsStructured(false, true).src).toBe(plain.src);
+  expect(stepsStructured(false, true).offered).toBeGreaterThan(0);
+  const forOnly = stepsStructured(true, false);
+  expect(forOnly.src).toBe(plain.src);
+  expect([forOnly.offered, forOnly.steps > 0]).toEqual([0, true]);
+  const both = stepsStructured(true, true);
+  expect(both.src).toMatch(/for \((\w+) = a0; a1 >= \1; \1 = \1 \+ 1, (\w+) = \2 \+ \1\) \{/);
+  expect([both.offered, both.steps]).toEqual([0, 0]);
+  for (const r of [plain, forOnly, both]) {
+    expect(r.agreement.disagree).toBe(0);
+    expect(r.agreement.judged).toBe(SEEDS.length);
+  }
+});

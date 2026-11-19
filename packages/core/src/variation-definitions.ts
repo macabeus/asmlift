@@ -1088,7 +1088,46 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       note: 'every arm either goes round the loop or calls `k` and leaves it; five arms, so agbcc dispatches through a jump table',
     },
     implementedIn: STRUCTURE,
-    seeAlso: ['tail-copies'],
+    seeAlso: ['tail-copies', 'for-steps'],
+  },
+  'for-steps': {
+    title: 'Second counter stepped in a `for`',
+    summary:
+      'a counted loop whose last block also steps a second variable is written `for` with both steps in its update',
+    detail:
+      'A counted loop whose last block steps its counter and another variable (`j += 3` beside `i++`) is ' +
+      'written by default as `while (1)`, even where a loop stepping the counter alone is written as a `for`. ' +
+      'This writes it as `for (i = init; test; i++, j += 3)` instead, the steps in the update in the order the ' +
+      'loop runs them, so an arm that reaches the step is `continue;` as in any other `for`. It is only offered ' +
+      'beside the counted-loop `for` (for-continue).',
+    compilerBehavior:
+      'agbcc and gcc 2.7.2 lay out a `for` whose update steps two variables as a guard, the body and a last ' +
+      'block that runs both steps and the test, which is also how they lay out the `while (1)` spelling. ' +
+      'Which one the source wrote decides how the arms that leave the loop are laid out, and that is not in ' +
+      'the assembly before it is compiled.',
+    offeredWhen: {
+      when: 'Structuring this lift with the counted-loop `for` met a loop it would write as one but for a second variable its last block steps.',
+      decidedBy: { symbol: 'STRUCTURE_VARIATIONS', file: RANK_VARIATIONS },
+    },
+    example: {
+      compiler: 'agbcc',
+      unit:
+        'struct E { s32 x; u8 id; u8 u; }; extern struct E gE[]; void k(s32);\n' +
+        'void example(s32 lo, s32 hi) { s32 i; s32 j; @ k(99); }',
+      before:
+        'if (lo <= hi) { i = lo; j = 0; while (1) { switch (gE[i].id) { case 1: if (gE[i].u != 1) { k(j); k(99); return; } break; ' +
+        'case 2: if (gE[i].x <= 20) { k(5); k(99); return; } break; case 3: if (gE[i].x >= 0) { k(6); k(99); return; } break; ' +
+        'case 4: if (gE[i].x > 2) { k(7); k(99); return; } break; case 5: if (gE[i].x != 9) { k(8); k(99); return; } break; } ' +
+        'i++; j += 3; if (i > hi) break; } }',
+      after:
+        'for (i = lo, j = 0; i <= hi; i++, j += 3) { switch (gE[i].id) { case 1: if (gE[i].u == 1) continue; k(j); break; ' +
+        'case 2: if (gE[i].x > 20) continue; k(5); break; case 3: if (gE[i].x < 0) continue; k(6); break; ' +
+        'case 4: if (gE[i].x <= 2) continue; k(7); break; case 5: if (gE[i].x == 9) continue; k(8); break; ' +
+        'default: continue; } break; }',
+      note: 'the for-continue example with `j` stepped beside `i`; case 1 reads it',
+    },
+    implementedIn: STRUCTURE,
+    seeAlso: ['for-continue'],
   },
   'case-goto': {
     title: 'Shared case body entered by `goto`',

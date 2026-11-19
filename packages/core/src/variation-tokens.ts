@@ -97,6 +97,7 @@ const TOKENS = [
   { name: 'site-sense', variationKind: 'structure' },
   { name: 'tail-copies', variationKind: 'structure' },
   { name: 'for-continue', variationKind: 'structure' },
+  { name: 'for-steps', variationKind: 'structure' },
   { name: 'case-goto', variationKind: 'structure' },
   // respell: the structured tree rewritten
   { name: 'unmerge', variationKind: 'respell' },
