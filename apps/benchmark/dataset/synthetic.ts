@@ -13724,10 +13724,9 @@ export const SYNTHETIC: SynthSpec[] = [
   },
   // jt_idxreuse_p2. jt_idxreuse with the scrutinee as the SECOND parameter: agbcc keeps it in r1,
   // the register it then loads the table pointer into (`lsl r0, r1, #2; ldr r1, .L; add r1, r0, r1`),
-  // so the `lsl` reads the scrutinee before the idiom overwrites it. frontend/thumb.ts
-  // `recoverJumpTable` used to judge that `lsl` as an extra reading a register the idiom wrote, and
-  // declined; the kept dispatch now writes the scaled index at its entry (jump-table.ts
-  // `enterKeptDispatch`). A Thumb dispatch shape, so agbcc alone.
+  // so the `lsl` reads the scrutinee before the idiom overwrites it: it is the idiom's, not an extra
+  // reading a register the idiom wrote, and the kept dispatch writes the scaled index at its entry
+  // (jump-table.ts `enterKeptDispatch`). A Thumb dispatch shape, so agbcc alone.
   {
     sym: 'jt_idxreuse_p2',
     src:
@@ -13744,8 +13743,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // ldr r1,[r1]; mov pc,r1`), so the scaled index stands in r0 at every case target
   // (frontend/thumb.ts `recoverJumpTable`'s `keepsIndex`), and the case's `bl jicall` finds it there.
   // `jicall()` and `jicall(i << 2)` compile to the same bytes, so a guessed arity that counts it
-  // refuses (frontend/call-plan.ts `CallSite.scaledIndex`); the Thumb call plan lifted
-  // `jicall(i << 2)` before it passed that predicate. A soundness pin: the agbcc cell declines, and
+  // refuses (frontend/call-plan.ts `CallSite.scaledIndex`). A soundness pin: the agbcc cell declines, and
   // the other toolchains read whatever their dispatch leaves.
   {
     sym: 'jt_idxcall',
