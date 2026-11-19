@@ -13739,6 +13739,24 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'extern s32 gArr[];\nvoid jt_idxreuse_p2(s32 *p, s32 i);',
     proto: { jt_idxreuse_p2: { returnsVoid: true } },
   },
+  // jt_idxcall. An undeclared call in a case of an ELIDED pointer-sum dispatch: agbcc sums the table
+  // address into the pointer register with no copy out (`lsl r0,r0,#2; ldr r1,.L; add r1,r0,r1;
+  // ldr r1,[r1]; mov pc,r1`), so the scaled index stands in r0 at every case target
+  // (frontend/thumb.ts `recoverJumpTable`'s `keepsIndex`), and the case's `bl jicall` finds it there.
+  // `jicall()` and `jicall(i << 2)` compile to the same bytes, so a guessed arity that counts it
+  // refuses (frontend/call-plan.ts `CallSite.scaledIndex`); the Thumb call plan lifted
+  // `jicall(i << 2)` before it passed that predicate. A soundness pin: the agbcc cell declines, and
+  // the other toolchains read whatever their dispatch leaves.
+  {
+    sym: 'jt_idxcall',
+    src:
+      'void jicall();\ns32 jt_idxcall(s32 i, s32 *p)\n{\n    switch (i) {\n    case 0: return p[i] + 1;\n' +
+      '    case 1: jicall(); return 4;\n    case 2: return p[i] - 7;\n    case 3: return p[i] ^ 9;\n' +
+      '    case 4: return p[i] | 2;\n    case 5: return p[i] & 6;\n    }\n    return 0;\n}',
+    features: ['dense'],
+    toolchains: ALL,
+    ctx: 's32 jt_idxcall(s32 i, s32 *p);',
+  },
   // jt_idxloop. The dispatch's scaled index at a case target another edge enters too: mwcc 2.4.2 at
   // -O4,p keeps `slwi r6,r3,2` in r6 into case 0, a do-while its back edge re-enters
   // (`lwzx r0,r4,r6` at the loop's head). frontend/jump-table.ts keeps it there because every path in

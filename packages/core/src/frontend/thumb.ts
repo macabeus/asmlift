@@ -54,6 +54,7 @@ import {
   idiomLeaves,
   parkedIn,
   refuseStaleIdiomReads,
+  scaledIndexIn,
   staleMarker,
 } from './jump-table';
 import {
@@ -7689,6 +7690,9 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
     bi,
     // what an elided or kept dispatch left in an argument register is no argument
     parked: parkedIn(fill.staleIdiomValues, reg),
+    // …and the scrutinee an elided pointer-sum dispatch scaled in place (`recoverJumpTable`'s
+    // `keepsIndex`) is no argument a guess may count: `h()` and `h(i << 2)` compile alike there
+    scaledIndex: scaledIndexIn(fill.staleIdiomValues, reg),
     read: (r) => ssa.readVar(r, bi),
     write: (r, v) => writeData(r, bi, v),
     // ARGUMENT WORD `k` past the registers is a word of this frame's outgoing area, at [sp,#0]
