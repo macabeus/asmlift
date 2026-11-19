@@ -8,7 +8,8 @@
 // (`irAgreement`), as `structure()` returns it and as it ships after `readabilityRewrites`. The
 // `for` takes a guard that is its test, a guard whose exit edge passes a relay block, an exit that
 // takes the IV, no guard where its first test folds to true, an update the header computes, and a
-// second update ordered after the first where it reads it. It refuses a guard that is not the
+// second update ordered after the first where it reads it, three steps sorted on the old values they
+// read, and the init clause the counter the test reads. It refuses a guard that is not the
 // loop's test, a constant first test that leaves, two updates each reading the other's old value, a
 // latch with an effect, an exit that takes the IV from before its update and an update from a call,
 // and those fixtures lift through the rerun's `while (1)` instead, judged the same way; a relay
@@ -199,12 +200,51 @@ test('a latch that runs a second update after the counter lifts as a `for` stepp
 });
 
 test('a second update that reads the counter from before its step runs first', () => {
-  // `s = i * 2` of the OLD `i`: the counter cannot step first, so `s`'s step does
+  // `s = i * 2` of the OLD `i`: the counter cannot step first, so `s`'s step does; the `for`'s init
+  // is still the counter's, the name its test reads
   const { src, agreement, shipped } = judged(twoSteps('%53: s32 = const {value=2}\n  %51: s32 = mul %5, %53'));
-  expect(src).toMatch(/for \((\w+) = a0; a1 >= (\w+); \1 = \2 \* 2, \2 = \2 \+ 1\) \{/);
+  expect(src).toMatch(/for \((\w+) = a0; a1 >= \1; (\w+) = \1 \* 2, \1 = \1 \+ 1\) \{/);
   expect(agreement.disagree).toBe(0);
   expect(shipped.disagree).toBe(0);
   expect(agreement.judged).toBeGreaterThan(SEEDS.length / 4); // a run whose `s` overflows is not judged
+});
+
+test("a counter the latch writes after a second update is still the `for`'s counter", () => {
+  // `s += 3` in the latch's first slot, `i + 1` in its second, and the test reads `i`: the init
+  // clause is `i`'s, whichever order the steps take, since neither reads the other
+  const ir = forJt()
+    .replace('^bb1(%5: s32):', '^bb1(%50: s32, %5: s32):')
+    .replace('^bb1(%0)', '^bb1(%0, %0)')
+    .replace(
+      'cond_br %37, ^bb12(), ^bb1(%36)',
+      '%53: s32 = const {value=3}\n  %51: s32 = add %50, %53\n  cond_br %37, ^bb12(), ^bb1(%51, %36)',
+    )
+    .replace('%34: s32 = call %5 {target="k"}', '%34: s32 = call %50 {target="k"}');
+  const { src, agreement, shipped } = judged(ir);
+  expect(src).toMatch(/for \((\w+) = a0; a1 >= \1; [^)]*\b\1 = \1 \+ 1\b[^)]*\) \{/);
+  expect(src).toMatch(/for \([^)]*\b(\w+) = \1 \+ 3\b[^)]*\) \{/);
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBeGreaterThan(0);
+});
+
+test("three steps are ordered by what each reads of the others, not by the latch's write order", () => {
+  // `i += c`, `b += 1`, `c += b`, written in that order: `c` must step after `i`, which reads its old
+  // value, and before `b`, whose old value it reads, so the one order is `i`, `c`, `b`
+  const ir = forJt()
+    .replace('^bb1(%5: s32):', '^bb1(%5: s32, %50: s32, %60: s32):')
+    .replace('^bb1(%0)', '^bb1(%0, %0, %0)')
+    .replace('%36: s32 = add %5, %35', '%36: s32 = add %5, %60')
+    .replace(
+      'cond_br %37, ^bb12(), ^bb1(%36)',
+      '%51: s32 = add %50, %35\n  %61: s32 = add %60, %50\n  cond_br %37, ^bb12(), ^bb1(%36, %51, %61)',
+    )
+    .replace('%34: s32 = call %5 {target="k"}', '%34: s32 = call %50 {target="k"}');
+  const { src, agreement, shipped } = judged(ir);
+  expect(src).toMatch(/for \((\w+) = a0; a1 >= \1; \1 = \1 \+ (\w+), \2 = \2 \+ (\w+), \3 = \3 \+ 1\) \{/);
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBeGreaterThan(0);
 });
 
 test('two updates that each read the other from before its step refuse the `for`', () => {

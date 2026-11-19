@@ -7509,50 +7509,121 @@ function structureRanked(
         strictGaps.length = gapMark;
       }
     }
-    // A SECOND COUNTER: the update writes the counter and then, left to right, names whose new
-    // value each reads only the names already stepped (their new value), its own old value, and
-    // what the loop never writes — `for (i = lo, j = lo << 3; i <= hi; i++, j = i << 2)`, whose
-    // latch steps `i` and then recomputes `j` from the new `i`. C runs a comma update in that order,
-    // after the body and on every `continue`, as the latch does. The counter is the first record
-    // (the pred's write order) every later one can follow; a step that reads another name's OLD
-    // value after that name was stepped has no order, and the loop stays `while (1)`. Each step is
-    // spelled as `latchExpr` spells it, a latch op inline and anything else as `exprWith` does, and
-    // `stale` walks it the same way. Not a rule of `FOR_PLAN_IV_GATES`, which every one of its
-    // fields reads; a stride (A SIBLING'S STRIDE) beside a second counter is refused rather than
-    // combined.
+    // A SECOND COUNTER: the update steps the counter and other names, left to right, each step
+    // reading the names already stepped (their new value), its own old value, the names not yet
+    // stepped (their old value) and what the loop never writes — `for (i = lo, j = lo << 3; i <= hi;
+    // i++, j = i << 2)`, whose latch steps `i` and then recomputes `j` from the new `i`. C runs a
+    // comma update in that order, after the body and on every `continue`, as the latch does. So the
+    // one constraint is that no step reads the OLD value of a name stepped ahead of it: the steps
+    // are sorted on that relation (`stepsInOrder`), and only a cycle in it (`a = b, b = a + b`)
+    // leaves the loop `while (1)`. The counter is the step the test reads, whatever the latch's
+    // write order. Each step is spelled as `latchExpr` spells it, every latch op inline and anything
+    // else as `exprWith` does, and `readsStepped` walks it the same way. Not a rule of
+    // `FOR_PLAN_IV_GATES`, which every one of its fields reads; a stride (A SIBLING'S STRIDE) beside
+    // a second counter is refused rather than combined.
     const inlined = latch.ops.some((o) => materialize.has(o));
-    const stale = (v: Value, done: Map<Value, string>, seen = new Set<Value>()): boolean => {
+    // Whether `v`, spelled with `named`'s values by their names and, where `inline` holds, every
+    // other latch op inline, reads the old value of one of `names` (hazards.ts `readsClobbered`,
+    // which stops at a named value). The update's steps and the `for`'s test both ask it.
+    const readsStepped = (
+      v: Value,
+      named: ReadonlyMap<Value, string>,
+      names: ReadonlySet<string>,
+      inline: boolean,
+      seen = new Set<Value>(),
+    ): boolean => {
       const d = defs.get(v);
-      if (done.has(v) || d === undefined || opBlock.get(d) !== latch) {
-        return readsClobbered(v, done, new Set(done.values()));
+      if (!inline || named.has(v) || d === undefined || opBlock.get(d) !== latch) {
+        return readsClobbered(v, named as Map<Value, string>, names as Set<string>);
       }
       if (seen.has(v)) {
         return false;
       }
       seen.add(v);
-      return d.operands.some((o) => stale(o, done, seen));
+      return d.operands.some((o) => readsStepped(o, named, names, inline, seen));
     };
-    const steps = (first: (typeof updateRecs)[number]): typeof updateRecs | null => {
-      const order = [first, ...updateRecs.filter((r) => r !== first)];
+    type StepRec = (typeof updateRecs)[number];
+    // What the step `r`'s value reads of the other steps, through the latch's ops: the new values
+    // (another step's arg, which it reads by name once that step runs ahead of it) and the old ones
+    // (a value named as a step's name). An old read orders `r` ahead; a new read asks to follow.
+    const stepReads = (r: StepRec): { fresh: Set<StepRec>; old: Set<StepRec> } => {
+      const fresh = new Set<StepRec>(),
+        old = new Set<StepRec>(),
+        seen = new Set<Value>();
+      const walk = (x: Value, root: boolean): void => {
+        if (seen.has(x)) {
+          return;
+        }
+        seen.add(x);
+        const stepOf = root ? undefined : updateRecs.find((o) => o.arg === x);
+        if (stepOf !== undefined) {
+          fresh.add(stepOf);
+          return;
+        }
+        const d = defs.get(x);
+        if (d !== undefined && opBlock.get(d) === latch) {
+          d.operands.forEach((o) => walk(o, false));
+          return;
+        }
+        const nm = varName.get(x);
+        if (nm !== undefined) {
+          updateRecs.filter((o) => o.name === nm).forEach((o) => old.add(o));
+          return;
+        }
+        d?.operands.forEach((o) => walk(o, false));
+      };
+      walk(r.arg, true);
+      fresh.delete(r);
+      old.delete(r);
+      return { fresh, old };
+    };
+    // A topological sort on the old reads, in write order where it leaves a choice, taking first a
+    // step every step whose new value it reads already precedes. The order it finds is then checked
+    // as it is spelled, and refused where a step still reads a name already stepped.
+    const stepsInOrder = (): StepRec[] | null => {
+      const reads = new Map(updateRecs.map((r) => [r, stepReads(r)]));
+      const order: StepRec[] = [];
+      const left = new Set(updateRecs);
+      while (left.size > 0) {
+        // `r` is ready when no step left reads its old value
+        const ready = [...left].filter((r) => ![...left].some((o) => o !== r && reads.get(o)!.old.has(r)));
+        if (ready.length === 0) {
+          return null; // a cycle
+        }
+        const next = ready.find((r) => ![...reads.get(r)!.fresh].some((o) => left.has(o))) ?? ready[0];
+        order.push(next);
+        left.delete(next);
+      }
       const done = new Map<Value, string>();
       for (const r of order) {
-        if (stale(r.arg, done)) {
+        if (readsStepped(r.arg, done, new Set(done.values()), true)) {
           return null;
         }
         done.set(r.arg, r.name);
       }
       return order;
     };
-    const stepOrder =
-      updateRecs.length === 1
-        ? updateRecs
-        : strides.length > 0
-          ? null
-          : (updateRecs.map(steps).find((o) => o !== null) ?? null);
+    const stepOrder = updateRecs.length === 1 ? updateRecs : strides.length > 0 ? null : stepsInOrder();
     if (stepOrder === null || stepOrder.length === 0) {
       return null;
     }
-    const [ivRec, ...extraRecs] = stepOrder;
+    // the counter: the step whose new or old value the test reads, the first in step order where it
+    // reads several, and the first step where it reads none
+    const testReads = (rec: StepRec): boolean => {
+      const seen = new Set<Value>();
+      const walk = (x: Value): boolean => {
+        if (x === rec.arg || x === rec.param || varName.get(x) === rec.name) {
+          return true;
+        }
+        if (seen.has(x)) {
+          return false;
+        }
+        seen.add(x);
+        return defs.get(x)?.operands.some(walk) ?? false;
+      };
+      return walk(lterm.operands[0]);
+    };
+    const ivRec = stepOrder.find(testReads) ?? stepOrder[0];
     const iv = ivRec.name;
     const updateNames = new Set(stepOrder.map((r) => r.name));
     const ivInit = initRecs.find((r) => r.name === iv);
@@ -7561,17 +7632,7 @@ function structureRanked(
     // latch may hold a materialized op its own reads alone use (`inlined`), which the `for` never
     // renders at its position, so its test and update spell every latch op inline, and the test is
     // checked through them for a read of a name the update writes.
-    const clobbered = (v: Value, seen = new Set<Value>()): boolean => {
-      const d = defs.get(v);
-      if (!inlined || sub.has(v) || d === undefined || opBlock.get(d) !== latch) {
-        return readsClobbered(v, sub, updateNames);
-      }
-      if (seen.has(v)) {
-        return false;
-      }
-      seen.add(v);
-      return d.operands.some((o) => clobbered(o, seen));
-    };
+    const clobbered = (v: Value): boolean => readsStepped(v, sub, updateNames, inlined);
     const entryVals = new Map<Value, Value>();
     h.params.forEach((p, i) => entryVals.set(p, initEdge.args[i] as Value));
     h.params.forEach((_, i) => entryVals.set(back.args[i] as Value, initEdge.args[i] as Value));
@@ -7804,17 +7865,19 @@ function structureRanked(
       };
       return e;
     };
-    // each later step reads the steps ahead of it by their names (A SECOND COUNTER)
-    const stepped = new Map<Value, string>([[ivRec.arg, iv]]);
-    const extraIncs: Stmt[] = extraRecs.map((r) => {
+    // the first step as one counter's update is spelled; each later one reads the steps ahead of it
+    // by their names (A SECOND COUNTER)
+    const [first, ...later] = stepOrder;
+    const stepped = new Map<Value, string>([[first.arg, first.name]]);
+    const laterIncs: Stmt[] = later.map((r) => {
       const value = intoDeclaredTemp(r.name, latchExpr(new Map(stepped))(r.arg));
       stepped.set(r.arg, r.name);
       return { k: 'assign', name: r.name, value };
     });
     const [inc] = inlined
-      ? [{ k: 'assign' as const, name: iv, value: intoDeclaredTemp(iv, latchExpr(null)(ivRec.arg)) }]
-      : extraRecs.length > 0
-        ? [{ k: 'assign' as const, name: iv, value: ivRec.value }]
+      ? [{ k: 'assign' as const, name: first.name, value: intoDeclaredTemp(first.name, latchExpr(null)(first.arg)) }]
+      : later.length > 0
+        ? [{ k: 'assign' as const, name: first.name, value: first.value }]
         : argAssigns(latch, h, null, keep);
     const inits = [...(pre !== undefined ? sideEffects(pre) : []), ...argAssigns(entry, h, null, keep)];
     const init: Stmt | undefined =
@@ -7835,7 +7898,7 @@ function structureRanked(
       inits: inits.filter((st) => st !== init),
       init,
       cond: test.contIsTaken ? spelled : negateCond(spelled),
-      inc: [inc, ...extraIncs],
+      inc: [inc, ...laterIncs],
       ...(strides.length > 0
         ? {
             derived: {
