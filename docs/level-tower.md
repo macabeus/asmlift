@@ -339,11 +339,17 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   **The corollary a "shrink the fan" round wants, and it is that round's whole answer: a variation's
   own LICENCE cannot prune it for CPU.** Skipping a variation wherever a predicate proves it cannot
   fire is sound exactly where the variation would have emitted no candidate — so a sound licence skip shrinks the
-  fan by zero, and the fan is what compiles. All it can save is the enumeration-time gate walk, and
-  enumeration is a small fraction of a ranked run beside one compile per candidate: on
+  fan by zero, and the fan is what compiles. All it can save is the enumeration-time gate walk: on
   `LoadBGTilemapData` the one such skip that was built fires on every tree and leaves 112,896
   candidates at 112,896, the compile phase untouched. So a round out to buy compile CPU has to remove candidates
-  that WOULD have compiled, which is not a licence question. `rank.ts`'s
+  that WOULD have compiled, which is not a licence question. That walk is not always small beside
+  the compiles, though. On a cold candidate store the compiles dominate. On a warm one,
+  `kleod:PauseMenuScreenHandler:agbcc` spent 1,535 s of a 1,999 s ranked call enumerating its
+  64,320 candidates, and 326 s of that was the decline walk of `narrowReadDeclarations`, a member that
+  fires on none of them, re-run once per stacked subset that holds it. Running each stacked member
+  once per input tree cut that enumeration to about 440 s with the fan unchanged
+  (`docs/bench-cost.md` §3). So a round out to buy ENUMERATION time can win it without touching the
+  fan, by not recomputing a gate, and that is not a licence question either. `rank.ts`'s
   `ORDERBASE_HOISTS` carries the worked case, and with it the three wrong readings of one such
   predicate, each of which deletes live candidates — two of them the row's own neighbours in the
   same loop.
