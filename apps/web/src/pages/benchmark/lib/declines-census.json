@@ -1,7 +1,7 @@
 {
   "generatedBy": "pnpm regen:declines-census (scripts/regen-decline-census.ts) — do not hand-edit",
-  "distinctMessages": 332,
-  "residueTotal": 136,
+  "distinctMessages": 333,
+  "residueTotal": 137,
   "residueByFile": [
     {
       "file": "frontend/thumb.ts",
@@ -80,7 +80,7 @@
     },
     {
       "file": "frontend/splat.ts",
-      "count": 19,
+      "count": 20,
       "messages": [
         "cannot lift 'X': 'X' calls 'X', a name a \\`.macro\\` in this file defines, and gas expands the macro before it reads an instruction of that name, which this reader does not do",
         "cannot lift 'X': 'X' inside the function can emit fill between instructions, which this reader does not model",
@@ -92,6 +92,7 @@
         "cannot lift 'X': 'X' saves or restores assembler options this reader does not track",
         "cannot lift 'X': 'X' switches section in a way this reader does not model",
         "cannot lift 'X': X holds a control byte, which gas reads as a statement end where this reader does not, so this reader cannot tell which statements gas assembles",
+        "cannot lift 'X': X holds a non-ASCII character outside a comment or string, which gas reads as part of a name, so this reader cannot tell which statements gas assembles",
         "cannot lift 'X': branch/jump target 'X' is not a local label in this function (tail call / cross-function branch not modelled)",
         "cannot lift 'X': data directive 'X' in the code stream — skipping it would silently delete its effect",
         "cannot lift 'X': its \\`glabel\\` sits inside a conditional, macro or repeated body, which this reader does not model",

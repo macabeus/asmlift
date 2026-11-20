@@ -628,6 +628,21 @@ describe('a line holding a control byte declines', () => {
   test('before the function too', () => {
     expect(() => decompile('f', `\t.text\u0000.data\n${fn('')}`, ARMV4T_AGBCC)).toThrow(/control byte/);
   });
+  // arm-none-eabi-as reads a non-ASCII character in code as part of a name (`mov r0, #1<U+00A0>` and
+  // `.if 1<U+00A0>` are errors); this reader read it as blank space. In a comment or a string it is
+  // text, and still reads.
+  test.each(['mov\tr0, #1\u00a0', '.if 1\u00a0\n\t.endif\n\tmov\tr0, #1', 'mov\tr0, #1\n\tb\u00e9:'])(
+    '%j declines',
+    (body) => {
+      const asm = `\t.text\n\t.code 16\n\t.thumb_func\nf:\n\t${body}\n\tbx\tlr\n`;
+      expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(/non-ASCII character outside a comment or string/);
+    },
+  );
+  test('non-ASCII in an `@` comment, a `/* */` comment or a string still reads', () => {
+    const asm =
+      '\t.text\n\t.code 16\n\t.thumb_func\nf:\n\tmov\tr0, #1 /* \u00e9 */ @ \u3000\n\tbx\tlr\n\t.section .rodata\nmsg:\n\t.ascii "\u00e9"\n';
+    expect(lift(asm)).toContain('return 1;');
+  });
   test('CRLF and UTF-8 still read', () => {
     expect(lift(fn(' @ café').replace(/\n/g, '\r\n'))).toContain('return 1;');
   });

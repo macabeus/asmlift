@@ -717,6 +717,34 @@ describe('an addressed line that calls a macro the file defines declines', () =>
   ])('%s: a line holding a control byte declines', (_probe, asm) => {
     expect(() => decompile('f', asm, MIPS_IDO)).toThrow(/holds a control byte/);
   });
+  // JS `trim()` and `\s` read U+00A0, U+2028, U+3000 as blank space; gas reads them (and U+0085) as
+  // name characters, so `.set noreorder<U+00A0>` is an unrecognised option, a warning, and the
+  // mode stays reorder (mips-linux-gnu-as 2.42: a0 + 1; main lifted a0 + 1 + 4). A line holding a
+  // non-ASCII character outside a comment or string declines.
+  test.each([
+    [
+      'h01',
+      '.set reorder\n.set noreorder\u00a0\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+    ],
+    [
+      'h02',
+      '.set reorder\n.set \u00a0noreorder\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+    ],
+    [
+      'h09',
+      '.set reorder\n.set noreorder\u2028\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+    ],
+    [
+      'h11',
+      '.set reorder\n.set noreorder\u0085\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+    ],
+    [
+      'h13',
+      '.set reorder\n.set noreorder\u3000\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+    ],
+  ])('%s: a non-ASCII character in code declines', (_probe, asm) => {
+    expect(() => decompile('f', asm, MIPS_IDO)).toThrow(/holds a non-ASCII character outside a comment or string/);
+  });
   test('a CRLF line and a non-ASCII comment still read', () => {
     const fn =
       'glabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1 /* café */\n' +

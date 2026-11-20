@@ -24,14 +24,15 @@
 // recover `x` as `(hi << 16) + (s16)lo` for a positive or a negative offset alike.
 // The other GOT/PIC relocations (`%gp_rel`, `%got`, …) are declined LOUD — small-data /
 // position-independent access is not modelled.
-import { CONTROL_BYTE } from './control-byte';
+import { CONTROL_BYTE, asciiTrim, isNonAscii } from './control-byte';
 import type { DisasmInstr, DisasmReloc } from './disasm';
 import { FrontendUnsupportedError } from './errors';
 
 // One instruction line: `/* ROM VRAM BYTES */  MNEMONIC  OPS`. Group 1 is the VRAM address word.
-const INSN_LINE = /^\/\*\s*[0-9A-Fa-f]+\s+([0-9A-Fa-f]+)\s+[0-9A-Fa-f]+\s*\*\/\s*(\S+)\s*(.*)$/;
+const INSN_LINE =
+  /^\/\*[ \t\r]*[0-9A-Fa-f]+[ \t\r]+([0-9A-Fa-f]+)[ \t\r]+[0-9A-Fa-f]+[ \t\r]*\*\/[ \t\r]*([^ \t\r]+)[ \t\r]*(.*)$/;
 // A Splat instruction-comment prefix anywhere in the text — the load-bearing format signal.
-const INSN_SIGNAL = /\/\*\s*[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s*\*\//;
+const INSN_SIGNAL = /\/\*[ \t\r]*[0-9A-Fa-f]+[ \t\r]+[0-9A-Fa-f]+[ \t\r]+[0-9A-Fa-f]+[ \t\r]*\*\//;
 // A local-label DEFINITION on its own line (`.L800011C0_1DC0:`); the colon is required.
 const LABEL_DEF = /^(\.[\w.$]+):$/;
 // A GOT/PIC relocation operand this reader does not support (small-data / position-independent
@@ -40,7 +41,7 @@ const LABEL_DEF = /^(\.[\w.$]+):$/;
 const RELOC_OP = /%(gp_rel|gprel|got|call16|call_hi|call_lo|higher|highest|neg|tprel|dtprel)\b/i;
 // Any `%hi`/`%lo` spelling at all, so a half `normalizeOperand`'s pattern cannot resolve is caught
 // rather than falling through to the paths that read an operand as arithmetic.
-const HILO_OP = /%(hi|lo)\s*\(/i;
+const HILO_OP = /%(hi|lo)[ \t\r]*\(/i;
 // Data directives whose bytes could encode an effect: skipping one inside a function slice would
 // silently delete it, so they decline (mirrors the Thumb frontend's in-code-data guard).
 const DATA_DIRECTIVE =
@@ -54,8 +55,9 @@ const DATA_DIRECTIVE =
  *  first token skipped an instruction gas assembles. The `/* ROM VRAM BYTES *\/` prefix is kept on
  *  its statement, since it is what marks an instruction. Null where the line's reading runs into
  *  the next one (a comment, string or character constant left open), which this reader does not
- *  follow. */
-function splatStatements(line: string): string[] | null {
+ *  follow. `seen.nonAsciiCode` is set when a code point outside ASCII sits in code, not in a
+ *  comment, string or character constant. */
+function splatStatements(line: string, seen?: { nonAsciiCode: boolean }): string[] | null {
   const out: string[] = [];
   let cur = '';
   for (let i = 0; i < line.length; i++) {
@@ -91,6 +93,9 @@ function splatStatements(line: string): string[] | null {
       out.push(cur);
       cur = '';
     } else {
+      if (seen && isNonAscii(c)) {
+        seen.nonAsciiCode = true;
+      }
       cur += c;
     }
   }
@@ -101,11 +106,11 @@ function splatStatements(line: string): string[] | null {
 // A section switch, and whether it makes plain `.text` (subsection 0) current. Any other section,
 // or `.text` with a subsection, is "another section" to this reader.
 const SECTION_SWITCH =
-  /^\.(section|text|data|bss|rdata|sdata|rodata|late_rodata|pushsection|popsection|previous|subsection)\b\s*(.*)$/i;
+  /^\.(section|text|data|bss|rdata|sdata|rodata|late_rodata|pushsection|popsection|previous|subsection)\b[ \t\r]*(.*)$/i;
 const isPlainText = (sw: RegExpMatchArray): boolean => {
   const kind = sw[1].toLowerCase();
-  const arg = sw[2].trim();
-  return kind === 'section' ? /^"?\.text"?\s*(?:,|$)/.test(arg) : kind === 'text' && (arg === '' || arg === '0');
+  const arg = asciiTrim(sw[2]);
+  return kind === 'section' ? /^"?\.text"?[ \t\r]*(?:,|$)/.test(arg) : kind === 'text' && (arg === '' || arg === '0');
 };
 
 // The directives known to leave the section and location where they are: an allowlist, so a
@@ -123,16 +128,16 @@ const keepsSplatSection = (line: string): boolean =>
 // `keepsSplatSection` list (its `.set` taken out and read here), the section switches and the data
 // directives. gas compares the option case-sensitively (`.set REORDER` is not reorder), so only the
 // directive name is read without case.
-const bareStatement = (statement: string): string => statement.replace(/\/\*.*?\*\//g, ' ').trim();
+const bareStatement = (statement: string): string => asciiTrim(statement.replace(/\/\*.*?\*\//g, ' '));
 type ReorderEffect = 'noreorder' | 'reorder' | 'safe' | 'unknown';
 const SPLAT_MARKER = /^(?:glabel|endlabel|dlabel|enddlabel|jlabel|alabel|nonmatching)\b/;
-const SAFE_SET = /^\.set\s+(?:noat|at|mips\d+(?:r\d+)?|gp=\d+|fp=\d+|[A-Za-z_$][\w.$]*\s*,.*)$/i;
+const SAFE_SET = /^\.set[ \t\r]+(?:noat|at|mips\d+(?:r\d+)?|gp=\d+|fp=\d+|[A-Za-z_$][\w.$]*[ \t\r]*,.*)$/i;
 function reorderEffect(statement: string): ReorderEffect {
   if (INSN_LINE.test(statement)) {
     return 'safe';
   }
   const t = bareStatement(statement);
-  const mode = t.match(/^\.[sS][eE][tT]\s+(no)?reorder$/);
+  const mode = t.match(/^\.[sS][eE][tT][ \t\r]+(no)?reorder$/);
   if (mode) {
     return mode[1] === undefined ? 'reorder' : 'noreorder';
   }
@@ -141,7 +146,7 @@ function reorderEffect(statement: string): ReorderEffect {
   }
   // a label on a data directive (a jump table's `jpt_400130: .word .L004000D4`) is data alone; on
   // any other directive the label hides what the directive is
-  if (DATA_DIRECTIVE.test(t.replace(/^(?:[\w.$]+:\s*)+/, ''))) {
+  if (DATA_DIRECTIVE.test(t.replace(/^(?:[\w.$]+:[ \t\r]*)+/, ''))) {
     return 'safe';
   }
   if (/^\.set\b/i.test(t)) {
@@ -158,7 +163,7 @@ const LINE_DIRECTIVE = /^\.(if\w*|else\w*|endif|rept|irpc?|endr|macro|endm|exitm
  *  three-word instruction-comment prefix) are unique to Splat — objdump and compiler `.s` carry
  *  neither — so a positive match is unambiguous. */
 export function isSplatMips(asm: string): boolean {
-  return /^\s*glabel\s+\S+/m.test(asm) || INSN_SIGNAL.test(asm);
+  return /^[ \t\r]*glabel[ \t\r]+[^ \t\r]+/m.test(asm) || INSN_SIGNAL.test(asm);
 }
 
 /** The name of every `.macro` the text defines, lower-cased (gas reads a macro name without
@@ -168,19 +173,20 @@ export function isSplatMips(asm: string): boolean {
  *  mips-linux-gnu-as 2.42), so an addressed line naming one runs the macro's body, not the
  *  instruction written. `*` stands for a name this reader cannot read (`.macro \\x`), which matches
  *  every mnemonic, and so does a line that leaves a comment, string or character constant open
- *  or holds a control byte.
+ *  or holds a control byte or a non-ASCII character in code.
  *  KNOWN GAP: a macro an `.include` defines is not seen here. */
 function definedMacros(lines: string[]): Set<string> {
   const names = new Set<string>();
   for (const raw of lines) {
-    const sts = CONTROL_BYTE.test(raw) ? null : splatStatements(raw);
-    if (sts === null) {
+    const seen = { nonAsciiCode: false };
+    const sts = CONTROL_BYTE.test(raw) ? null : splatStatements(raw, seen);
+    if (sts === null || seen.nonAsciiCode) {
       names.add('*'); // a line this reader cannot cut may hide a `.macro` in what it leaves open
       continue;
     }
     for (const st of sts) {
-      const t = bareStatement(st).replace(/^(?:[\w.$]+:\s*)+/, '');
-      const m = t.match(/^\.macro\b\s*([^\s,]*)/i);
+      const t = bareStatement(st).replace(/^(?:[\w.$]+:[ \t\r]*)+/, '');
+      const m = t.match(/^\.macro\b[ \t\r]*([^ \t\r,]*)/i);
       if (m) {
         names.add(/^[A-Za-z_.$][\w.$]*$/.test(m[1]) ? m[1].toLowerCase() : '*');
       }
@@ -206,15 +212,24 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
   const readStatements = (raw: string): string[] => {
     if (CONTROL_BYTE.test(raw)) {
       throw new FrontendUnsupportedError(
-        `cannot lift '${name}': ${JSON.stringify(raw.trim())} holds a control byte, which gas reads as a statement ` +
+        `cannot lift '${name}': ${JSON.stringify(asciiTrim(raw))} holds a control byte, which gas reads as a statement ` +
           `end where this reader does not, so this reader cannot tell which statements gas assembles`,
       );
     }
-    const sts = splatStatements(raw);
+    const seen = { nonAsciiCode: false };
+    const sts = splatStatements(raw, seen);
     if (sts === null) {
       throw new FrontendUnsupportedError(
-        `cannot lift '${name}': '${raw.trim()}' leaves a comment, string or character constant open at the end of ` +
+        `cannot lift '${name}': '${asciiTrim(raw)}' leaves a comment, string or character constant open at the end of ` +
           `its line, so this reader cannot tell which statements gas assembles`,
+      );
+    }
+    // gas reads a non-ASCII code point in code as a name character (`.set noreorder<U+00A0>` is an
+    // unrecognised option), where JS reads several as blank space; such a line declines.
+    if (seen.nonAsciiCode) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': ${JSON.stringify(asciiTrim(raw))} holds a non-ASCII character outside a comment or ` +
+          `string, which gas reads as part of a name, so this reader cannot tell which statements gas assembles`,
       );
     }
     return sts;
@@ -232,7 +247,7 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
   // Slice to the requested function: `glabel NAME` … its `endlabel`/the next `glabel`/EOF.
   const glabels: { line: number; sym: string }[] = [];
   for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].match(/^\s*glabel\s+(\S+)/);
+    const m = lines[i].match(/^[ \t\r]*glabel[ \t\r]+([^ \t\r]+)/);
     if (m) {
       glabels.push({ line: i, sym: m[1] });
     }
@@ -248,7 +263,7 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
     }
     let end = lines.length;
     for (let i = glabels[at].line + 1; i < lines.length; i++) {
-      if (/^\s*(endlabel|glabel)\b/.test(lines[i])) {
+      if (/^[ \t\r]*(endlabel|glabel)\b/.test(lines[i])) {
         end = i;
         break;
       }
@@ -260,7 +275,7 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
     let depth = 0;
     for (const raw of lines.slice(0, glabels[at].line)) {
       for (const st of readStatements(raw)) {
-        const d = st.trim().match(LINE_DIRECTIVE)?.[1].toLowerCase();
+        const d = asciiTrim(st).match(LINE_DIRECTIVE)?.[1].toLowerCase();
         depth +=
           d === undefined ? 0 : /^(?:if\w*|macro|rept|irpc?)$/.test(d) ? 1 : /^(?:endif|endm|endr)$/.test(d) ? -1 : 0;
       }
@@ -310,10 +325,10 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
   };
   for (const raw of lines.slice(0, sliceFrom)) {
     for (const st of readStatements(raw)) {
-      const t = st.trim();
+      const t = asciiTrim(st);
       // `.set push` / `.set pop` save and restore the reorder state (measured: a `pop` back to
       // `.set reorder` before the function lets gas fill its delay slot); not modelled.
-      if (/^\.set\s+(?:push|pop)\b/i.test(t)) {
+      if (/^\.set[ \t\r]+(?:push|pop)\b/i.test(t)) {
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': '${t}' saves or restores assembler options this reader does not track`,
         );
@@ -329,7 +344,7 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
     }
   }
   for (const raw of statements) {
-    const line = raw.trim();
+    const line = asciiTrim(raw);
     if (!line) {
       continue;
     }
@@ -366,7 +381,7 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
       inOtherSection = !isPlainText(sw);
       continue;
     }
-    if (/^\.set\s+(?:push|pop)\b/i.test(line)) {
+    if (/^\.set[ \t\r]+(?:push|pop)\b/i.test(line)) {
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': '${line}' saves or restores assembler options this reader does not track`,
       );
@@ -376,8 +391,8 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
     // alignment (measured: `.balign 16` after a `jr` puts two nops before its delay slot). The
     // fill is not modelled, so each declines.
     if (
-      /^\.(?:set|equ|eqv|equiv)\s+(?:\.|"\.")\s*,/i.test(line) ||
-      /^\.\s*=/.test(line) ||
+      /^\.(?:set|equ|eqv|equiv)[ \t\r]+(?:\.|"\.")[ \t\r]*,/i.test(line) ||
+      /^\.[ \t\r]*=/.test(line) ||
       /^\.\w*align\w*\b/i.test(line)
     ) {
       throw new FrontendUnsupportedError(
@@ -433,7 +448,7 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
         `cannot lift '${name}': data directive '${mnemonic}' in the code stream — skipping it would silently delete its effect`,
       );
     }
-    const normalized = m[3].trim() ? splitOperands(m[3].trim()).map((o) => normalizeOperand(name, o)) : [];
+    const normalized = asciiTrim(m[3]) ? splitOperands(asciiTrim(m[3])).map((o) => normalizeOperand(name, o)) : [];
     const ops = normalized.map((n) => n.op);
     // At most one relocation per instruction — the same invariant disasm.ts enforces on objdump
     // output, and for the same reason: two would leave one symbol standing for the other's operand.
@@ -503,14 +518,14 @@ function splitOperands(s: string): string[] {
       depth--;
     }
     if (ch === ',' && depth === 0) {
-      out.push(cur.trim());
+      out.push(asciiTrim(cur));
       cur = '';
       continue;
     }
     cur += ch;
   }
-  if (cur.trim()) {
-    out.push(cur.trim());
+  if (asciiTrim(cur)) {
+    out.push(asciiTrim(cur));
   }
   return out;
 }
@@ -590,7 +605,7 @@ function normalizeOperand(name: string, op: string): { op: string; reloc?: Disas
   // The addend is a constant expression like any other here, so its RADIX is {@link evalConst}'s
   // question rather than this pattern's — {@link refuseOctal} says why the placement is the rule.
   const hilo = op.match(
-    /^%(hi|lo)\(\s*([A-Za-z_.$][\w.$]*)\s*(?:([+-])\s*(0x[0-9a-fA-F]+|\d+))?\s*\)(?:\((\$?[A-Za-z]\w*)\))?$/,
+    /^%(hi|lo)\([ \t\r]*([A-Za-z_.$][\w.$]*)[ \t\r]*(?:([+-])[ \t\r]*(0x[0-9a-fA-F]+|\d+))?[ \t\r]*\)(?:\((\$?[A-Za-z]\w*)\))?$/,
   );
   if (hilo) {
     const addend = hilo[4] ? evalConst(name, hilo[4]) * (hilo[3] === '-' ? -1 : 1) : 0;
@@ -620,7 +635,7 @@ function normalizeOperand(name: string, op: string): { op: string; reloc?: Disas
   // Memory operand `DISP(base)` — base is a register (letter-first), DISP a constant/expression.
   const mem = op.match(/^(.*)\((\$?[A-Za-z]\w*)\)$/);
   if (mem) {
-    const disp = mem[1].trim();
+    const disp = asciiTrim(mem[1]);
     const off = disp === '' ? '0' : String(evalConst(name, disp));
     return plain(`${off}(${mem[2].replace(/^\$/, '')})`);
   }
