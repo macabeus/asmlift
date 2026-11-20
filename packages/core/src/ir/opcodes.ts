@@ -274,6 +274,13 @@ export const OPCODES = {
   // (`raise/retsink.ts`, `raise/tailsink.ts`) replaces that edge's `br` and takes its stamp, so
   // `structure/retspell.ts` can still read how the machine arrived. A `ret` a frontend built carries
   // nothing, and is read by its block's in-edges instead.
+  // `viaReturnReg: true` — OPTIONAL, set by a frontend on a `ret` it leaves bare because it branched
+  // through the return register (Thumb `pop {r0}; bx r0`), which so holds the return address and no
+  // value. A bare `ret` without it is one no path wrote that register for (PowerPC `blr`), which hands
+  // back what the caller left there. Read off a frontend's lift (frontend/callee-body.ts
+  // `returnsUntouched`). A pass that moves a return onto another edge carries it with the return
+  // (ir/core.ts `returnStampsOf`), so the copies still compare equal to the return they came from
+  // (raise/reroll.ts `rejoins`).
   ret: { operands: 'variadic', results: 0, terminator: true, successors: 0 },
   // `fallthrough: true` — OPTIONAL, set by a frontend when the block carried NO control-transfer
   // instruction and this `br` stands for the machine simply running into the next block. Its

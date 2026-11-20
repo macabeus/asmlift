@@ -47,6 +47,7 @@ import {
   mkOp,
   predecessors,
   reachableBlocks,
+  returnStampsOf,
   terminator,
 } from '../ir/core';
 import { simplifyTrivialPhis } from '../ir/simplify';
@@ -125,7 +126,8 @@ export function sinkStoreTails(fn: Fn): boolean {
       // read as a branch — the side that can never delete a return the object needs.
       const t = src.from.ops[src.from.ops.length - 1];
       const attrs = t.successors[0]?.block === tail ? fallThroughOf(t) : {};
-      src.from.ops.splice(src.from.ops.length - 1, 1, ...copies, mkOp('ret', { attrs }));
+      const stamps = returnStampsOf(tail.ops[tail.ops.length - 1]);
+      src.from.ops.splice(src.from.ops.length - 1, 1, ...copies, mkOp('ret', { attrs: { ...attrs, ...stamps } }));
     }
     // By REACHABILITY, not predecessor count: the tail (unless a conditional edge keeps it) and
     // every forwarder on the way are left unreachable, however long the chain, and a forwarder's

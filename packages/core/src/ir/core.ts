@@ -481,6 +481,12 @@ export function fallThroughOf(term: Op): Op['attrs'] {
   return term.attrs.fallthrough === true ? { fallthrough: true } : {};
 }
 
+/** What a frontend stamped on a `ret` of the return itself (`opcodes.ts`: `viaReturnReg`), which a
+ *  pass rebuilding that return on another edge carries, as the return it moves is the same one. */
+export function returnStampsOf(ret: Op): Op['attrs'] {
+  return ret.attrs.viaReturnReg === true ? { viaReturnReg: true } : {};
+}
+
 /** The successor blocks of `b`, read off its terminator. */
 export function successorsOf(b: Block): Block[] {
   return terminator(b)?.successors.map((s) => s.block) ?? [];
