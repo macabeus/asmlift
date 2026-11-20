@@ -14,15 +14,17 @@
 //   elf/shadowed.elf   v1-v3d, v5, v7, v8a, w1-w4, x1, x2, h2: the shadow reached gas
 //   elf/<v>.elf        v4 (`.req`), v8c (a marker that also pushes), v9 (`.equ` + `.if`), v9b (`.set` +
 //                      `.ifndef`), macroproj (a `mov` shadow, the first review's repro)
-//   asm/<text>.s       cal.s: kl2dct.s for every probe but v4, v9, v9b and macroproj, which have their own
+//   asm/<text>.s       cal.s: kl2dct.s for every probe but v4, v9, v9b, macroproj and t1-t6, which have
+//                      their own (t1-t6 define the macro in cal.s itself; t3/t6's path is a placeholder)
 //   obj/<text>.<dialect>.o   asmlift's assembly of it (src `controlledSources` + `assembleWith`); a missing
 //                      one is a dialect gas refused. test/matching/splat-bodies-assembly checks them.
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, test } from 'vitest';
 
 import { runCli } from '../../src/main';
+import { controlledSources } from '../../src/splat-bodies';
 import { fakeAssembly, runWithAssembly } from './splat-bodies-fake';
 
 const FIXTURE = join(import.meta.dirname, 'fixtures/splat-bodies-probes');
@@ -92,10 +94,23 @@ describe('CLI (agbcc): no probe lifts wrong', () => {
     ['v9 .equ and .if', 'v9', 'v9'],
     ['v9b .set and .ifndef', 'v9b', 'v9b'],
     ['macroproj mov shadow', 'macroproj', 'macroproj'],
+    // the callee's own text defines the macro (t1 literally; t2, t5 under a name gas's expansion spells)
+    ['t1 a literal .macro movs', 'shadowed', 't1'],
+    ['t2 .irp-generated macro name', 'shadowed', 't2'],
+    ['t3 a macro building .include', 'shadowed', 't3'],
+    ['t4 .altmacro, a macro defining a macro (control)', 'clean', 't4'],
+    ['t5 a macro defining a macro', 'shadowed', 't5'],
+    ['t6 .irp building .include', 'shadowed', 't6'],
   ])('%s: no body, the lift without one', async (_, elf, text) => {
     const plain = await lift(elf, text, false);
     expect(plain).toContain('return cal(3, &gp);');
     expect(await lift(elf, text, true)).toBe(plain);
+  });
+  test('a text holding macro machinery is never assembled', () => {
+    for (const t of ['t1', 't2', 't3', 't4', 't5', 't6']) {
+      expect(controlledSources(readFileSync(join(FIXTURE, 'asm', `${t}.s`), 'latin1')), t).toBeUndefined();
+    }
+    expect(controlledSources(readFileSync(join(FIXTURE, 'asm/kl2dct.s'), 'latin1'))).toHaveLength(2);
   });
   test.each(['v0 kl2dct header and markers', 'v8b a nested include redefining a marker as it was', 'h3 CRLF header'])(
     '%s: the body is read',

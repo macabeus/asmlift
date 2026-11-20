@@ -26,8 +26,11 @@
 //     one header defines the macro. The site is read off the units, not off decomp.yaml's
 //     `paths.asm`/`paths.nonmatchings`: a file under those paths that no unit includes is no code the
 //     build links. A name two sites include (a second unit, or a commented-out line) gives no body;
-//   - the file defines the label once, marks it `.weak` nowhere, and holds no `.include` (an
-//     included file is the project's environment, which this proof does not read);
+//   - the file defines the label once, marks it `.weak` nowhere, holds no `.include` (an included
+//     file is the project's environment, which this proof does not read) and no macro machinery
+//     (`.macro`, `.irp`, `.irpc`, `.rept`, `.purgem`, `.altmacro`, `.endm`, a `\()` splice): a macro
+//     the file defines would be expanded alike by both assemblies, while the frontend reads the line
+//     as written;
 //   - the controlled assembly succeeds: any macro but the markers, a missing file, an unknown
 //     symbol in an immediate makes gas fail, and that gives no body;
 //   - its object defines `<name>` as one non-weak Thumb FUNC, as long as its ELF range (elf-bodies.ts
@@ -329,14 +332,20 @@ export const MARKER_PRELUDE = [
   '.endm',
 ].join('\n');
 
+/** Macro machinery in a project file: a macro it defines, possibly under a name only gas's expansion
+ *  spells (`.irp m, movs` / `.macro \m`, a macro defining a macro, a `\()` splice), would be expanded
+ *  by asmlift's assembly as by the project's, so the bytes agree while the frontend reads the line as
+ *  the instruction written. A file holding any of it is no body: kl2dct's hold none. */
+const MACRO_MACHINERY = /(?<![\w.$])\.(?:macro|irpc?|rept|purgem|altmacro|endm)(?![\w.$])|\\\(/i;
+
 /** The sources asmlift assembles for a project file's `text`, one per dialect; undefined where the
- *  text `.include`s anything (see the header). The Thumb frontend reads both `.syntax divided` and
+ *  text `.include`s anything or holds macro machinery (see the header). The Thumb frontend reads both `.syntax divided` and
  *  `.syntax unified` (thumb.ts `isDataOp`: a project's split files carry no `.syntax` of their own,
  *  and its INCLUDE_ASM may wrap them in either), and the register reads it takes from a line are the
  *  same in both, so the file is a body where either dialect assembles it to the linked bytes. gas's
  *  default, divided, is tried first. */
 export function controlledSources(text: string): string[] | undefined {
-  if (/(?<![\w.$])\.include(?![\w.$])/i.test(text)) {
+  if (/(?<![\w.$])\.include(?![\w.$])/i.test(text) || MACRO_MACHINERY.test(text)) {
     return undefined;
   }
   return ['divided', 'unified'].map((d) => `${MARKER_PRELUDE}\n.syntax ${d}\n${text}\n`);
