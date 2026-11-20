@@ -1,6 +1,6 @@
 // THE FILES A PROJECT'S ASSEMBLY `.include`s, found as gas finds them (src/asm-includes.ts): the
 // project's root first, then each `-I` of its compile command, and the macro names they define.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, test } from 'vitest';
@@ -37,6 +37,35 @@ describe('the -I directories of a compile command', () => {
     // a directory spelt through a variable is no directory known
     expect(includeSearchFromCommand('/p', 'as -I $(INC) y.s')).toBeUndefined();
   });
+  test('every other include flag refuses the command', () => {
+    for (const flag of [
+      '-include x.h',
+      '-imacros x.h',
+      '-iquote inc',
+      '-isystem inc',
+      '-idirafter inc',
+      '--include-dir=inc',
+      '-Wa,-Iinc',
+      '-Wp,-include,x.h',
+      '-Xassembler -Iinc',
+      '@flags.txt',
+      '-Dasm=__asm__',
+      '-U INCLUDE_ASM',
+      '-I ../inc',
+      '-I-',
+    ]) {
+      expect(includeSearchFromCommand('/p', `cc -E -I include ${flag} x.c`), flag).toBeUndefined();
+    }
+    // kl2dct's command
+    expect(
+      includeSearchFromCommand(
+        '/p',
+        'cc -E -x c -nostdinc -undef -I include {{inputPath}} -o {{outputPath}}.i\n' +
+          './tools/agbcc/bin/agbcc {{outputPath}}.i -o {{outputPath}}.s -mthumb-interwork -Wimplicit -O2 -fhex-asm -DNONMATCHING\n' +
+          'arm-none-eabi-as -mcpu=arm7tdmi {{outputPath}}.s -o {{outputPath}}',
+      ),
+    ).toEqual({ cwd: '/p', dirs: ['/p/include'] });
+  });
 });
 
 describe('an include is resolved where gas resolves it, and only one way', () => {
@@ -45,6 +74,14 @@ describe('an include is resolved where gas resolves it, and only one way', () =>
     expect(resolveInclude('a.inc', { cwd: root, dirs: [] })).toBe(join(root, 'a.inc'));
     expect(resolveInclude('b.inc', { cwd: root, dirs: [] })).toBeUndefined();
     expect(resolveInclude('b.inc', { cwd: root, dirs: [join(root, 'include')] })).toBe(join(root, 'include/b.inc'));
+  });
+  test('a path with a `..` component, or an absolute one, is no answer', () => {
+    // the kernel walks lnk/../a.inc through the link: sub/a.inc, where a lexical join reads ./a.inc
+    const root = tree({ 'a.inc': '', 'sub/a.inc': '', 'sub/d/x': '' });
+    symlinkSync('sub/d', join(root, 'lnk'));
+    expect(resolveInclude('lnk/../a.inc', { cwd: root, dirs: [] })).toBeUndefined();
+    expect(resolveInclude(join(root, 'a.inc'), { cwd: root, dirs: [] })).toBeUndefined();
+    expect(readIncludes(['x.inc'], { cwd: tree({ 'x.inc': '.include "lnk/../a.inc"\n' }), dirs: [] })).toBeUndefined();
   });
   test('a file two directories hold is no answer', () => {
     const root = tree({ 'a.inc': '', 'include/a.inc': '' });

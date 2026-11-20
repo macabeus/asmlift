@@ -26,9 +26,10 @@
 //   - the file defines the label once and marks it `.weak` nowhere;
 //   - the unit's object defines `<name>` as one non-weak Thumb FUNC, as long as its ELF range
 //     (elf-bodies.ts `functionRange` on both);
-//   - the text reads as the bytes it assembles to: the header's and the file's `.include` chain
-//     resolves the way gas resolves it (asm-includes.ts), and no statement of the file, nor any word
-//     of the header, names a macro that chain, the header or the file defines. A macro under an
+//   - the text reads as the bytes it assembles to: the header is the allowlisted C form
+//     ({@link headerIncludes}), the compile command carries no flag asm-includes.ts refuses, the
+//     header's and the file's `.include` chain resolves the way gas resolves it (asm-includes.ts),
+//     and no statement of the file names a macro that chain or the file defines. A macro under an
 //     instruction's name (`.macro mov rd, imm` / `add \rd, \imm`) makes gas assemble a line as
 //     another instruction, and the core reads the file's lines as written. The function-marker
 //     macros the Thumb frontend reads (`thumb_func_start`, `thumb_func_end`, …: kl2dct's and pret's
@@ -47,10 +48,17 @@
 // #378), so a second reading of the same bytes adds nothing.
 import type { CalleeBody } from '@asmlift/core/frontend/callee-body';
 import { createRunner } from '@match-kit/compiler';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 
-import { type IncludeSearch, definedMacros, includeOperands, readIncludes } from './asm-includes';
+import {
+  type IncludeSearch,
+  definedMacros,
+  includeOperands,
+  isPlainPath,
+  readIncludes,
+  resolveInclude,
+} from './asm-includes';
 import { renderCc } from './compile-command';
 import { type ElfImage, type FunctionRange, calleeAt, functionRange, readElfImage } from './elf-bodies';
 
@@ -321,26 +329,67 @@ const isMarker = (name: string, bodies: ReadonlyArray<readonly string[] | undefi
   );
 };
 
-/** Whether the core reads the callee's `text` as the bytes the compile of `header` plus that file
- *  assembles (see the header): the include chain of both resolves under `search`, and no statement
- *  of the file, nor any word of the header, calls a macro other than a {@link MARKER_MACROS} one. */
-export function readsAsAssembled(header: string, text: string, search: IncludeSearch): boolean {
-  // the header is C: an `#include` brings text this reader does not follow
-  if (/^\s*#\s*include\b/m.test(header)) {
-    return false;
-  }
-  // its `.include`s are inside strings (`asm(".include \"include/macros.inc\"\n")`), but for the
-  // INCLUDE_ASM macro's own, whose path its arguments spell: that one is the file
-  const headerPaths: string[] = [];
-  for (const line of header.split('\n')) {
-    for (const m of line.matchAll(/(?<![\w.$])\.include(?![\w.$])(.*)/gi)) {
-      const literal = m[1].match(/^\s+\\"([^"\\\n]+)\\"/);
-      if (literal !== null) {
-        headerPaths.push(literal[1]);
-      } else if (!(/^\s+\\""/.test(m[1]) && /^\s*#\s*define\s+INCLUDE_ASM\b/.test(line))) {
-        return false;
-      }
+// THE HEADER IS C, and what gas reads of it is what the preprocessor and the compiler make of it:
+// string concatenation, escapes, `#import`, macros, a command's `-include`. No scan of its source
+// recovers that, so the header is an ALLOWLIST (fail-closed by construction): every line is blank, a
+// whole-line comment, an include guard (`#ifndef X` then `#define X`, and `#endif`), the INCLUDE_ASM
+// `#define` in the one form {@link INCLUDE_ASM_DEFINE} reads, or exactly
+// `asm(".include \"<plain path>\"\n");` (asm-includes.ts `isPlainPath`). Anything else gives no body.
+const HEADER_STATEMENT = String.raw`(?:\.pushsection \.text|\.popsection|\.syntax (?:unified|divided)|\.text)\\n`;
+/** `#define INCLUDE_ASM(DIR, NAME) asm("<statements>.include \"" DIR "/" #NAME ".s\"\n<statements>")`,
+ *  each statement one of {@link HEADER_STATEMENT} (kl2dct's define, and the bare one). */
+const INCLUDE_ASM_DEFINE = new RegExp(
+  String.raw`^#define INCLUDE_ASM\((\w+), ?(\w+)\) asm\("(?:${HEADER_STATEMENT})*\.include \\"" \1 "/" #\2 "\.s\\"\\n(?:${HEADER_STATEMENT})*"\);?$`,
+);
+const HEADER_INCLUDE = /^asm\("\.include \\"([^"\\]+)\\"\\n"\);$/;
+
+/** The files the header `.include`s, in order, where it is the allowlisted form above. */
+export function headerIncludes(header: string): string[] | undefined {
+  const out: string[] = [];
+  let guard: string | undefined;
+  for (const raw of header.split('\n')) {
+    const line = raw.trim();
+    if (line.endsWith('\\') || line.includes('??')) {
+      return undefined; // a line splice (or a trigraph's) joins the next line to this one
     }
+    const expected = guard;
+    guard = undefined;
+    if (line === '') {
+      guard = expected;
+      continue;
+    }
+    if (/^\/\/.*$/.test(line) || /^\/\*(?:(?!\*\/).)*\*\/$/.test(line)) {
+      guard = expected;
+      continue;
+    }
+    const ifndef = line.match(/^#ifndef (\w+)$/);
+    if (ifndef) {
+      guard = ifndef[1];
+      continue;
+    }
+    if (line === '#endif' || (expected !== undefined && line === `#define ${expected}`)) {
+      continue;
+    }
+    if (INCLUDE_ASM_DEFINE.test(line)) {
+      continue;
+    }
+    const inc = line.match(HEADER_INCLUDE);
+    if (inc === null || !isPlainPath(inc[1])) {
+      return undefined;
+    }
+    out.push(inc[1]);
+  }
+  return out;
+}
+
+/** Whether the core reads the callee's `text` as the bytes the compile of `header` plus that file
+ *  assembles (see the header): the header is the allowlisted form, the include chain of both
+ *  resolves under `search`, and no statement of the file calls a macro other than a
+ *  {@link MARKER_MACROS} one. */
+export function readsAsAssembled(header: string, text: string, search: IncludeSearch): boolean {
+  const headerPaths = headerIncludes(header);
+  if (headerPaths === undefined) {
+    return false;
   }
   const ownPaths = includeOperands(text);
   const chain = ownPaths === undefined ? undefined : readIncludes([...headerPaths, ...ownPaths], search);
@@ -348,10 +397,8 @@ export function readsAsAssembled(header: string, text: string, search: IncludeSe
     return false;
   }
   const macros = new Map(chain.macros);
-  for (const own of [definedMacros(header), definedMacros(text)]) {
-    for (const [n, bodies] of own) {
-      macros.set(n, [...(macros.get(n) ?? []), ...bodies]);
-    }
+  for (const [n, bodies] of definedMacros(text)) {
+    macros.set(n, [...(macros.get(n) ?? []), ...bodies]);
   }
   if (macros.has('*')) {
     return false;
@@ -360,9 +407,6 @@ export function readsAsAssembled(header: string, text: string, search: IncludeSe
     const bodies = macros.get(word.toLowerCase());
     return bodies !== undefined && !isMarker(word.toLowerCase(), bodies);
   };
-  if ([...header.matchAll(/[A-Za-z_.$][\w.$]*/g)].some((w) => calls(w[0]))) {
-    return false;
-  }
   for (const line of text.split('\n')) {
     if (/^\s*\.include\s+"[^"\\\n]+"\s*(?:@.*)?$/i.test(line)) {
       continue;
@@ -480,7 +524,15 @@ export async function calleeBodiesFromProjectAsm(
       headerText.set(header, t);
     }
     const h = headerText.get(header);
-    if (h === undefined || !readsAsAssembled(h, text, search)) {
+    // the file gas includes is the one read: its `dir` a plain path, found one way by gas's search
+    const own = isPlainPath(site.dir) ? resolveInclude(`${site.dir}/${callee}.s`, search) : undefined;
+    let read: string | undefined;
+    try {
+      read = realpathSync(site.asm);
+    } catch {
+      read = undefined;
+    }
+    if (h === undefined || own === undefined || own !== read || !readsAsAssembled(h, text, search)) {
       continue;
     }
     const object = await compile(`#include "${header}"\nINCLUDE_ASM("${site.dir}", ${callee});\n`);

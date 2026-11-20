@@ -22,12 +22,22 @@
 // toward a name more, never one fewer. `*` stands for a name this reader cannot read (`.macro \x`,
 // `x: y .macro`), and matches every name.
 //
-// Every `.include` must be read the same way: one whose operand is not a plain quoted path
-// (`.include \x` in a macro body, a path built from a symbol), one no directory holds, one two
-// directories hold, and one that includes a file already on the chain (gas recurses until it
-// fails) each make the whole chain no answer, and the caller then gives no answer either.
+// Every `.include` must be read the same way: one whose operand is not a plain path (see
+// {@link isPlainPath}: `.include \x` in a macro body, a path built from a symbol, an absolute path, a
+// `..` component), one no directory holds, one two directories hold, and one that includes a file
+// already on the chain (gas recurses until it fails) each make the whole chain no answer, and the
+// caller then gives no answer either.
+//
+// A `..` component is refused rather than resolved: the kernel walks `lnk/../x` through the link
+// `lnk` points at, and a lexical `resolve` folds it to `./x`, another file (measured). With no `..`,
+// the lexical join and the kernel's walk name the same file, and its realpath is the answer.
+//
+// THE COMMAND IS READ FAIL-CLOSED ({@link includeSearchFromCommand}): every flag that adds a file or a
+// search directory the compile reads, other than the `-I` forms read there, gives no search at all.
+// KNOWN GAP: a compile command that runs a script (`sh build.sh`) whose own text writes an `.include`
+// or passes a flag is opaque here; only the command's own words are read.
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
+import { resolve } from 'node:path';
 
 /** Where gas looks for an included file: the directory it runs in, then each `-I` in order. */
 export interface IncludeSearch {
@@ -35,30 +45,63 @@ export interface IncludeSearch {
   dirs: readonly string[];
 }
 
+/** A relative path of plain characters with no `..` component: one the lexical join and the
+ *  kernel's walk read as the same file. */
+export function isPlainPath(path: string): boolean {
+  return /^[\w.+/-]+$/.test(path) && !path.startsWith('/') && !path.split('/').includes('..');
+}
+
+// THE FLAGS OF A COMPILE COMMAND, in one place. Accepted: `-I <dir>`, `-I<dir>` and `-I"<dir>"`, where
+// `<dir>` is plain characters with no `..` component (absolute allowed); they are the search
+// directories, in order. Refused (no search, so no body): every other include-path or include-file
+// flag, which adds a directory or a file this reader does not follow: gcc's `-i…` family
+// (`-include`, `-imacros`, `-iquote`, `-isystem`, `-idirafter`, `-iprefix`, …), `--include…`,
+// flags handed to the assembler or preprocessor (`-Wa,`, `-Wp,`, `-Xassembler`, `-Xpreprocessor`),
+// a response file (`@file`), a `-D`/`-U` naming anything with `asm` in it (it would rewrite the
+// header's `asm(…)` or INCLUDE_ASM), and an `-I` whose directory is not plain (`-I $(D)`, `-I-`).
+const REFUSED_FLAG = /^(?:-i|--include|-Wa,|-Wp,|-Xassembler|-Xpreprocessor|@)/;
+const PLAIN_DIR = (d: string) => /^[\w.+/-]+$/.test(d) && d !== '-' && !d.split('/').includes('..');
+
 /** The `-I` directories a compile command and its flags spell, in order, resolved against `cwd`;
- *  undefined where one is not a plain word (`-I $(DIR)`, `-I{{x}}`), since the directory gas then
- *  searches is not known. */
+ *  undefined where the command carries any flag the list above refuses. */
 export function includeSearchFromCommand(
   cwd: string,
   command: string,
   flags: readonly string[] = [],
 ): IncludeSearch | undefined {
+  const words = `${command} ${flags.join(' ')}`.split(/\s+/).filter((w) => w !== '');
   const dirs: string[] = [];
-  for (const m of `${command} ${flags.join(' ')}`.matchAll(/(?<=^|\s)-I(?:\s+|(?=\S))(\S+)/g)) {
-    const raw = m[1].replace(/^(["'])(.*)\1$/, '$2');
-    if (!/^[\w./+-]+$/.test(raw)) {
+  for (let k = 0; k < words.length; k++) {
+    const w = words[k];
+    if (REFUSED_FLAG.test(w)) {
       return undefined;
     }
-    dirs.push(resolve(cwd, raw));
+    if (/^-[DU]/.test(w)) {
+      const name = w.length > 2 ? w.slice(2) : (words[k + 1] ?? '');
+      if (/asm/i.test(name)) {
+        return undefined;
+      }
+      continue;
+    }
+    if (w.startsWith('-I')) {
+      const raw = (w.length > 2 ? w.slice(2) : (words[++k] ?? '')).replace(/^"(.*)"$/, '$1');
+      if (!PLAIN_DIR(raw)) {
+        return undefined;
+      }
+      dirs.push(resolve(cwd, raw));
+    }
   }
   return { cwd, dirs };
 }
 
-/** The one file `path` names under `search`; undefined where none does or two different ones do. */
+/** The one file `path` names under `search`; undefined where it is no plain path, or none or two
+ *  different files answer it. */
 export function resolveInclude(path: string, search: IncludeSearch): string | undefined {
-  const tries = isAbsolute(path) ? [path] : [search.cwd, ...search.dirs].map((d) => resolve(d, path));
+  if (!isPlainPath(path)) {
+    return undefined;
+  }
   const found = new Set<string>();
-  for (const t of tries) {
+  for (const t of [search.cwd, ...search.dirs].map((d) => resolve(d, path))) {
     try {
       if (existsSync(t) && statSync(t).isFile()) {
         found.add(realpathSync(t));
@@ -76,7 +119,7 @@ export function includeOperands(text: string): string[] | undefined {
   const out: string[] = [];
   for (const m of text.matchAll(/(?<![\w.$])\.include(?![\w.$])(.*)/gi)) {
     const op = m[1].match(/^\s+"([^"\\\n]+)"\s*(?:[@#;].*)?$/);
-    if (op === null) {
+    if (op === null || !isPlainPath(op[1])) {
       return undefined;
     }
     out.push(op[1]);
