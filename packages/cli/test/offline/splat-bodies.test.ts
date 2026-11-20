@@ -1,5 +1,5 @@
-// A GUESSED THUMB CALLEE'S BODY READ OFF THE PROJECT'S OWN ASSEMBLY (src/splat-bodies.ts), where the
-// project's own compile command shows the file assembles to the linked code.
+// A GUESSED THUMB CALLEE'S BODY READ OFF THE PROJECT'S OWN ASSEMBLY (src/splat-bodies.ts), where
+// asmlift's own assembly of the file is the linked code.
 //
 // fixtures/splat-bodies is a project: linked.elf is built from linked.s, and each
 // asm/nonmatchings/m/<name>.s assembles to obj/<name>.o:
@@ -10,8 +10,8 @@
 // sel dispatches through a jump table, and selstale's file is sel with the table's second word one
 // instruction past the case the linked table enters. stale's file moves 2 into r0 where the linked
 // code moves 1. wk's file marks it `.weak`. wrongbl's
-// file calls helper2 where the linked code calls helper. dup is included by two units. The compile
-// command copies the object of the name its unit includes, as the project's assembler would write it.
+// file calls helper2 where the linked code calls helper. dup is included by two units. asmlift's
+// assembly is faked by obj/<name>.o (splat-bodies-fake.ts; test/matching checks it against GNU as).
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,7 +19,15 @@ import { afterAll, describe, expect, test } from 'vitest';
 
 import { readElfImage } from '../../src/elf-bodies';
 import { runCli } from '../../src/main';
-import { assemblesToLinked, definesOnce, includingUnit, projectAsm } from '../../src/splat-bodies';
+import {
+  type BodyAssemble,
+  assembleWith,
+  assemblesToLinked,
+  definesOnce,
+  includingUnit,
+  projectAsm,
+} from '../../src/splat-bodies';
+import { fakeAssembly, runWithAssembly } from './splat-bodies-fake';
 
 const FIXTURE = join(import.meta.dirname, 'fixtures/splat-bodies');
 const LINKED = readElfImage(readFileSync(join(FIXTURE, 'linked.elf')))!;
@@ -28,7 +36,8 @@ const object = (name: string) => readFileSync(join(FIXTURE, 'obj', `${name}.o`))
 const scratchDirs: string[] = [];
 afterAll(() => scratchDirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
 
-/** A copy of the fixture project whose decomp.yaml states `compiler`, or none. */
+/** A copy of the fixture project whose decomp.yaml states a compile command (which opts a project
+ *  into its bodies being read), or none. */
 const project = (compiler: string | undefined, asm: string) => {
   const root = mkdtempSync(join(tmpdir(), 'asmlift-splat-bodies-test-'));
   scratchDirs.push(root);
@@ -39,13 +48,9 @@ const project = (compiler: string | undefined, asm: string) => {
       (compiler === undefined ? '' : `    compiler: ${JSON.stringify(compiler)}\n`),
   );
   writeFileSync(join(root, 'f.s'), asm);
-  writeFileSync(join(root, 'copy.sh'), COPY_SH);
   return join(root, 'f.s');
 };
-// the name the generated unit includes, and its object copied to the output, by a script the
-// command runs: the command itself must be shell-literal (asm-includes.ts)
-const COPY = 'sh copy.sh {{inputPath}} {{outputPath}}';
-const COPY_SH = 'n=$(sed -n \'s/^INCLUDE_ASM(.*, \\(.*\\));$/\\1/p\' "$1"); cp obj/$n.o "$2"\n';
+const ASSEMBLE = fakeAssembly(join(FIXTURE, 'obj'));
 
 describe('a project file is a body only where its object is the linked code', () => {
   test('the one unit and the one header', () => {
@@ -93,9 +98,9 @@ describe('CLI (agbcc): a guessed Thumb callee is bounded by its proven body in t
     `\tbl\t${callee}\n\tpop\t{r1}\n\tbx\tr1\n.L3:\n\t.word\tgp\n`;
   // a run with the project's root spelt `<root>`, and without the `[flags]` notes a compile command
   // adds whether or not any body is read
-  const run = async (compiler: string | undefined, callee: string) => {
-    const input = project(compiler, stored(callee));
-    const r = await runCli([input]);
+  const run = async (assemble: BodyAssemble | undefined, callee: string) => {
+    const input = project(assemble === undefined ? undefined : 'cc {{inputPath}} -o {{outputPath}}', stored(callee));
+    const r = assemble === undefined ? await runCli([input]) : await runWithAssembly([input], assemble);
     const root = join(input, '..');
     const stderr = r.stderr
       .split('\n')
@@ -109,23 +114,22 @@ describe('CLI (agbcc): a guessed Thumb callee is bounded by its proven body in t
     ['rd1', 'return rd1(3);'],
   ])('%s', async (callee, proven) => {
     expect((await run(undefined, callee)).stdout).toContain(`return ${callee}(3, &gp);`);
-    expect((await run(COPY, callee)).stdout).toContain(proven);
+    expect((await run(ASSEMBLE, callee)).stdout).toContain(proven);
   });
   // the note names the project file a body was read from, not the ELF whose halfwords bound nothing
   test('the [proto] note names the project file that bounded the guess', async () => {
-    const { stderr } = await run(COPY, 'rd1');
+    const { stderr } = await run(ASSEMBLE, 'rd1');
     expect(stderr).toContain(
       "checked against what its body in the project's asm reads, where that file assembles to the code in " +
         'tools.asmlift.elf: rd1 (asm/nonmatchings/m/rd1.s, at most 1 argument word)',
     );
     expect(stderr).not.toContain('what its body in tools.asmlift.elf reads');
   });
-  // each refusal leaves the run as it is with no compile command to prove a body by
+  // each refusal leaves the run as it is with no body read
   test.each(['stale', 'wk', 'wrongbl', 'dup'])('%s keeps today\u2019s output', async (callee) => {
-    expect(await run(COPY, callee)).toEqual(await run(undefined, callee));
+    expect(await run(ASSEMBLE, callee)).toEqual(await run(undefined, callee));
   });
-  test('a compile command whose assembler is not there keeps today\u2019s output', async () => {
-    const missing = 'asmlift-no-such-assembler {{inputPath}} -o {{outputPath}}';
-    expect(await run(missing, 'rd0')).toEqual(await run(undefined, 'rd0'));
+  test('a host with no assembler keeps today\u2019s output', async () => {
+    expect(await run(assembleWith('asmlift-no-such-assembler'), 'rd0')).toEqual(await run(undefined, 'rd0'));
   });
 });

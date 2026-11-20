@@ -39,7 +39,6 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { includeSearchFromCommand } from './asm-includes';
 import { guessedArityNote } from './callees';
 import { type CommandCompilers, compilersFromCommand } from './compile-command';
 import { type AsmliftToolConfig, type UnitCompiler, asmliftBlock, resolveTarget } from './config';
@@ -70,7 +69,7 @@ import type { RankedResult } from './rank';
 // it either, because that module loads the objdiff engine and the note above `./rank` is about
 // exactly that edge.
 import { rankedSummaryLine, scoreOf, threwLine, threwStep } from './score-format';
-import { type UnitCompile, calleeBodiesFromProjectAsm, unitCompileFromCommand } from './splat-bodies';
+import { type BodyAssemble, assembleWith, calleeBodiesFromProjectAsm } from './splat-bodies';
 
 export { scoreOf } from './score-format';
 
@@ -193,9 +192,9 @@ export interface ObjInput {
   /** a range of `tools.asmlift.elf`, for a guessed callee's body (elf-bodies.ts); absent ⇒ the
    *  target's objdump */
   disasmRange?: RangeDisasm;
-  /** one of the project's translation units compiled with `tools.asmlift.compiler`, for a Thumb
-   *  callee's body read off the project's assembly (splat-bodies.ts); absent ⇒ that command */
-  compileUnit?: UnitCompile;
+  /** asmlift's own assembly of a project file, for a Thumb callee's body read off the project's
+   *  assembly (splat-bodies.ts); absent ⇒ GNU as (`assembleWith`) */
+  assembleBody?: BodyAssemble;
 }
 
 export interface CliResult {
@@ -810,20 +809,18 @@ export async function runCli(
       );
       warn += read.warnings.join('');
       // a Thumb range's halfwords bound no argument register: its body in the project's assembly does,
-      // where the project's own build proves it is the linked code (splat-bodies.ts)
+      // where asmlift's own assembly of it is the linked code (splat-bodies.ts). Only for a project that
+      // states a compile command: it is how a project says its own build is what asmlift may compare
+      // against, though the proof itself runs none of it.
       const thumb = Object.keys(read.bodies).filter((c) => read.bodies[c].kind === 'thumb');
       const image =
         thumb.length > 0 && toolCfg.compiler !== undefined ? readElfImage(readFileSync(elfPath)) : undefined;
       if (image !== undefined) {
-        const compile =
-          objInput?.compileUnit ??
-          unitCompileFromCommand(toolCfg.compiler!, configDir!, flagsResolution.fill, flagsResolution.cc);
         const project = await calleeBodiesFromProjectAsm(
           configDir!,
           image,
           thumb,
-          compile,
-          includeSearchFromCommand(configDir!, toolCfg.compiler!, flagsResolution.fill),
+          objInput?.assembleBody ?? assembleWith(),
         );
         Object.assign(read.bodies, project.bodies);
         calleeBodyFiles = new Map(Object.entries(project.files));
