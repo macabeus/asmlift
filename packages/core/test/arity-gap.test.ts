@@ -14,20 +14,17 @@ describe('where an ABI can leave an argument register empty below a filled one',
   test('an 8-byte argument skips an odd word on O32 and PowerPC, and a leading float shadows O32 words', () => {
     expect(argRegisterHoles(ARMV4T_AGBCC)).toEqual({
       skippable: new Set(),
-      leadingFloatShadow: false,
       floatShadowed: new Set(),
     });
     for (const t of [MIPS_IDO, MIPS_GCC]) {
       // two leading slots, each a double's two words: IDO, `g(double, float, int)` leaves a2 empty under a3
       expect(argRegisterHoles(t)).toEqual({
         skippable: new Set(['a1', 'a3']),
-        leadingFloatShadow: true,
         floatShadowed: new Set(['a0', 'a1', 'a2', 'a3']),
       });
     }
     expect(argRegisterHoles(PPC_MWCC)).toEqual({
       skippable: new Set(['r4', 'r6', 'r8', 'r10']),
-      leadingFloatShadow: false,
       floatShadowed: new Set(),
     });
   });
@@ -36,17 +33,17 @@ describe('where an ABI can leave an argument register empty below a filled one',
     const holes = Object.fromEntries(
       Object.entries(TOOLCHAIN_TARGETS).map(([id, r]) => {
         const h = argRegisterHoles(r.description);
-        return [id, [[...h.skippable].join(','), h.leadingFloatShadow, [...h.floatShadowed].join(',')]];
+        return [id, [[...h.skippable].join(','), [...h.floatShadowed].join(',')]];
       }),
     );
     expect(holes).toMatchObject({
-      agbcc: ['', false, ''],
-      'ido7.1': ['a1,a3', true, 'a0,a1,a2,a3'],
-      'gcc2.7.2kmc': ['a1,a3', true, 'a0,a1,a2,a3'],
-      'gcc2.7.2': ['a1,a3', true, 'a0,a1,a2,a3'],
-      mwcc_242_81: ['r4,r6,r8,r10', false, ''],
-      mwcc_233_163n: ['r4,r6,r8,r10', false, ''],
-      mwcc_247_107: ['r4,r6,r8,r10', false, ''],
+      agbcc: ['', ''],
+      'ido7.1': ['a1,a3', 'a0,a1,a2,a3'],
+      'gcc2.7.2kmc': ['a1,a3', 'a0,a1,a2,a3'],
+      'gcc2.7.2': ['a1,a3', 'a0,a1,a2,a3'],
+      mwcc_242_81: ['r4,r6,r8,r10', ''],
+      mwcc_233_163n: ['r4,r6,r8,r10', ''],
+      mwcc_247_107: ['r4,r6,r8,r10', ''],
     });
   });
 });
