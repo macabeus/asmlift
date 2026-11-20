@@ -691,6 +691,45 @@ describe('on Thumb (agbcc), a marker ceiling asks only the blocks filled so far'
   });
 });
 
+// A KEPT DISPATCH'S DEFAULT EDGE IS NO PATH: its switch is `exhaustive`, and the bounds test's `bhi` is
+// the only way into the default (frontend/ssa.ts `holdsValueOnFilledPaths`). agbcc, `void kd(s32 *p,
+// s32 x, s32 d, s32 c) { s32 y = x - d; if (c) gOut = d - 37; else switch (d) { case 1: p[0] = 1; break;
+// … case 8: p[7] = 8; break; default: g(7, y); break; } switch (d - 37) { … } }`: PRE puts `d - 37` in
+// the first dispatch, so it is kept, and its block writes the table's base to r1. `y` is in r1 on the
+// bounds test's path into `.L14: mov r0, #7; bl g`, so a ceiling at r1 would lift `g(7)` and drop it.
+describe("on Thumb (agbcc), a kept dispatch's never-taken default edge brings no marker", () => {
+  const kd =
+    '\t.code\t16\n.text\n\t.align\t2, 0\n\t.thumb_func\nkd:\n\tpush\t{r4, r5, lr}\n' +
+    '\tadd\tr5, r0, #0\n\tadd\tr4, r2, #0\n\tsub\tr1, r1, r4\n\tcmp\tr3, #0\n' +
+    '\tbeq\t.L3\t@cond_branch\n\tldr\tr1, .L28\n\tadd\tr0, r4, #0\n\tsub\tr0, r0, #0x25\n' +
+    '\tstr\tr0, [r1]\n\tadd\tr2, r0, #0\n\tb\t.L4\n.L29:\n\t.align\t2, 0\n.L28:\n\t.word\tgOut\n' +
+    '.L3:\n\tsub\tr0, r4, #0x1\n\tcmp\tr0, #0x7\n\tbhi\t.L14\t@cond_branch\n\tlsl\tr0, r0, #0x2\n' +
+    '\tldr\tr1, .L30\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tadd\tr2, r4, #0\n' +
+    '\tsub\tr2, r2, #0x25\n\tmov\tpc, r0\n.L31:\n\t.align\t2, 0\n.L30:\n\t.word\t.L15\n' +
+    '\t.align\t2, 0\n\t.align\t2, 0\n.L15:\n\t.word\t.L6\n\t.word\t.L7\n\t.word\t.L8\n' +
+    '\t.word\t.L4\n\t.word\t.L10\n\t.word\t.L11\n\t.word\t.L12\n\t.word\t.L13\n.L6:\n' +
+    '\tmov\tr0, #0x1\n\tstr\tr0, [r5]\n\tb\t.L27\n.L7:\n\tmov\tr0, #0x2\n\tstr\tr0, [r5, #0x4]\n' +
+    '\tb\t.L27\n.L8:\n\tmov\tr0, #0x3\n\tstr\tr0, [r5, #0x8]\n\tb\t.L27\n.L10:\n\tmov\tr0, #0x5\n' +
+    '\tstr\tr0, [r5, #0x10]\n\tb\t.L27\n.L11:\n\tmov\tr0, #0x6\n\tstr\tr0, [r5, #0x14]\n' +
+    '\tb\t.L27\n.L12:\n\tmov\tr0, #0x7\n\tstr\tr0, [r5, #0x18]\n\tb\t.L27\n.L13:\n' +
+    '\tmov\tr0, #0x8\n\tstr\tr0, [r5, #0x1c]\n\tb\t.L27\n.L14:\n\tmov\tr0, #0x7\n\tbl\tg\n.L27:\n' +
+    '\tadd\tr2, r4, #0\n\tsub\tr2, r2, #0x25\n.L4:\n\tcmp\tr2, #0x7\n\tbhi\t.L16\t@cond_branch\n' +
+    '\tlsl\tr0, r2, #0x2\n\tldr\tr1, .L32\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n' +
+    '.L33:\n\t.align\t2, 0\n.L32:\n\t.word\t.L25\n\t.align\t2, 0\n\t.align\t2, 0\n.L25:\n' +
+    '\t.word\t.L17\n\t.word\t.L18\n\t.word\t.L19\n\t.word\t.L20\n\t.word\t.L21\n\t.word\t.L22\n' +
+    '\t.word\t.L23\n\t.word\t.L24\n.L17:\n\tmov\tr0, #0x1\n\tstr\tr0, [r5, #0x24]\n\tb\t.L16\n' +
+    '.L18:\n\tmov\tr0, #0x2\n\tstr\tr0, [r5, #0x28]\n\tb\t.L16\n.L19:\n\tmov\tr0, #0x3\n' +
+    '\tstr\tr0, [r5, #0x2c]\n\tb\t.L16\n.L20:\n\tmov\tr0, #0x4\n\tstr\tr0, [r5, #0x30]\n' +
+    '\tb\t.L16\n.L21:\n\tmov\tr0, #0x5\n\tstr\tr0, [r5, #0x34]\n\tb\t.L16\n.L22:\n' +
+    '\tmov\tr0, #0x6\n\tstr\tr0, [r5, #0x38]\n\tb\t.L16\n.L23:\n\tmov\tr0, #0x7\n' +
+    '\tstr\tr0, [r5, #0x3c]\n\tb\t.L16\n.L24:\n\tmov\tr0, #0x8\n\tstr\tr0, [r5, #0x40]\n.L16:\n' +
+    '\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n.Lfe1:\n\t.size\t f,.Lfe1-f\n\n';
+  test("the default arm's call is not capped at the table base the dispatch block left in r1", () => {
+    const prototypes: Prototypes = { kd: { params: ['s32 *', 's32', 's32', 's32'], returnsVoid: true } };
+    expect(() => decompile('kd', kd, ARMV4T_AGBCC, { prototypes })).toThrow(/a case of the kept jump table reads r1/);
+  });
+});
+
 // A WRITE ANOTHER BLOCK MADE, ASKED ON O32: whether an instruction read it is asked on every path out
 // of it, and the call's own block is not asked (frontend/call-plan.ts `leftover`)
 describe('on O32, a write another block made is a leftover where an instruction read it', () => {
