@@ -45,7 +45,7 @@ import { type AsmliftToolConfig, type UnitCompiler, asmliftBlock, resolveTarget 
 import { declaredBlock, indentedDeclarations } from './declare';
 import { isDecline } from './decline';
 import { moduleHasUnits, objdiffAbove, readObjdiffUnits, unitDefining } from './dtk-unit';
-import { type RangeDisasm, calleeBodiesFromElf, elfBodyCallees } from './elf-bodies';
+import { type RangeDisasm, calleeBodiesFromElf, elfBodyCallees, readElfImage } from './elf-bodies';
 import { type FlagsInput, resolveFlags } from './flags';
 import { moduleElfPath } from './module-elf';
 import {
@@ -69,6 +69,7 @@ import type { RankedResult } from './rank';
 // it either, because that module loads the objdiff engine and the note above `./rank` is about
 // exactly that edge.
 import { rankedSummaryLine, scoreOf, threwLine, threwStep } from './score-format';
+import { type UnitCompile, calleeBodiesFromProjectAsm, unitCompileFromCommand } from './splat-bodies';
 
 export { scoreOf } from './score-format';
 
@@ -191,6 +192,9 @@ export interface ObjInput {
   /** a range of `tools.asmlift.elf`, for a guessed callee's body (elf-bodies.ts); absent ⇒ the
    *  target's objdump */
   disasmRange?: RangeDisasm;
+  /** one of the project's translation units compiled with `tools.asmlift.compiler`, for a Thumb
+   *  callee's body read off the project's assembly (splat-bodies.ts); absent ⇒ that command */
+  compileUnit?: UnitCompile;
 }
 
 export interface CliResult {
@@ -802,6 +806,17 @@ export async function runCli(
           ((elf, t, section, start, stop) => disasmRange(elf, t, section, start, stop, toolCfg?.objdump)),
       );
       warn += read.warnings.join('');
+      // a Thumb range's halfwords bound no argument register: its body in the project's assembly does,
+      // where the project's own build proves it is the linked code (splat-bodies.ts)
+      const thumb = Object.keys(read.bodies).filter((c) => read.bodies[c].kind === 'thumb');
+      const image =
+        thumb.length > 0 && toolCfg.compiler !== undefined ? readElfImage(readFileSync(elfPath)) : undefined;
+      if (image !== undefined) {
+        const compile =
+          objInput?.compileUnit ??
+          unitCompileFromCommand(toolCfg.compiler!, configDir!, flagsResolution.fill, flagsResolution.cc);
+        Object.assign(read.bodies, await calleeBodiesFromProjectAsm(configDir!, image, thumb, compile));
+      }
       calleeBodies = Object.keys(read.bodies).length === 0 ? undefined : read.bodies;
     }
   }
