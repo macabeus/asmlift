@@ -258,7 +258,7 @@ describe('a return the body left the return register untouched for', () => {
     expect(boundsOf(caller, t, undefined, {}, { id: { kind: 'listing', text: id } })('id')).toBe(1);
   });
   // agbcc's interworking return `pop {r0}; bx r0` branches through r0: it hands back the return
-  // address, not the caller's first argument (kl2dct sub_08047848 loads r0 first and was bounded at 1)
+  // address, not the caller's first argument (kl2dct sub_08047848 loads r0 first)
   test('agbcc: a return through r0 hands back no argument', () => {
     const t = TOOLCHAIN_TARGETS.agbcc.description;
     const via =

@@ -594,8 +594,8 @@ describe('on Thumb (agbcc), a callee body in the same input bounds the arity gue
 // (i) { case 0: gx = 5; cb(); break; … case 2: cb(); break; case 4: gB = 2; cb(); break; … } }`: agbcc
 // cross-jumps cases 0, 2 and 4 into one `bl cb` that case 2's dispatch edge enters directly, so on
 // that path r0 holds the case's code address and r1 the table's, and no argument of the one call is
-// there. The guess stopped at nothing and read the marker; the store's 5 that case 0 leaves in r0 is
-// the same bytes as `cb(5)` only where nothing proves otherwise.
+// there. With no ceiling the guess reads the marker; the store's 5 that case 0 leaves in r0 is the
+// same bytes as `cb(5)` only where nothing proves otherwise.
 describe("on Thumb (agbcc), a dispatch's marker in an argument register caps the arity guess", () => {
   const jtMark =
     '\t.code\t16\n\t.text\n\t.thumb_func\n' +

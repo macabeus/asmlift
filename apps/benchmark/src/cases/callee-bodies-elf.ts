@@ -9,8 +9,8 @@
 // callee's body off the project's `.s` the build proves is the linked code (cli splat-bodies.ts),
 // which only a compile with that command proves. This reader does not compile, so it freezes none of
 // those: it REFUSES a project where that pass has a file to read (`projectAsmCandidates`), rather
-// than freezing less than the CLI reads. No bench project has one today (kleod has no INCLUDE_ASM and
-// names no compiler); one that does needs those bodies frozen here first.
+// than freezing less than the CLI reads (kleod has no INCLUDE_ASM and names no compiler). A project
+// that has one needs those bodies frozen here first.
 import { moduleOf } from '@asmlift/bench-schema';
 import { asmliftBlock } from '@asmlift/cli/config';
 import { calleeBodiesFromElf, readElfImage } from '@asmlift/cli/elf-bodies';

@@ -116,12 +116,11 @@ export interface SourceRead {
  *     $f12/$f14 and moves x into a3, a2 untouched; undeclared, the float is promoted to a double and
  *     x goes to 16(sp). A guessed callee may be one the source declared and the lift was not told of.
  *     PowerPC's floats take no general word (`'separate'`), so they leave no hole there. The set is
- *     always a prefix from the first register: `decideGap` asks it of a gap starting there, and a
- *     reader asking of one register by itself (call-plan.ts `maySkip`: the marker `ceiling` and
- *     `parked`, each of which drops every word above the register it stops at) of that register.
- *  Its readers are the guessed-arity gap (frontend/call-plan.ts `decideGap`) and the dispatch stops
- *  (`maySkip`). A register missing here is one the gap refuses on but the stops cap at, so the stops
- *  are sound only as far as this is complete. */
+ *     always a prefix from the first register.
+ *  Its readers are the guessed-arity gap (frontend/call-plan.ts `decideGap`, of a gap starting at the
+ *  first register) and the dispatch stops (`maySkip`: the marker `ceiling` and `parked`, each of which
+ *  drops every word above the register it stops at). A hole missing here is a register those stops
+ *  cap at below a real argument, so they are sound only as far as this is complete. */
 export function argRegisterHoles(target: Pick<TargetDescription, 'argRegs' | 'evenWordAlignedArgs' | 'fpu'>): {
   skippable: ReadonlySet<string>;
   floatShadowed: ReadonlySet<string>;
