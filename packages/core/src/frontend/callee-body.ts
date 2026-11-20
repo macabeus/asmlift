@@ -27,8 +27,8 @@
 // argument: `void *id(void *p) { return p; }` is a lone `blr` and `bx lr`, which no instruction reads,
 // and its lift returns nothing and counts no parameter. So a return the lift left bare, on a path
 // from the entry that makes no call (a call destroys the register), counts the first argument word
-// as read, unless the callee's entry declares a void return. Not where the frontend leaves a return
-// bare only when it branched through that register (`Frontend.bareReturnClobbersReturnReg`): agbcc's
+// as read, unless the callee's entry declares a void return. Not a return the frontend left bare
+// because it branched through that register (`ret` `viaReturnReg`, ir/opcodes.ts): agbcc's
 // `pop {r0}; bx r0` hands back the return address, and the Thumb frontend reads r0 at every other
 // return, so a first argument handed back there is already a parameter. KNOWN GAP: a return in a
 // register PAIR (r0:r1, r3:r4) that nothing declares is counted for its first register only.
@@ -131,8 +131,7 @@ export function asksCalleeBody(entry: FnProto | undefined): boolean {
  *  `lift` lifts one function of a text (the input, or a body in `external`) under a table, with no
  *  bound of its own: one level of bodies is read, never the callee's callees'. `frontend` is what
  *  the target frontend says of its own lifts: its entry scan (`Frontend.entryStackWords`), asked
- *  only of a body that does not lift, and what a bare return of its means
- *  (`Frontend.bareReturnClobbersReturnReg`). */
+ *  only of a body that does not lift. */
 export function calleeBodyReads(
   self: string,
   asm: string,
@@ -140,7 +139,7 @@ export function calleeBodyReads(
   prototypes: Prototypes,
   lift: CalleeLift,
   external?: CalleeBodies,
-  frontend?: Pick<Frontend, 'entryStackWords' | 'bareReturnClobbersReturnReg'>,
+  frontend?: Pick<Frontend, 'entryStackWords'>,
 ): { bound: CalleeBodyBound; stackWords: CalleeStackWords } {
   const memo = new Map<string, BodyReads>();
   const read = (callee: string): BodyReads => {
@@ -160,7 +159,7 @@ export function calleeBodyBounds(
   prototypes: Prototypes,
   lift: CalleeLift,
   external?: CalleeBodies,
-  frontend?: Pick<Frontend, 'bareReturnClobbersReturnReg'>,
+  frontend?: Pick<Frontend, 'entryStackWords'>,
 ): CalleeBodyBound {
   return calleeBodyReads(self, asm, target, prototypes, lift, external, frontend).bound;
 }
@@ -219,22 +218,14 @@ function bodyReads(
   prototypes: Prototypes,
   lift: CalleeLift,
   external: CalleeBodies | undefined,
-  frontend: Pick<Frontend, 'entryStackWords' | 'bareReturnClobbersReturnReg'> | undefined,
+  frontend: Pick<Frontend, 'entryStackWords'> | undefined,
 ): BodyReads {
   if (callee === self || declaresAggregateReturn(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined)) {
     return {};
   }
   // a body that lifts answers both; one that does not answers its entry's loads, and no bound
   const lifted = (text: string, relocs?: readonly Reloc[]): BodyReads => {
-    const got = liftedReads(
-      callee,
-      text,
-      target,
-      prototypes,
-      lift,
-      frontend?.bareReturnClobbersReturnReg === true,
-      relocs,
-    );
+    const got = liftedReads(callee, text, target, prototypes, lift, relocs);
     // a scan of the entry's stack loads sees no register read, so where the ABI can skip an
     // argument register (`evenWordAlignedArgs`) it cannot say the registers are all arguments
     return (
@@ -274,7 +265,6 @@ function liftedReads(
   target: TargetDescription,
   prototypes: Prototypes,
   lift: CalleeLift,
-  bareReturnClobbers: boolean,
   relocs?: readonly Reloc[],
 ): BodyReads | undefined {
   const helpers = helperPrototypes(target);
@@ -313,10 +303,7 @@ function liftedReads(
         return undefined;
       }
       const passesFirst =
-        target.returnReg === target.argRegs[0] &&
-        !bareReturnClobbers &&
-        !declaresVoidReturn(table[callee]) &&
-        returnsUntouched(fn);
+        target.returnReg === target.argRegs[0] && !declaresVoidReturn(table[callee]) && returnsUntouched(fn);
       const top = Math.max(0, ...params.map((p) => (entryArgRank(p) ?? -1) + 1));
       const stack = Math.max(0, top - target.argRegs.length);
       return {
@@ -360,8 +347,9 @@ function readsEveryArgReg(fn: Fn, target: TargetDescription, forced: ReadonlySet
   return target.argRegs.every((_, k) => read.has(k));
 }
 
-/** Whether some return of `fn` hands back nothing the lift names (a bare `ret`) on a path from the
- *  entry that makes no call: there the return register still holds what the caller left in it. */
+/** Whether some return of `fn` hands back nothing the lift names (a bare `ret`, not one that branched
+ *  through the return register: `viaReturnReg`) on a path from the entry that makes no call: there the
+ *  return register still holds what the caller left in it. */
 function returnsUntouched(fn: Fn): boolean {
   const callFree = new Set<Block>();
   const work = fn.blocks.length === 0 ? [] : [fn.blocks[0]];
@@ -373,7 +361,9 @@ function returnsUntouched(fn: Fn): boolean {
     callFree.add(b);
     work.push(...successorsOf(b));
   }
-  return [...callFree].some((b) => b.ops.some((o) => o.opcode === 'ret' && o.operands.length === 0));
+  return [...callFree].some((b) =>
+    b.ops.some((o) => o.opcode === 'ret' && o.operands.length === 0 && o.attrs.viaReturnReg !== true),
+  );
 }
 
 /** WHAT A CALLEE'S BODY SAYS OF ITS STACK ARGUMENTS: one past the highest incoming stack word it is

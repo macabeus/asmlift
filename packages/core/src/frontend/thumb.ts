@@ -7853,7 +7853,9 @@ function lowerTerminator(fill: ThumbFill, cur: BlockCursor): void {
     // load PC directly. Only the register actually branched through is disqualified.
     const viaReturnReg = last.mnemonic === 'bx' && last.ops[0] === target.returnReg;
     if (viaReturnReg) {
-      irb.ops.push(mkOp('ret'));
+      // stamped, as a bare return no path wrote r0 for would hand the caller's first argument back
+      // (frontend/callee-body.ts `returnsUntouched`), and this one hands back the return address
+      irb.ops.push(mkOp('ret', { attrs: { viaReturnReg: true } }));
     } else {
       const lo = readVar(target.returnReg, bi);
       const whole = pairs.wideReturn(lo, bi);
@@ -7926,7 +7928,6 @@ export const thumbFrontend: Frontend = {
   inputFormat: 'gnu-as',
   lift,
   entryStackWords: thumbEntryWordsFromText,
-  bareReturnClobbersReturnReg: true,
 };
 
 /** Internal surface for this module's own tests, and for nothing else. `@asmlift/core` exports
