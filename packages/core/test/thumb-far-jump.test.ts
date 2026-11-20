@@ -381,6 +381,27 @@ describe('what is not provably a relay declines loud', () => {
     expect(lift(asm)).toContain('return a0 + 2;');
   });
 
+  // A macro whose name only gas's expansion spells: `.irp m, movs` / `.macro \m …` defines `movs`
+  // (the review's t2), and so does a macro that defines a macro, called as `mk movs` (t5). gas then
+  // assembles `movs r1, #0` as `adds r1, #0` (the linked probe: it stores the r1 it is handed),
+  // which read as written lifted `gp = 0;`. Any such name may be every name, so the lines after it
+  // decline; a literal name keeps its own rule (above).
+  const CAL =
+    '\tthumb_func_start cal\ncal:\n\tpush {lr}\n\tmovs r1, #0\n\tldr r2, _p\n\tstr r1, [r2]\n\tpop {r0}\n' +
+    '\tbx r0\n\t.align 2, 0\n_p: .4byte gp\n\tthumb_func_end cal\n';
+  test.each([
+    ['t2 .irp-generated name', '\t.irp m, movs\n\t.macro \\m rd, imm\n\tadds \\rd, \\imm\n\t.endm\n\t.endr\n'],
+    [
+      't5 a macro defining a macro',
+      '\t.macro mk name\n\t.macro \\name rd, imm\n\tadds \\rd, \\imm\n\t.endm\n\t.endm\n\tmk movs\n',
+    ],
+    ['a spliced name', '\t.macro mo\\()vs rd, imm\n\tadds \\rd, \\imm\n\t.endm\n'],
+  ])('%s: a macro name gas spells declines every line after it', (_, prefix) => {
+    expect(decompile('cal', CAL, ARMV4T_AGBCC).source).toContain('gp = 0;');
+    expect(() => decompile('cal', prefix + CAL, ARMV4T_AGBCC)).toThrow(FrontendUnsupportedError);
+    expect(() => decompile('cal', prefix + CAL, ARMV4T_AGBCC)).toThrow(/changes which lines are assembled/);
+  });
+
   // Comments, as gas reads them (arm-none-eabi-as checked): a `;` inside `/* … */` separates
   // nothing, and a `#` opening a statement comments out the rest of the line, `;`s included.
   // Split blindly, `# x; add r0, #1` assembled an `add` the object does not have.

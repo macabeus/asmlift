@@ -1574,6 +1574,13 @@ function decode(
       );
     }
     const defined = new Set<string>();
+    // A `.macro` whose name is not a literal word (`.macro \m`, a `\()` splice) or that sits inside
+    // a repeated or macro body (`.irp m, movs` / `.macro \m`; a macro that defines a macro) gets its
+    // name only when gas expands it, so it may be any name: from there on every statement is read as
+    // a possible macro call. `bodyDepth` counts the open `.macro`/`.irp`/`.irpc`/`.rept` bodies above
+    // the statement.
+    let anyName = false;
+    let bodyDepth = 0;
     for (const [k, line] of lines.entries()) {
       for (const [j, st] of line.statements.entries()) {
         const { debug, section } = mask.lines[k].statements[j];
@@ -1596,8 +1603,11 @@ function decode(
           for (const l of names.map((s) => s.trim().toLowerCase())) {
             if (l !== '') {
               defined.add(l);
+              anyName ||= !/^[a-z_.$][\w.$]*$/.test(l);
             }
           }
+          anyName ||= bodyDepth > 0;
+          bodyDepth++;
           continue;
         }
         // `.macro` after anything but plain labels (a quoted `"nop": .macro` names the macro `nop`)
@@ -1608,7 +1618,12 @@ function decode(
           );
         }
         const head = rest.match(/^[\w.$]+/)?.[0].toLowerCase();
-        if (code && head !== undefined && defined.has(head)) {
+        if (head !== undefined && /^\.(?:irpc?|rept)$/.test(head)) {
+          bodyDepth++;
+        } else if (head !== undefined && /^\.(?:endm|endr)$/.test(head)) {
+          bodyDepth = Math.max(0, bodyDepth - 1);
+        }
+        if (code && head !== undefined && (anyName || defined.has(head))) {
           macroUses.add(codeLines.length - 1);
         }
       }

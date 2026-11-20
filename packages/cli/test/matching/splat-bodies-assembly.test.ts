@@ -2,16 +2,25 @@
 // with the real GNU as, against the object fixtures the offline project-asm body tests fake it with
 // (offline/splat-bodies-fake.ts). A fixture that said more or less than gas does would make those
 // tests prove nothing.
+import { TOOLCHAIN } from '@asmlift/toolchains';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { type ElfImage, readElfImage } from '../../src/elf-bodies';
-import { type BodyAssemble, assembleWith, assemblesToLinked, controlledSources } from '../../src/splat-bodies';
+import {
+  type BodyAssemble,
+  MARKER_PRELUDE,
+  assembleWith,
+  assemblesToLinked,
+  controlledSources,
+} from '../../src/splat-bodies';
 import { fakeAssembly } from '../offline/splat-bodies-fake';
 
 const OFFLINE = join(import.meta.dirname, '../offline/fixtures');
-const GAS = assembleWith();
+// the pinned toolchain's assembler, which is what `assembleWith()` defaults to (ASMLIFT_ARM_AS, else
+// arm-none-eabi-as)
+const GAS = assembleWith(TOOLCHAIN.as);
 
 /** Whether either dialect of `text` assembles (by `assemble`) to `callee`'s linked code. */
 const isBody = async (assemble: BodyAssemble, linked: ElfImage, text: string, callee: string) => {
@@ -49,7 +58,12 @@ describe('the real assembly reads each fixture as its fake does', () => {
     const dir = join(OFFLINE, 'splat-bodies-probes');
     for (const f of readdirSync(join(dir, 'asm'))) {
       const name = f.replace(/\.s$/, '');
-      const sources = controlledSources(readFileSync(join(dir, 'asm', f), 'latin1'))!;
+      const sources = controlledSources(readFileSync(join(dir, 'asm', f), 'latin1'));
+      if (sources === undefined) {
+        // t1-t6 hold macro machinery: never assembled (below)
+        expect(name).toMatch(/^t[1-6]$/);
+        continue;
+      }
       for (const [k, dialect] of ['divided', 'unified'].entries()) {
         const real = await GAS(sources[k], 'cal');
         let fixture: Uint8Array | undefined;
@@ -62,6 +76,26 @@ describe('the real assembly reads each fixture as its fake does', () => {
           fixture === undefined ? undefined : Buffer.from(fixture),
         );
       }
+    }
+  });
+  // the review's t2 and t5 define `movs` under a name only gas's expansion spells: assembled as they
+  // stand they ARE the shadowed link's code, so refusing macro machinery is what keeps them no body
+  test('t2 and t5, assembled despite the rule, match the shadowed link', async () => {
+    const dir = join(OFFLINE, 'splat-bodies-probes');
+    const linked = readElfImage(readFileSync(join(dir, 'elf/shadowed.elf')))!;
+    for (const t of ['t2', 't5']) {
+      const text = readFileSync(join(dir, 'asm', `${t}.s`), 'latin1');
+      expect(controlledSources(text), t).toBeUndefined();
+      const either = async (assemble: BodyAssemble) => {
+        for (const d of ['divided', 'unified']) {
+          const object = await assemble(`${MARKER_PRELUDE}\n.syntax ${d}\n${text}\n`, 'cal');
+          if (object !== undefined && assemblesToLinked(linked, object, 'cal')) {
+            return true;
+          }
+        }
+        return false;
+      };
+      expect(await either(GAS), t).toBe(true);
     }
   });
   test('a text that .includes anything is assembled in no dialect', () => {
