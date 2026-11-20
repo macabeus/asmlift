@@ -399,8 +399,7 @@ export const parkedIn =
  *  parkedIn}'s, and a MIXED target's too, which stands for what the other paths into it brought as
  *  well (`StaleMarker.parks`). On the path through the dispatch the register holds the table's
  *  address or the case's code address there, which no C argument evaluates to; a guessed arity reads
- *  it as a ceiling where the ABI fills its argument registers in order (frontend/call-plan.ts
- *  `CallSite.marker`). A narrow reload's copy of sp is none: a frame address is an argument a source
+ *  it as a ceiling in a register the ABI never skips (frontend/call-plan.ts `CallSite.marker`). A narrow reload's copy of sp is none: a frame address is an argument a source
  *  passes. */
 export const markerIn =
   (stale: ReadonlyMap<Value, StaleIdiomRead>, key: (reg: string) => string = (r) => r) =>

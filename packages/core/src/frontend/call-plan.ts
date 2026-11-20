@@ -217,12 +217,16 @@ export interface CallSite {
    *  register, parked or not (frontend/jump-table.ts `markerIn`). A MIXED case target's marker
    *  stands for what its other paths brought too, so the register is no value the case lacks; but on
    *  the path through the dispatch it holds the table's address or the case's code address, and the
-   *  call is one instruction on every path, so a register some path brings it to is none of the
-   *  call's arguments (a defined program whose callee read it would read a code address there). Where
-   *  argument words fill in order (`argRegisterHoles` none, no floating-point argument registers:
-   *  agbcc), no register above it is one either, and the guessed arity stops below it
-   *  (`fallbackArgc`'s `ceiling`). Elsewhere a hole may sit under it: an O32 leading float leaves a0
-   *  untouched, a `long long` skips a1, so the marker may stand in a register the call skipped. */
+   *  call is one instruction on every path, so a register some real path brings it to is none of the
+   *  call's arguments (a defined program whose callee read it would read a code address there). A
+   *  register this ABI never leaves empty below a filled one is then no hole either, so no register
+   *  above it is an argument, and the guessed arity stops below the lowest such register
+   *  (`fallbackArgc`'s `ceiling`). The holes are `parked`'s, asked per register: every register on
+   *  agbcc, which fills argument words in order; on O32 and PowerPC not a register an aligned pair
+   *  skips (a1, r4), nor the a0 a leading float leaves untouched, where the marker may stand in a
+   *  register the call skipped and caps nothing. "Some real path" is asked of the blocks filled so
+   *  far (`SsaBuilder.holdsValueOnFilledPaths`): a block not filled yet may write the register on its
+   *  way to the call, so the marker past it is no value that path brings. */
   readonly marker?: (v: Value, reg: string) => boolean;
   /** whether `v`, in argument register `reg`, is the scaled index a jump-table dispatch left in that
    *  very register (frontend/jump-table.ts `scaledIndexIn`): a call handed it and one not compile
@@ -1089,12 +1093,13 @@ export function callDeclarations(
     const resultOwed: Array<() => void> = [];
     // how many argument words the decided gaps put beyond doubt
     let decidedWords = 0;
-    // the lowest argument register past the stated ones that some path brings a dispatch's marker
-    // to, where the ABI fills argument words in order (`CallSite.marker`)
-    const ceiling =
-      holes.skippable.size === 0 && !holes.leadingFloatShadow && target.fpu === undefined
-        ? target.argRegs.findIndex((r, k) => k >= floor && ssa.holdsValue(r, bi, (v) => site.marker?.(v, r) === true))
-        : -1;
+    // whether this ABI may leave argument register `r` empty below one a call fills (`argRegisterHoles`)
+    const maySkip = (r: string) => holes.skippable.has(r) || (holes.leadingFloatShadow && r === target.argRegs[0]);
+    // the lowest argument register past the stated ones that some path filled so far brings a
+    // dispatch's marker to, of those the ABI never skips (`CallSite.marker`)
+    const ceiling = target.argRegs.findIndex(
+      (r, k) => k >= floor && !maySkip(r) && ssa.holdsValueOnFilledPaths(r, bi, (v) => site.marker?.(v, r) === true),
+    );
     const argc =
       widths === null
         ? fallbackArgc(ssa, target.argRegs, bi, {
@@ -1105,8 +1110,7 @@ export function callDeclarations(
             gap: { name, at: guess.at, fail },
             floor,
             parked: (r) =>
-              !holes.skippable.has(r) &&
-              !(holes.leadingFloatShadow && r === target.argRegs[0]) &&
+              !maySkip(r) &&
               (ssa.holdsValue(r, bi, (v) => site.parked?.(v, r) === true) ||
                 // a call in the case destroyed it: the hole is that call's, and refuses only where a
                 // register above holds a value written since (`fallbackArgc`'s `parked`)
