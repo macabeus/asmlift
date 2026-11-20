@@ -52,6 +52,7 @@ import {
   enterCaseTarget,
   enterKeptDispatch,
   idiomLeaves,
+  markerIn,
   parkedIn,
   refuseStaleIdiomReads,
   scaledIndexIn,
@@ -7703,6 +7704,7 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
     bi,
     // what an elided or kept dispatch left in an argument register is no argument
     parked: parkedIn(fill.staleIdiomValues, reg),
+    marker: markerIn(fill.staleIdiomValues, reg),
     // …and the scrutinee an elided pointer-sum dispatch scaled in place (`recoverJumpTable`'s
     // `keepsIndex`) is no argument a guess may count: `h()` and `h(i << 2)` compile alike there
     scaledIndex: scaledIndexIn(fill.staleIdiomValues, reg),

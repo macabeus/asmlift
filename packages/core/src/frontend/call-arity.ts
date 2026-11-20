@@ -84,6 +84,9 @@ export function fallbackArgc(
      *  ahead of the idiom and `bl h; mov r0,#1; bl g` in a case lifts `g(1)` — the gap rule's
      *  `setUp` walks through calls and would count r3's copy, which `h` destroyed. */
     parked?: (reg: string) => boolean;
+    /** the index of an argument register no register of the call's lies at or above, where a
+     *  dispatch's marker stands on some path (`CallSite.marker`): neither counted nor a gap's top */
+    ceiling?: number;
     /** how many argument words the callee's own body reads at most (frontend/callee-body.ts),
      *  asked only where it can answer something. It is an upper bound on what the callee READS, and
      *  a source call passes more than that whenever a parameter goes unused or a K&R call hands
@@ -115,7 +118,7 @@ export function fallbackArgc(
   const floor = opts.floor ?? 0;
   // the registers past the lowest parked one are none of the call's: neither counted nor a gap's top
   const parkedAt = argRegs.findIndex((r, k) => k >= floor && opts.parked?.(r) === true && !setUp(k));
-  const top = parkedAt < 0 ? argRegs.length : parkedAt;
+  const top = Math.min(parkedAt < 0 ? argRegs.length : parkedAt, opts.ceiling ?? argRegs.length);
   // the run of argument registers the caller set up from `from`, each past a declaration's
   // stated words asked whether it still holds the incoming value
   // whether argument register `k` lies at or past what the callee's own body reads
