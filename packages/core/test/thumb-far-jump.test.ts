@@ -611,3 +611,24 @@ describe('a section switch this frontend cannot place, and code in another secti
     );
   });
 });
+
+// A control byte other than TAB ends a statement for gas, where readGasLines kept it inside one
+// (arm-none-eabi-as -mthumb -mcpu=arm7tdmi): `mov r0, #1<NUL>add r0, #2` assembles both instructions
+// (return 3), and a `.set K, 1<NUL>add r0, #2` line assembles the `add` too; both lifted `return 1`.
+// Any line holding one now declines the whole input, wherever it sits; a CRLF line and UTF-8 text
+// read as before.
+describe('a line holding a control byte declines', () => {
+  const fn = (mid: string) => `\t.text\n\t.code 16\n\t.thumb_func\nf:\n\tmov\tr0, #1${mid}\n\tbx\tlr\n`;
+  test.each(['\u0000add r0, #2', '\n\t.set K, 1\u0000add r0, #2', '\n\t@ x\u0000y', '\u0001', '\u007f', '\rx'])(
+    '%j',
+    (mid) => {
+      expect(() => decompile('f', fn(mid), ARMV4T_AGBCC)).toThrow(/on a line holding a control byte/);
+    },
+  );
+  test('before the function too', () => {
+    expect(() => decompile('f', `\t.text\u0000.data\n${fn('')}`, ARMV4T_AGBCC)).toThrow(/control byte/);
+  });
+  test('CRLF and UTF-8 still read', () => {
+    expect(lift(fn(' @ café').replace(/\n/g, '\r\n'))).toContain('return 1;');
+  });
+});

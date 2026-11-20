@@ -36,6 +36,7 @@ import { ARM_REGISTER_ALIASES, type TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
 import { type CallDeclarations, type CallLowering, callDeclarations } from './call-plan';
 import { type CalleeStackWords, asksCalleeBody } from './callee-body';
+import { CONTROL_BYTE } from './control-byte';
 import { unreadPairHalf } from './dead-reads';
 import { pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
@@ -755,6 +756,21 @@ function readGasLines(asm: string): GasLine[] {
     }
     end();
     crossesLine ||= inComment;
+    // A control byte (other than TAB, and a CR closing a CRLF line) is read by gas as a statement
+    // end or worse (arm-none-eabi-as: `mov r0, #1<NUL>add r0, #2` assembles both instructions),
+    // where this reader keeps it inside one statement. Every statement of such a line is unread,
+    // and the line counts as one whose reading reaches past it, so the whole input declines
+    // wherever the line sits (a hidden `.macro` or section switch above the function counts too).
+    if (CONTROL_BYTE.test(line)) {
+      crossesLine = true;
+      const why = 'on a line holding a control byte, which gas reads as a statement end where this reader does not';
+      if (statements.length === 0) {
+        statements.push({ text: '', unread: why });
+      }
+      for (const st of statements) {
+        st.unread ??= why;
+      }
+    }
     out.push({ statements, comment, crossesLine });
   }
   return out;

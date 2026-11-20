@@ -688,6 +688,42 @@ describe('an addressed line that calls a macro the file defines declines', () =>
   ])('%s: a line before the function that leaves a comment open declines', (_probe, asm) => {
     expect(() => decompile('f', asm, MIPS_IDO)).toThrow(/'\/\* a' leaves a comment, string or character constant open/);
   });
+  // A NUL ends a statement for gas (mips-linux-gnu-as 2.42), where this reader kept it inside one.
+  // g05 (`.globl f<NUL>.set reorder` before f) and g19 (`addiu …<NUL>.set reorder` inside f): gas
+  // runs the `.set reorder` (a0 + 1); main lifted a0 + 1 + 4. g16 and g20 declined already; g21
+  // (`# x<NUL>.set reorder`, which gas reads as one comment) now declines too, as every line holding
+  // a control byte other than TAB does, wherever it sits.
+  test.each([
+    [
+      'g05',
+      '.set noreorder\n.globl f\u0000.set reorder\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+    ],
+    [
+      'g16',
+      '.set noreorder\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\u0000.set reorder\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+    ],
+    [
+      'g19',
+      '.set noreorder\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\u0000.set reorder\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+    ],
+    [
+      'g20',
+      '.set noreorder\n.text\u0000.set reorder\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+    ],
+    [
+      'g21',
+      '.set noreorder\n# x\u0000.set reorder\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+    ],
+  ])('%s: a line holding a control byte declines', (_probe, asm) => {
+    expect(() => decompile('f', asm, MIPS_IDO)).toThrow(/holds a control byte/);
+  });
+  test('a CRLF line and a non-ASCII comment still read', () => {
+    const fn =
+      'glabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1 /* café */\n' +
+      '    /* 104 80000104 03E00008 */  jr         $ra\n' +
+      '    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n';
+    expect(decompile('f', `.set noreorder\n${fn}`.replace(/\n/g, '\r\n'), MIPS_IDO).source).toContain('a0 + 1 + 4');
+  });
   // KNOWN GAP (traps/20261120-071902Z-MERGE462-addressed-line-can-be-a-gas-macro-call.md, probe d24): a
   // macro an `.include` defines is not seen, so d17 with its `.macro nop` moved into `m2.inc` still lifts
   // a0 + 1 + 4 where gas gives a0 + 1. Declining every addressed line after an `.include` would cost

@@ -24,6 +24,7 @@
 // recover `x` as `(hi << 16) + (s16)lo` for a positive or a negative offset alike.
 // The other GOT/PIC relocations (`%gp_rel`, `%got`, …) are declined LOUD — small-data /
 // position-independent access is not modelled.
+import { CONTROL_BYTE } from './control-byte';
 import type { DisasmInstr, DisasmReloc } from './disasm';
 import { FrontendUnsupportedError } from './errors';
 
@@ -166,12 +167,13 @@ export function isSplatMips(asm: string): boolean {
  *  may shadow a real mnemonic (`.macro nop`, `.macro addiu a,b,c`) with no warning (measured,
  *  mips-linux-gnu-as 2.42), so an addressed line naming one runs the macro's body, not the
  *  instruction written. `*` stands for a name this reader cannot read (`.macro \\x`), which matches
- *  every mnemonic, and so does a line that leaves a comment, string or character constant open.
+ *  every mnemonic, and so does a line that leaves a comment, string or character constant open
+ *  or holds a control byte.
  *  KNOWN GAP: a macro an `.include` defines is not seen here. */
 function definedMacros(lines: string[]): Set<string> {
   const names = new Set<string>();
   for (const raw of lines) {
-    const sts = splatStatements(raw);
+    const sts = CONTROL_BYTE.test(raw) ? null : splatStatements(raw);
     if (sts === null) {
       names.add('*'); // a line this reader cannot cut may hide a `.macro` in what it leaves open
       continue;
@@ -198,7 +200,16 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
   // A line that leaves a comment, string or character constant open hides from this reader what
   // gas assembles after it (a `*/ .macro nop` on the next line is a macro definition, measured), so
   // it declines wherever the reader reads it: before the function and inside it alike.
+  // A control byte (other than TAB, and a CR closing a CRLF line) is read by gas as a statement end
+  // or worse (mips-linux-gnu-as: `.globl f<NUL>.set reorder` runs the `.set reorder`), where this
+  // reader keeps it inside a statement; such a line declines as well.
   const readStatements = (raw: string): string[] => {
+    if (CONTROL_BYTE.test(raw)) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': ${JSON.stringify(raw.trim())} holds a control byte, which gas reads as a statement ` +
+          `end where this reader does not, so this reader cannot tell which statements gas assembles`,
+      );
+    }
     const sts = splatStatements(raw);
     if (sts === null) {
       throw new FrontendUnsupportedError(
