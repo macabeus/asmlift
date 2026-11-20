@@ -197,11 +197,23 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
   // `.set reorder` lets gas fill and move delay slots itself (measured: it inserts a nop after a
   // `jr`), so a function assembled under it is not the instruction stream written. The reader
   // reads every slot as written; it declines under an explicit `.set reorder`. A file that never
-  // says `.set noreorder` is read as written too (gas's own default is reorder).
-  let reorder = false;
+  // says `.set noreorder` is read as written too: Splat's per-function files never say it, because
+  // INCLUDE_ASM sets `.set noreorder` around the `.include` (measured: wrapped so, gas assembles the
+  // text's own words). An `.include` before the function may set either mode in text this reader
+  // never sees, so it forgets the mode (`unknown`) until a later `.set`. A mode set in a
+  // conditional, macro or repeated body is set as that body is assembled (never under `.if 0`, nor
+  // in a macro nothing invokes, measured), which this reader does not model, so it declines.
+  let reorder: boolean | 'unknown' = false;
+  let depth = 0;
   for (const raw of lines.slice(0, sliceFrom)) {
     for (const st of splatStatements(raw) ?? []) {
       const t = st.trim();
+      const d = t.match(LINE_DIRECTIVE)?.[1].toLowerCase();
+      depth +=
+        d === undefined ? 0 : /^(?:if\w*|macro|rept|irpc?)$/.test(d) ? 1 : /^(?:endif|endm|endr)$/.test(d) ? -1 : 0;
+      if (/^\.include\b/i.test(t)) {
+        reorder = 'unknown';
+      }
       // `.set push` / `.set pop` save and restore the reorder state (measured: a `pop` back to
       // `.set reorder` before the function lets gas fill its delay slot); not modelled.
       if (/^\.set\s+(?:push|pop)\b/i.test(t)) {
@@ -210,6 +222,12 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
         );
       }
       const ro = t.match(/^\.set\s+(no)?reorder\b/i);
+      if (ro && depth !== 0) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': '${t}' sits inside a conditional, macro or repeated body before the function, ` +
+            `so this reader cannot tell whether gas fills the delay slots itself`,
+        );
+      }
       if (ro) {
         reorder = ro[1] === undefined;
       }
@@ -297,7 +315,13 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
       continue;
     }
     const m = line.match(INSN_LINE);
-    if (m && reorder) {
+    if (m && reorder === 'unknown') {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': an \`.include\` before the function may set the reorder mode, and no ` +
+          `\`.set noreorder\` follows it, so this reader cannot tell whether gas fills the delay slots itself`,
+      );
+    }
+    if (m && reorder === true) {
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': '${line}' is assembled under \`.set reorder\`, where gas fills delay slots itself`,
       );

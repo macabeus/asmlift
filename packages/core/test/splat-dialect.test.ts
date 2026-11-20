@@ -399,3 +399,37 @@ describe('fill or reordering gas adds between Splat instructions declines', () =
     expect(decompile('f', `.set reorder\n.set noreorder\n${fn('')}`, MIPS_IDO).source).toContain('a0 + 1 + 4');
   });
 });
+
+// The mode before the function is read only where the reader reads it as gas does. mips-linux-gnu-as
+// 2.42 -march=vr4300 on `addiu v0,a0,1; jr ra; addiu v0,v0,4` (a0 + 1 + 4 as written):
+// - `.if 0` / `.set noreorder` / `.endif`, or a `.macro` holding it that nothing invokes, then
+//   `.text`: gas skips it and stays in reorder mode, `jr ra; addiu v0,a0,1; addiu v0,v0,4; nop`,
+//   a0 + 1. The `.text` cleared the "another section" mark, and the hidden `.set` lifted a0 + 1 + 4.
+// - `.set noreorder` / `.include` of a file saying `.set reorder` / `.text`: the same a0 + 1.
+// A file that never says either is still read as noreorder text: Splat's per-function files rely
+// on INCLUDE_ASM's own `.set noreorder`.
+describe('a reorder mode set where the reader cannot read it declines', () => {
+  const fn =
+    'glabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n' +
+    '    /* 104 80000104 03E00008 */  jr         $ra\n' +
+    '    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n';
+  test.each([
+    '.if 0\n.set noreorder\n.endif\n.text\n',
+    '.macro m\n.set noreorder\n.endm\n.text\n',
+    '.set noreorder\n.if 0\n.set reorder\n.endif\n.text\n',
+    '.rept 1\n.set reorder\n.endr\n.text\n',
+  ])('a mode set inside a body before the function (`%s`) declines', (head) => {
+    expect(() => decompile('f', `${head}${fn}`, MIPS_IDO)).toThrow(/sits inside a conditional, macro or repeated body/);
+  });
+  test('an `.include` forgets the mode until a later `.set`', () => {
+    expect(() => decompile('f', `.set noreorder\n.include "macro.inc"\n.text\n${fn}`, MIPS_IDO)).toThrow(
+      /an `\.include` before the function may set the reorder mode/,
+    );
+    expect(decompile('f', `.include "macro.inc"\n.set noreorder\n.text\n${fn}`, MIPS_IDO).source).toContain(
+      'a0 + 1 + 4',
+    );
+  });
+  test('a file that never sets the mode is read as written (per-function Splat files)', () => {
+    expect(decompile('f', fn, MIPS_IDO).source).toContain('a0 + 1 + 4');
+  });
+});
