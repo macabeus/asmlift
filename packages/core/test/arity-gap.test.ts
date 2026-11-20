@@ -12,13 +12,23 @@ import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, TOOLCHAIN_TARGETS, argRegis
 
 describe('where an ABI can leave an argument register empty below a filled one', () => {
   test('an 8-byte argument skips an odd word on O32 and PowerPC, and a leading float shadows O32 words', () => {
-    expect(argRegisterHoles(ARMV4T_AGBCC)).toEqual({ skippable: new Set(), leadingFloatShadow: false });
+    expect(argRegisterHoles(ARMV4T_AGBCC)).toEqual({
+      skippable: new Set(),
+      leadingFloatShadow: false,
+      floatShadowed: new Set(),
+    });
     for (const t of [MIPS_IDO, MIPS_GCC]) {
-      expect(argRegisterHoles(t)).toEqual({ skippable: new Set(['a1', 'a3']), leadingFloatShadow: true });
+      // two leading slots, each a double's two words: IDO, `g(double, float, int)` leaves a2 empty under a3
+      expect(argRegisterHoles(t)).toEqual({
+        skippable: new Set(['a1', 'a3']),
+        leadingFloatShadow: true,
+        floatShadowed: new Set(['a0', 'a1', 'a2', 'a3']),
+      });
     }
     expect(argRegisterHoles(PPC_MWCC)).toEqual({
       skippable: new Set(['r4', 'r6', 'r8', 'r10']),
       leadingFloatShadow: false,
+      floatShadowed: new Set(),
     });
   });
 
@@ -26,17 +36,17 @@ describe('where an ABI can leave an argument register empty below a filled one',
     const holes = Object.fromEntries(
       Object.entries(TOOLCHAIN_TARGETS).map(([id, r]) => {
         const h = argRegisterHoles(r.description);
-        return [id, [[...h.skippable].join(','), h.leadingFloatShadow]];
+        return [id, [[...h.skippable].join(','), h.leadingFloatShadow, [...h.floatShadowed].join(',')]];
       }),
     );
     expect(holes).toMatchObject({
-      agbcc: ['', false],
-      'ido7.1': ['a1,a3', true],
-      'gcc2.7.2kmc': ['a1,a3', true],
-      'gcc2.7.2': ['a1,a3', true],
-      mwcc_242_81: ['r4,r6,r8,r10', false],
-      mwcc_233_163n: ['r4,r6,r8,r10', false],
-      mwcc_247_107: ['r4,r6,r8,r10', false],
+      agbcc: ['', false, ''],
+      'ido7.1': ['a1,a3', true, 'a0,a1,a2,a3'],
+      'gcc2.7.2kmc': ['a1,a3', true, 'a0,a1,a2,a3'],
+      'gcc2.7.2': ['a1,a3', true, 'a0,a1,a2,a3'],
+      mwcc_242_81: ['r4,r6,r8,r10', false, ''],
+      mwcc_233_163n: ['r4,r6,r8,r10', false, ''],
+      mwcc_247_107: ['r4,r6,r8,r10', false, ''],
     });
   });
 });
@@ -619,6 +629,17 @@ describe("on Thumb (agbcc), a dispatch's marker in an argument register caps the
     const fpu = { argRegs: ['f0'], returnReg: 'f0', slots: 'leading' as const };
     expect(() => decompile('jt_mark', jtMark, { ...ARMV4T_AGBCC, fpu }, { prototypes })).toThrow(
       /a case of the elided jump table reads r0/,
+    );
+  });
+  // the call block sets r0 up on every path, so only r1's table address is a marker. A leading float
+  // slot may take a double, shadowing r0 AND r1 under an integer in r2 (`floatShadowed`): r1 may be
+  // that hole, so it caps nothing, where capping it would drop every word above it
+  const set3 = jtMark.replace('.L14:\n\tbl\tcb\n', '.L14:\n\tmov\tr0, #3\n\tbl\tcb\n');
+  test('…a register a leading double shadows past the first word caps nothing either', () => {
+    expect(decompile('jt_mark', set3, ARMV4T_AGBCC, { prototypes }).source).toContain('cb(3)');
+    const fpu = { argRegs: ['f0'], returnReg: 'f0', slots: 'leading' as const };
+    expect(() => decompile('jt_mark', set3, { ...ARMV4T_AGBCC, fpu }, { prototypes })).toThrow(
+      /a case of the elided jump table reads r1/,
     );
   });
 });
