@@ -187,7 +187,7 @@
         },
         "fanNotCompiled": 50968,
         "fanNotCompiledDigest": "af14fc26dfb70953",
-        "rankSeconds": 296.32,
+        "rankSeconds": 266.29,
         "source": "void AthleticChallengeScrollUpdate(void) {\n    s32 v0;\n    u32 v7;\n    s32 v11;\n    s32 v12;\n    s32 v13;\n    s32 v14;\n    s32 v15;\n    s32 v20;\n    s32 v21;\n    s32 v22;\n    s32 v23;\n    s32 v1;\n    s32 v5;\n    s32 v6;\n    s32 v4;\n    s32 v3;\n    s32 v2;\n    s32 v8;\n    s32 v10;\n    s32 v9;\n    s32 v16;\n    s32 v17;\n    s32 v18;\n    s32 v19;\n    if ((0x30 & gAthleticChallengeScrollFlags) == 0) {\n        v0 = ((u16 *)&gBgInfo)[32];\n        if (*(s16 *)&gEntityInfo > (s16)(120 + v0)) {\n            if (*(u16 *)&gEntityInfo - 120 - ((u16 *)&gBgInfo)[32] > 5) {\n                v1 = 2;\n            } else {\n                v1 = 0 & -65536 | 1;\n            }\n            v2 = 16;\n            v3 = gHeldKeys;\n            v4 = 32;\n            if ((v4 & v3) != 0) {\n                v2 = 0;\n                v1 = v1 & -65536;\n            }\n        } else {\n            if (*(s16 *)&gEntityInfo < (s16)(120 + v0)) {\n                if (((u16 *)&gBgInfo)[32] - (*(u16 *)&gEntityInfo - 120) > 5) {\n                    v5 = 0 & -65536;\n                    v6 = 65534;\n                } else {\n                    v5 = 0;\n                    v6 = 65535;\n                }\n                v2 = 32;\n                v1 = v5 | v6;\n                v3 = gHeldKeys;\n                v4 = 16;\n                if ((v4 & v3) != 0) {\n                    v2 = 0;\n                    v1 = v1 & -65536;\n                }\n            } else {\n                v2 = 0;\n                v1 = 0;\n            }\n        }\n    } else {\n        v2 = 0;\n        v1 = 0;\n    }\n    if ((0xc0 & gAthleticChallengeScrollFlags) == 0) {\n        v7 = ((u16 *)&gEntityInfo)[3];\n        if (v7 > 160) {\n            v8 = 68;\n        } else {\n            v8 = 0;\n        }\n        if ((u16)(v8 + v7) > 99) {\n            if ((u16)(v8 + v7 - 100) > 30) {\n                v9 = v2 | 0x80;\n                v1 = v1 & 0xffff;\n                v10 = 0xc0 << 10;\n            } else {\n                v9 = v2 | 0x80;\n                v1 = v1 & 0xffff;\n                v10 = 65536;\n            }\n            v2 = v9;\n            v1 = v1 | v10;\n        } else {\n            if ((u16)(v8 + v7) <= 70) {\n                if ((u16)(v8 + 70 - v7) > 25) {\n                    v9 = (u8)(v2 | 0x40);\n                    v1 = v1 & 0xffff;\n                    v10 = -196608;\n                } else {\n                    v9 = (u8)(v2 | 0x40);\n                    v10 = -65536;\n                }\n                v2 = v9;\n                v1 = v1 | v10;\n            }\n        }\n    }\n    v11 = gAthleticChallengeScrollFlags;\n    v12 = gAthleticChallengeAutoScrollXVelocity;\n    v13 = gAthleticChallengeAutoScrollBaseVelocity.x;\n    v14 = gAthleticChallengeAutoScrollYVelocity;\n    v15 = gAthleticChallengeAutoScrollBaseVelocity.y;\n    gAthleticChallengeAutoScrollXVelocity = v12 + v13 & 0xffff;\n    gAthleticChallengeAutoScrollYVelocity = v14 + v15 & 0xffff;\n    if (gUnk_03005220.unk46 != 0) {\n        v16 = (v2 | v11) & 0x30;\n        v17 = 0;\n    } else {\n        v16 = v2 | v11;\n        v17 = (v1 & -65536 | (u16)(v1 + (v12 + v13 >> 16))) & 0xffff | ((u32)(v1 & -65536 | (u16)(v1 + (v12 + v13 >> 16))) >> 16) + (v14 + v15 >> 16) << 16;\n    }\n    if (v16 != 0) ScrollBg2LevelData(v16, v17);\n    ((u16 *)&gBgInfo)[18] = (u32)((u16 *)&gBgInfo)[32] >> 1;\n    if ((gUnk_03004C20.globalFrameCounter & 3) == 0 && gEnteredCannonGoal == 0) {\n        if ((u32)((u16 *)&gBgInfo)[33] >= gPreviousBg2VOfs) {\n            v18 = ((u16 *)&gBgInfo)[19] + (((u16 *)&gBgInfo)[33] - gPreviousBg2VOfs & 1);\n        } else {\n            v18 = ((u16 *)&gBgInfo)[19] - (gPreviousBg2VOfs - ((u16 *)&gBgInfo)[33] & 1);\n        }\n        ((u16 *)&gBgInfo)[19] = v18;\n        if ((0x80 << 8 & ((u16 *)&gBgInfo)[19]) != 0) {\n            v19 = 0;\n            ((u16 *)&gBgInfo)[19] = v19;\n        } else {\n            if ((u16)((u16 *)&gBgInfo)[19] > 80) {\n                v19 = 80;\n                ((u16 *)&gBgInfo)[19] = v19;\n            }\n        }\n    }\n    gPreviousBg2VOfs = ((u16 *)&gBgInfo)[33];\n    v20 = gSineTable[gBg2Alpha + 64];\n    *(u16 *)&gBg2PA = MultiplyQ8(v20, (s16)ReciprocalQ8(*(s16 *)&gBg2XMag));\n    v21 = gSineTable[gBg2Alpha];\n    *(u16 *)&gBg2PB = MultiplyQ8(v21, (s16)ReciprocalQ8(*(s16 *)&gBg2XMag));\n    v22 = ((u16 *)&gSineTable)[gBg2Alpha];\n    *(u16 *)&gBg2PC = MultiplyQ8((s16)-v22, (s16)ReciprocalQ8(*(s16 *)&gBg2YMag));\n    v23 = gSineTable[gBg2Alpha + 64];\n    *(u16 *)&gBg2PD = MultiplyQ8(v23, (s16)ReciprocalQ8(*(s16 *)&gBg2YMag));\n    gBg2X = (((u16 *)&gBgInfo)[32] + 120 << 8) - *(s16 *)&gBg2PA * 120 - *(s16 *)&gBg2PB * 80;\n    gBg2Y = (((u16 *)&gBgInfo)[33] + 80 << 8) - *(s16 *)&gBg2PC * 120 - *(s16 *)&gBg2PD * 80;\n}\n",
         "score": null,
         "maxScore": null,
@@ -362,7 +362,7 @@
             "withheld": 5
           }
         },
-        "rankSeconds": 2.1,
+        "rankSeconds": 1.94,
         "withheldCandidates": [
           {
             "variations": [
@@ -728,7 +728,7 @@
             "candidates": 744
           }
         },
-        "rankSeconds": 15.02,
+        "rankSeconds": 17.5,
         "symbolsUsed": [
           {
             "name": "BossWaitForNextFrame",
@@ -1003,7 +1003,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 0.13,
+        "rankSeconds": 0.1,
         "symbolsUsed": [
           {
             "name": "thunk_HeapAlloc",
@@ -1363,7 +1363,7 @@
             "candidates": 48
           }
         },
-        "rankSeconds": 2.58,
+        "rankSeconds": 2.11,
         "symbolsUsed": [
           {
             "name": "thunk_HeapAlloc",
@@ -1589,7 +1589,7 @@
             "withheld": 51
           }
         },
-        "rankSeconds": 4.88,
+        "rankSeconds": 4.59,
         "withheldCandidates": [
           {
             "variations": [
@@ -2587,7 +2587,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.11,
+        "rankSeconds": 0.1,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "s32 DivideQ8(s16 num1, u32 num2) {\n    return (s16)((num1 << 8) / (s16)num2);\n}\n",
@@ -2786,7 +2786,7 @@
             "candidates": 180
           }
         },
-        "rankSeconds": 7.35,
+        "rankSeconds": 6.92,
         "symbolsUsed": [
           {
             "name": "gBgTilemapBufs",
@@ -2961,7 +2961,7 @@
             "candidates": 8
           }
         },
-        "rankSeconds": 3.16,
+        "rankSeconds": 3.28,
         "symbolsUsed": [
           {
             "name": "gBgTilemapBufs",
@@ -3165,7 +3165,7 @@
             "candidates": 216
           }
         },
-        "rankSeconds": 14.77,
+        "rankSeconds": 16.41,
         "symbolsUsed": [
           {
             "name": "gBg2XMag",
@@ -3369,7 +3369,7 @@
             "candidates": 27
           }
         },
-        "rankSeconds": 2.1,
+        "rankSeconds": 2.07,
         "symbolsUsed": [
           {
             "name": "gEntityInfo",
@@ -3524,7 +3524,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.15,
+        "rankSeconds": 0.16,
         "symbolsUsed": [
           {
             "name": "gHeldKeys",
@@ -3692,7 +3692,7 @@
             "candidates": 10
           }
         },
-        "rankSeconds": 2.1,
+        "rankSeconds": 1.98,
         "symbolsUsed": [
           {
             "name": "gHeldKeys",
@@ -3872,7 +3872,7 @@
             "candidates": 10
           }
         },
-        "rankSeconds": 2.43,
+        "rankSeconds": 2.27,
         "symbolsUsed": [
           {
             "name": "gObjPalRamPtr",
@@ -4083,7 +4083,7 @@
             "candidates": 3
           }
         },
-        "rankSeconds": 0.17,
+        "rankSeconds": 1.36,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "s32 MultiplyQ8(s16 num1, s16 num2) {\n    s32 v0;\n    s32 w0;\n    v0 = num1 * num2;\n    w0 = v0;\n    if (w0 < 0) w0 += 255;\n    v0 = w0 << 8 >> 16;\n    return v0;\n}\n",
@@ -4400,7 +4400,7 @@
             "withheld": 5760
           }
         },
-        "rankSeconds": 1102.44,
+        "rankSeconds": 1031.89,
         "withheldCandidates": [
           {
             "variations": [
@@ -575602,7 +575602,7 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "struct Off0 { u8 _pad0[4]; s32 m4; u8 _pad1[32]; s32 m40; };\nstruct Off1 { u8 _pad0[12]; u16 m12; };\nstruct Struct0 { u8 field_0; u8 _pad0[7]; u8 field_8; u8 _pad1[15]; s32 field_24; };\nvoid PauseMenuScreenHandler(s32 a0, s32 a1, s32 a2, s32 a3) {\n    s32 v0;\n    s32 v1;\n    u8 *v2;\n    u8 *v5;\n    s32 v6;\n    u8 *v7;\n    s32 v8;\n    struct Struct0 *v11;\n    u8 *v12;\n    s32 v13;\n    u8 *v14;\n    u8 j;\n    u8 k;\n    u8 i;\n    s32 *v10;\n    u32 v9;\n    u8 *v4;\n    s32 v3;\n    u8 sp0[12];\n    v0 = gNewKeys;\n    ((s32 *)sp0)[1] = (0xa & v0) != 0;\n    if ((1 & v0) != 0) ((s32 *)sp0)[1] = (u8)(gMenuInfo->cursorIndex + 1);\n    if ((0xc0 & v0) != 0) {\n        i = 0;\n        v1 = gUnk_030034BC;\n        v2 = (u8 *)gMenuInfo;\n        do {\n            *(u16 *)sp0 = 0;\n            ((volatile s32 *)&REG_DMA3SAD)[0] = sp0;\n            ((volatile s32 *)&REG_DMA3SAD)[1] = (i + v2[12] * 3 << 6) + ((v1 << 11) + ((u32)&gBgTilemapBufs + 330));\n            ((volatile s32 *)&REG_DMA3SAD)[2] = -2130706430;\n            ((volatile s32 *)&REG_DMA3SAD)[2];\n            *(u16 *)sp0 = 0;\n            ((volatile s32 *)&REG_DMA3SAD)[0] = sp0;\n            ((volatile s32 *)&REG_DMA3SAD)[1] = (i + v2[12] * 3 << 6) + ((v1 << 11) + ((u32)&gBgTilemapBufs + 330 + 36));\n            ((volatile s32 *)&REG_DMA3SAD)[2] = -2130706430;\n            ((volatile s32 *)&REG_DMA3SAD)[2];\n            i = i + 1;\n        } while (i <= 1);\n        if (gPauseMenuType == 0 || gPauseMenuType == 2) {\n            if ((0x80 & gNewKeys) != 0) {\n                m4aSongNumStart(81);\n                gMenuInfo->cursorIndex = gMenuInfo->cursorIndex + 1;\n                if ((u32)gMenuInfo->cursorIndex > 3) gMenuInfo->cursorIndex = 0;\n            }\n            if ((0x40 & gNewKeys) != 0) {\n                m4aSongNumStart(81);\n                gMenuInfo->cursorIndex = gMenuInfo->cursorIndex - 1;\n                if ((0x80 & gMenuInfo->cursorIndex) != 0) {\n                    v3 = 3;\n                    v4 = (u8 *)gMenuInfo;\n                    v4[12] = v3;\n                }\n            }\n        } else {\n            if ((0x80 & gNewKeys) != 0) {\n                m4aSongNumStart(81);\n                gMenuInfo->cursorIndex = gMenuInfo->cursorIndex + 1;\n                if ((u32)gMenuInfo->cursorIndex > 2) gMenuInfo->cursorIndex = 0;\n            }\n            if ((0x40 & gNewKeys) != 0) {\n                m4aSongNumStart(81);\n                gMenuInfo->cursorIndex = gMenuInfo->cursorIndex - 1;\n                if ((0x80 & gMenuInfo->cursorIndex) != 0) {\n                    v3 = 2;\n                    v4 = (u8 *)gMenuInfo;\n                    v4[12] = v3;\n                }\n            }\n        }\n        j = 0;\n        do {\n            ((s32 *)sp0)[2] = j * 30;\n            k = 0;\n            do {\n                if (gUnk_030034BC == 0) {\n                    v5 = (u8 *)gMenuInfo;\n                    v6 = ((s32 *)sp0)[2];\n                    gBgTilemapBufs[gUnk_030034BC][(j + v5[12] * 3 << 5) + (k + 165)] = ((u16 *)gBgDataPtrs.pBufBg3Tilemap)[v6 + k + 157] + gUnk_03000800;\n                    *(u16 *)(((j + v5[12] * 3 << 5) + (k + 183) << 1) + (gUnk_030034BC << 11) + (u32)&gBgTilemapBufs) = ((u16 *)gBgDataPtrs.pBufBg3Tilemap)[v6 + k + 175] + gUnk_03000800;\n                } else {\n                    v7 = (u8 *)gMenuInfo;\n                    v8 = ((s32 *)sp0)[2];\n                    gBgTilemapBufs[gUnk_030034BC][(j + v7[12] * 3 << 5) + (k + 165)] = ((u16 *)gBgDataPtrs.pBufBg3Tilemap)[v8 + k + 157];\n                    *(u16 *)(((j + v7[12] * 3 << 5) + (k + 183) << 1) + (gUnk_030034BC << 11) + (u32)&gBgTilemapBufs) = *(u16 *)((v8 + k << 1) + (u8 *)gBgDataPtrs.pBufBg3Tilemap + ((0x9d << 1) + 36));\n                }\n                k = k + 1;\n            } while (k <= 1);\n            j = j + 1;\n        } while (j <= 1);\n    }\n    if (((s32 *)sp0)[1] != 0) ((s32 *)sp0)[1] = gUnk_081166F8[gPauseMenuType][((s32 *)sp0)[1] - 1];\n    switch (((s32 *)sp0)[1] - 1) {\n        case 0:\n            ((struct Off0 *)&gCallbackQueue)->m40 = &InputHandler_Normal;\n            v9 = 0;\n            v10 = (s32 *)((u32)&gCallbackQueue + 40);\n            do {\n                v10[0] = v10[10];\n                v10++;\n                v9++;\n            } while (v9 <= 9);\n            ((s32 *)&gCallbackQueue)[gCallbackQueue.currentCount - 1] = 0;\n            *(u8 *)((u32)&gCallbackQueue + 122 - 1) = gCallbackQueue.previousCount;\n            PauseMenuScreenRestoreGfx();\n            m4aSoundVSyncOn();\n            m4aMPlayAllContinue();\n            return;\n        case 1:\n            PauseMenuScreenRestoreGfx();\n            ((struct Off0 *)&gCallbackQueue)->m4 = &TransitionFromDeathToLevel_FadeOut;\n            v11 = (struct Struct0 *)gUnk_03005284;\n            gUnk_03005220.collected1Ups = v11->field_24;\n            gUnk_03005220.lives = v11->field_0;\n            gUnk_03005220.hearts = (u32)(v11->field_8 << 30) >> 30;\n            REG_BLDCNT = 0;\n            gBlendValue = 0;\n            return;\n        case 2:\n            v12 = (u8 *)gUnk_03005284;\n            v13 = 0;\n            gUnk_03005220.lives = v12[30];\n            v12[0] = v12[30];\n            PauseMenuScreenRestoreGfx();\n            gBlendValue = v13;\n            if (((struct Off1 *)&gUnk_03004C20)->m12 == 0xc1 << 3) gUnk_03004C20.world = 5;\n            gVisionSelectInfo.currentVision = gUnk_03004C20.level;\n            gUnk_03004C20.level = v13;\n            ((struct Off0 *)&gCallbackQueue)->m4 = &TransitionFromVisionSelectToLevel_FadeOut;\n            return;\n        case 3:\n            ((struct Off0 *)&gCallbackQueue)->m4 = &ButtonConfigurationScreenInit;\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tilemap);\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tiles);\n            return;\n        case 4:\n            if (gUnk_03004C20.level != 0) {\n                v14 = (u8 *)gUnk_03005284;\n                gUnk_03005220.lives = v14[30];\n                v14[0] = v14[30];\n            }\n            PauseMenuScreenRestoreGfx();\n            REG_BLDCNT = 0;\n            gBlendValue = 0;\n            sub_080008DC();\n            ((struct Off0 *)&gCallbackQueue)->m4 = &TransitionFromVisionSelectToWorldMap_FadeOut;\n            return;\n        case 5:\n            gBlendValue = 0;\n            gUnk_03004C20.level = 9;\n            gTitleScreenStage = 0;\n            EntityResetOamBuffer();\n            ((struct Off0 *)&gCallbackQueue)->m4 = &TransitionFromVisionSelectToBootScreen_FadeOut;\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tilemap);\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tiles);\n            return;\n        default:\n            return;\n    }\n}\n",
+        "source": "struct Off0 { u8 _pad0[4]; s32 m4; u8 _pad1[32]; s32 m40; };\nstruct Off1 { u8 _pad0[12]; u16 m12; };\nstruct Struct0 { u8 field_0; u8 _pad0[7]; u8 field_8; u8 _pad1[15]; s32 field_24; };\nvoid PauseMenuScreenHandler(void) {\n    s32 v0;\n    s32 v1;\n    u8 *v2;\n    u8 *v5;\n    s32 v6;\n    u8 *v7;\n    s32 v8;\n    struct Struct0 *v11;\n    u8 *v12;\n    s32 v13;\n    u8 *v14;\n    u8 j;\n    u8 k;\n    u8 i;\n    s32 *v10;\n    u32 v9;\n    u8 *v4;\n    s32 v3;\n    u8 sp0[12];\n    v0 = gNewKeys;\n    ((s32 *)sp0)[1] = (0xa & v0) != 0;\n    if ((1 & v0) != 0) ((s32 *)sp0)[1] = (u8)(gMenuInfo->cursorIndex + 1);\n    if ((0xc0 & v0) != 0) {\n        i = 0;\n        v1 = gUnk_030034BC;\n        v2 = (u8 *)gMenuInfo;\n        do {\n            *(u16 *)sp0 = 0;\n            ((volatile s32 *)&REG_DMA3SAD)[0] = sp0;\n            ((volatile s32 *)&REG_DMA3SAD)[1] = (i + v2[12] * 3 << 6) + ((v1 << 11) + ((u32)&gBgTilemapBufs + 330));\n            ((volatile s32 *)&REG_DMA3SAD)[2] = -2130706430;\n            ((volatile s32 *)&REG_DMA3SAD)[2];\n            *(u16 *)sp0 = 0;\n            ((volatile s32 *)&REG_DMA3SAD)[0] = sp0;\n            ((volatile s32 *)&REG_DMA3SAD)[1] = (i + v2[12] * 3 << 6) + ((v1 << 11) + ((u32)&gBgTilemapBufs + 330 + 36));\n            ((volatile s32 *)&REG_DMA3SAD)[2] = -2130706430;\n            ((volatile s32 *)&REG_DMA3SAD)[2];\n            i = i + 1;\n        } while (i <= 1);\n        if (gPauseMenuType == 0 || gPauseMenuType == 2) {\n            if ((0x80 & gNewKeys) != 0) {\n                m4aSongNumStart(81);\n                gMenuInfo->cursorIndex = gMenuInfo->cursorIndex + 1;\n                if ((u32)gMenuInfo->cursorIndex > 3) gMenuInfo->cursorIndex = 0;\n            }\n            if ((0x40 & gNewKeys) != 0) {\n                m4aSongNumStart(81);\n                gMenuInfo->cursorIndex = gMenuInfo->cursorIndex - 1;\n                if ((0x80 & gMenuInfo->cursorIndex) != 0) {\n                    v3 = 3;\n                    v4 = (u8 *)gMenuInfo;\n                    v4[12] = v3;\n                }\n            }\n        } else {\n            if ((0x80 & gNewKeys) != 0) {\n                m4aSongNumStart(81);\n                gMenuInfo->cursorIndex = gMenuInfo->cursorIndex + 1;\n                if ((u32)gMenuInfo->cursorIndex > 2) gMenuInfo->cursorIndex = 0;\n            }\n            if ((0x40 & gNewKeys) != 0) {\n                m4aSongNumStart(81);\n                gMenuInfo->cursorIndex = gMenuInfo->cursorIndex - 1;\n                if ((0x80 & gMenuInfo->cursorIndex) != 0) {\n                    v3 = 2;\n                    v4 = (u8 *)gMenuInfo;\n                    v4[12] = v3;\n                }\n            }\n        }\n        j = 0;\n        do {\n            ((s32 *)sp0)[2] = j * 30;\n            k = 0;\n            do {\n                if (gUnk_030034BC == 0) {\n                    v5 = (u8 *)gMenuInfo;\n                    v6 = ((s32 *)sp0)[2];\n                    gBgTilemapBufs[gUnk_030034BC][(j + v5[12] * 3 << 5) + (k + 165)] = ((u16 *)gBgDataPtrs.pBufBg3Tilemap)[v6 + k + 157] + gUnk_03000800;\n                    *(u16 *)(((j + v5[12] * 3 << 5) + (k + 183) << 1) + (gUnk_030034BC << 11) + (u32)&gBgTilemapBufs) = ((u16 *)gBgDataPtrs.pBufBg3Tilemap)[v6 + k + 175] + gUnk_03000800;\n                } else {\n                    v7 = (u8 *)gMenuInfo;\n                    v8 = ((s32 *)sp0)[2];\n                    gBgTilemapBufs[gUnk_030034BC][(j + v7[12] * 3 << 5) + (k + 165)] = ((u16 *)gBgDataPtrs.pBufBg3Tilemap)[v8 + k + 157];\n                    *(u16 *)(((j + v7[12] * 3 << 5) + (k + 183) << 1) + (gUnk_030034BC << 11) + (u32)&gBgTilemapBufs) = *(u16 *)((v8 + k << 1) + (u8 *)gBgDataPtrs.pBufBg3Tilemap + ((0x9d << 1) + 36));\n                }\n                k = k + 1;\n            } while (k <= 1);\n            j = j + 1;\n        } while (j <= 1);\n    }\n    if (((s32 *)sp0)[1] != 0) ((s32 *)sp0)[1] = gUnk_081166F8[gPauseMenuType][((s32 *)sp0)[1] - 1];\n    switch (((s32 *)sp0)[1] - 1) {\n        case 0:\n            ((struct Off0 *)&gCallbackQueue)->m40 = &InputHandler_Normal;\n            v9 = 0;\n            v10 = (s32 *)((u32)&gCallbackQueue + 40);\n            do {\n                v10[0] = v10[10];\n                v10++;\n                v9++;\n            } while (v9 <= 9);\n            ((s32 *)&gCallbackQueue)[gCallbackQueue.currentCount - 1] = 0;\n            *(u8 *)((u32)&gCallbackQueue + 122 - 1) = gCallbackQueue.previousCount;\n            PauseMenuScreenRestoreGfx();\n            m4aSoundVSyncOn();\n            m4aMPlayAllContinue();\n            return;\n        case 1:\n            PauseMenuScreenRestoreGfx();\n            ((struct Off0 *)&gCallbackQueue)->m4 = &TransitionFromDeathToLevel_FadeOut;\n            v11 = (struct Struct0 *)gUnk_03005284;\n            gUnk_03005220.collected1Ups = v11->field_24;\n            gUnk_03005220.lives = v11->field_0;\n            gUnk_03005220.hearts = (u32)(v11->field_8 << 30) >> 30;\n            REG_BLDCNT = 0;\n            gBlendValue = 0;\n            return;\n        case 2:\n            v12 = (u8 *)gUnk_03005284;\n            v13 = 0;\n            gUnk_03005220.lives = v12[30];\n            v12[0] = v12[30];\n            PauseMenuScreenRestoreGfx();\n            gBlendValue = v13;\n            if (((struct Off1 *)&gUnk_03004C20)->m12 == 0xc1 << 3) gUnk_03004C20.world = 5;\n            gVisionSelectInfo.currentVision = gUnk_03004C20.level;\n            gUnk_03004C20.level = v13;\n            ((struct Off0 *)&gCallbackQueue)->m4 = &TransitionFromVisionSelectToLevel_FadeOut;\n            return;\n        case 3:\n            ((struct Off0 *)&gCallbackQueue)->m4 = &ButtonConfigurationScreenInit;\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tilemap);\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tiles);\n            return;\n        case 4:\n            if (gUnk_03004C20.level != 0) {\n                v14 = (u8 *)gUnk_03005284;\n                gUnk_03005220.lives = v14[30];\n                v14[0] = v14[30];\n            }\n            PauseMenuScreenRestoreGfx();\n            REG_BLDCNT = 0;\n            gBlendValue = 0;\n            sub_080008DC();\n            ((struct Off0 *)&gCallbackQueue)->m4 = &TransitionFromVisionSelectToWorldMap_FadeOut;\n            return;\n        case 5:\n            gBlendValue = 0;\n            gUnk_03004C20.level = 9;\n            gTitleScreenStage = 0;\n            EntityResetOamBuffer();\n            ((struct Off0 *)&gCallbackQueue)->m4 = &TransitionFromVisionSelectToBootScreen_FadeOut;\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tilemap);\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tiles);\n            return;\n        default:\n            return;\n    }\n}\n",
         "score": 206,
         "maxScore": 561,
         "compileErrors": null,
@@ -575617,7 +575617,7 @@
           "score": 68,
           "lines": 164,
           "gotos": 0,
-          "casts": 30,
+          "casts": 31,
           "unkGlue": 0,
           "rawMem": 4,
           "addrDeref": 0,
@@ -575634,7 +575634,7 @@
             "callNeZero": 0,
             "localGaps": 0,
             "unusedLocals": 0,
-            "placeholderParams": 4,
+            "placeholderParams": 0,
             "genericCounters": 1
           }
         }
@@ -575926,7 +575926,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.27,
+        "rankSeconds": 0.28,
         "symbolsUsed": [
           {
             "name": "gBgDataPtrs",
@@ -576173,7 +576173,7 @@
             "candidates": 224
           }
         },
-        "rankSeconds": 11.66,
+        "rankSeconds": 12.14,
         "symbolsUsed": [
           {
             "name": "gUnk_030034DC",
@@ -576396,7 +576396,7 @@
             "withheld": 20
           }
         },
-        "rankSeconds": 7.05,
+        "rankSeconds": 6.81,
         "withheldCandidates": [
           {
             "variations": [
@@ -577060,7 +577060,7 @@
             "candidates": 10
           }
         },
-        "rankSeconds": 2.96,
+        "rankSeconds": 2.95,
         "symbolsUsed": [
           {
             "name": "gEntityInfo",
@@ -577279,7 +577279,7 @@
             "candidates": 864
           }
         },
-        "rankSeconds": 33.46,
+        "rankSeconds": 28.77,
         "symbolsUsed": [
           {
             "name": "gEntityInfo",
@@ -577458,7 +577458,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 0.07,
+        "rankSeconds": 0.14,
         "symbolsUsed": [
           {
             "name": "gUnk_03005400",
@@ -577633,7 +577633,7 @@
             "candidates": 16
           }
         },
-        "rankSeconds": 1.88,
+        "rankSeconds": 1.99,
         "symbolsUsed": [
           {
             "name": "gUnk_03004C20",
@@ -577868,7 +577868,7 @@
             "withheld": 896
           }
         },
-        "rankSeconds": 101.44,
+        "rankSeconds": 87.04,
         "withheldCandidates": [
           {
             "variations": [
@@ -594495,7 +594495,7 @@
             "withheld": 16
           }
         },
-        "rankSeconds": 13.44,
+        "rankSeconds": 11.53,
         "withheldCandidates": [
           {
             "variations": [
@@ -595493,7 +595493,7 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "void sub_08046A64(u8 a0, s32 a1, s32 a2, s32 a3) {\n    s32 v0;\n    u8 v2;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 v8;\n    s32 v9;\n    s32 v10;\n    s32 v11;\n    s32 v12;\n    s32 v13;\n    s32 v14;\n    s32 v15;\n    s32 v16;\n    s32 v17;\n    u32 v3;\n    u32 i;\n    u32 v4;\n    u8 v1;\n    u8 sp0[36];\n    v0 = *(u8 *)&gVisionSelectInfo;\n    v1 = 1;\n    v2 = (u32)a0 / 9;\n    if (1 >= v2) {\n        v3 = 1;\n    } else {\n        do {\n            v1 = v1 * 3 + 1;\n        } while (v1 < v2);\n        v3 = v1;\n    }\n    while (v3 != 0) {\n        if (v3 < a0) {\n            ((s32 *)sp0)[8] = v3 << 3;\n            i = v3;\n            do {\n                if (i >= v3) {\n                    if (((u16 *)(i * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v3 * 28))[3] < ((u16 *)(i * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364))))[3]) {\n                        ((s32 *)sp0)[7] = ((s32 *)sp0)[8] - v3 << 2;\n                        v4 = i;\n                        while (1) {\n                            v5 = ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364))))[1];\n                            v6 = ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364))))[2];\n                            *(s32 *)sp0 = *(s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)));\n                            ((s32 *)sp0)[1] = v5;\n                            ((s32 *)sp0)[2] = v6;\n                            v7 = ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) + 12))[1];\n                            v8 = ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) + 12))[2];\n                            ((s32 *)sp0)[3] = *(s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) + 12);\n                            ((s32 *)sp0)[4] = v7;\n                            ((s32 *)sp0)[5] = v8;\n                            ((s32 *)sp0)[6] = *(s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) + 12 + 12);\n                            v9 = ((s32 *)sp0)[7];\n                            v10 = ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9))[1];\n                            v11 = ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9))[2];\n                            *(s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364))) = *(s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9);\n                            ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364))))[1] = v10;\n                            ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364))))[2] = v11;\n                            v12 = ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9 + 12))[1];\n                            v13 = ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9 + 12))[2];\n                            *(s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) + 12) = *(s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9 + 12);\n                            ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) + 12))[1] = v12;\n                            ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) + 12))[2] = v13;\n                            *(s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) + 12 + 12) = *(s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9 + 12 + 12);\n                            v14 = ((s32 *)sp0)[1];\n                            v15 = ((s32 *)sp0)[2];\n                            *(s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9) = *(s32 *)sp0;\n                            ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9))[1] = v14;\n                            ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9))[2] = v15;\n                            v16 = ((s32 *)sp0)[4];\n                            v17 = ((s32 *)sp0)[5];\n                            *(s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9 + 12) = ((s32 *)sp0)[3];\n                            ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9 + 12))[1] = v16;\n                            ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9 + 12))[2] = v17;\n                            *(s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9 + 12 + 12) = ((s32 *)sp0)[6];\n                            if ((u8)(v4 - v3) < v3) break;\n                            v4 = (u8)(v4 - v3);\n                            if (((u16 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - ((s32 *)sp0)[7]))[3] >= ((u16 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364))))[3]) break;\n                        }\n                    }\n                }\n                i = (u8)(i + 1);\n            } while (i < a0);\n        }\n        v3 = (u8)(v3 / 3);\n    }\n}\n",
+        "source": "void sub_08046A64(u8 arg0) {\n    s32 v0;\n    u8 v2;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 v8;\n    s32 v9;\n    s32 v10;\n    s32 v11;\n    s32 v12;\n    s32 v13;\n    s32 v14;\n    s32 v15;\n    s32 v16;\n    s32 v17;\n    u32 v3;\n    u32 i;\n    u32 v4;\n    u8 v1;\n    u8 sp0[36];\n    v0 = *(u8 *)&gVisionSelectInfo;\n    v1 = 1;\n    v2 = (u32)arg0 / 9;\n    if (1 >= v2) {\n        v3 = 1;\n    } else {\n        do {\n            v1 = v1 * 3 + 1;\n        } while (v1 < v2);\n        v3 = v1;\n    }\n    while (v3 != 0) {\n        if (v3 < arg0) {\n            ((s32 *)sp0)[8] = v3 << 3;\n            i = v3;\n            do {\n                if (i >= v3) {\n                    if (((u16 *)(i * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v3 * 28))[3] < ((u16 *)(i * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364))))[3]) {\n                        ((s32 *)sp0)[7] = ((s32 *)sp0)[8] - v3 << 2;\n                        v4 = i;\n                        while (1) {\n                            v5 = ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364))))[1];\n                            v6 = ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364))))[2];\n                            *(s32 *)sp0 = *(s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)));\n                            ((s32 *)sp0)[1] = v5;\n                            ((s32 *)sp0)[2] = v6;\n                            v7 = ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) + 12))[1];\n                            v8 = ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) + 12))[2];\n                            ((s32 *)sp0)[3] = *(s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) + 12);\n                            ((s32 *)sp0)[4] = v7;\n                            ((s32 *)sp0)[5] = v8;\n                            ((s32 *)sp0)[6] = *(s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) + 12 + 12);\n                            v9 = ((s32 *)sp0)[7];\n                            v10 = ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9))[1];\n                            v11 = ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9))[2];\n                            *(s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364))) = *(s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9);\n                            ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364))))[1] = v10;\n                            ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364))))[2] = v11;\n                            v12 = ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9 + 12))[1];\n                            v13 = ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9 + 12))[2];\n                            *(s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) + 12) = *(s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9 + 12);\n                            ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) + 12))[1] = v12;\n                            ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) + 12))[2] = v13;\n                            *(s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) + 12 + 12) = *(s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9 + 12 + 12);\n                            v14 = ((s32 *)sp0)[1];\n                            v15 = ((s32 *)sp0)[2];\n                            *(s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9) = *(s32 *)sp0;\n                            ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9))[1] = v14;\n                            ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9))[2] = v15;\n                            v16 = ((s32 *)sp0)[4];\n                            v17 = ((s32 *)sp0)[5];\n                            *(s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9 + 12) = ((s32 *)sp0)[3];\n                            ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9 + 12))[1] = v16;\n                            ((s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9 + 12))[2] = v17;\n                            *(s32 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - v9 + 12 + 12) = ((s32 *)sp0)[6];\n                            if ((u8)(v4 - v3) < v3) break;\n                            v4 = (u8)(v4 - v3);\n                            if (((u16 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364)) - ((s32 *)sp0)[7]))[3] >= ((u16 *)(v4 * 28 + (((u32)(v0 << 28) >> 29) * 28 + ((u32)&gEntityInfo + 364))))[3]) break;\n                        }\n                    }\n                }\n                i = (u8)(i + 1);\n            } while (i < arg0);\n        }\n        v3 = (u8)(v3 / 3);\n    }\n}\n",
         "score": 197,
         "maxScore": 231,
         "compileErrors": null,
@@ -595525,7 +595525,7 @@
             "callNeZero": 0,
             "localGaps": 0,
             "unusedLocals": 0,
-            "placeholderParams": 4,
+            "placeholderParams": 0,
             "genericCounters": 2
           }
         }
@@ -595927,7 +595927,7 @@
             "candidates": 10
           }
         },
-        "rankSeconds": 1.98,
+        "rankSeconds": 1.92,
         "symbolsUsed": [
           {
             "name": "gUnk_030007C8",
@@ -596266,7 +596266,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 0.83,
+        "rankSeconds": 0.92,
         "symbolsUsed": [
           {
             "name": "gUnk_03004D84",
@@ -596286,7 +596286,7 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "struct Elem0 { u16 field_0; u8 _pad0[190]; };\nstruct Struct0 { u16 field_0; u16 field_2; u8 field_4; u8 field_5; u8 field_6; u8 field_7; u8 field_8; u8 field_9; };\nvoid sub_0804C300(s32 a0, s32 a1, s32 a2, s32 a3) {\n    u16 v0;\n    s32 v2;\n    s32 v1;\n    u8 *p0;\n    v0 = sub_0804B254((u8 *)gUnk_03004D84 + 2);\n    if (((struct Elem0 *)&gUnk_08189F04)[v0].field_0 != 65535) {\n        v1 = 0;\n        do {\n            v2 = gUnk_03005428;\n            gUnk_03005428 = v2 + 1;\n            p0 = (u8 *)&gUnk_08189F04;\n            EntityCreate((u8)v2, p0[v1 + v0 * 192 + 7], ((struct Struct0 *)(v1 + v0 * 192 + (u32)&gUnk_08189F04))->field_0, ((struct Struct0 *)(v1 + v0 * 192 + (u32)&gUnk_08189F04))->field_2, p0[v1 + v0 * 192 + 4], p0[v1 + v0 * 192 + 9], p0[v1 + v0 * 192 + 5], p0[v1 + v0 * 192 + 6], p0[v1 + v0 * 192 + 8]);\n            v1 += 12;\n        } while (*(u16 *)(v0 * 192 + v1 + (u32)&gUnk_08189F04) != 65535);\n    }\n    gUnk_03004D84 = (void *)((u8 *)gUnk_03004D84 + 4);\n}\n",
+        "source": "struct Elem0 { u16 field_0; u8 _pad0[190]; };\nstruct Struct0 { u16 field_0; u16 field_2; u8 field_4; u8 field_5; u8 field_6; u8 field_7; u8 field_8; u8 field_9; };\nvoid sub_0804C300(void) {\n    u16 v0;\n    s32 v2;\n    s32 v1;\n    u8 *p0;\n    v0 = sub_0804B254((u8 *)gUnk_03004D84 + 2);\n    if (((struct Elem0 *)&gUnk_08189F04)[v0].field_0 != 65535) {\n        v1 = 0;\n        do {\n            v2 = gUnk_03005428;\n            gUnk_03005428 = v2 + 1;\n            p0 = (u8 *)&gUnk_08189F04;\n            EntityCreate((u8)v2, p0[v1 + v0 * 192 + 7], ((struct Struct0 *)(v1 + v0 * 192 + (u32)&gUnk_08189F04))->field_0, ((struct Struct0 *)(v1 + v0 * 192 + (u32)&gUnk_08189F04))->field_2, p0[v1 + v0 * 192 + 4], p0[v1 + v0 * 192 + 9], p0[v1 + v0 * 192 + 5], p0[v1 + v0 * 192 + 6], p0[v1 + v0 * 192 + 8]);\n            v1 += 12;\n        } while (*(u16 *)(v0 * 192 + v1 + (u32)&gUnk_08189F04) != 65535);\n    }\n    gUnk_03004D84 = (void *)((u8 *)gUnk_03004D84 + 4);\n}\n",
         "score": 43,
         "maxScore": 78,
         "compileErrors": null,
@@ -596298,10 +596298,10 @@
           "argMismatch": 16
         },
         "quality": {
-          "score": 88,
+          "score": 86,
           "lines": 20,
           "gotos": 0,
-          "casts": 6,
+          "casts": 7,
           "unkGlue": 0,
           "rawMem": 1,
           "addrDeref": 0,
@@ -596318,7 +596318,7 @@
             "callNeZero": 0,
             "localGaps": 0,
             "unusedLocals": 0,
-            "placeholderParams": 4,
+            "placeholderParams": 0,
             "genericCounters": 1
           }
         }
@@ -596465,7 +596465,7 @@
             "candidates": 8
           }
         },
-        "rankSeconds": 2.1,
+        "rankSeconds": 0.82,
         "symbolsUsed": [
           {
             "name": "gBgInfo",
@@ -596653,7 +596653,7 @@
             "candidates": 4
           }
         },
-        "rankSeconds": 0.17,
+        "rankSeconds": 0.59,
         "symbolsUsed": [
           {
             "name": "gBgInfo",
@@ -596808,7 +596808,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.09,
+        "rankSeconds": 0.1,
         "symbolsUsed": [
           {
             "name": "gUnk_03004D84",
@@ -596990,7 +596990,7 @@
             "candidates": 46
           }
         },
-        "rankSeconds": 2.18,
+        "rankSeconds": 2.53,
         "symbolsUsed": [
           {
             "name": "gEntityInfo",
@@ -597182,7 +597182,7 @@
             "candidates": 32
           }
         },
-        "rankSeconds": 6.42,
+        "rankSeconds": 5.72,
         "symbolsUsed": [
           {
             "name": "gUnk_030034A0",
@@ -597190,7 +597190,7 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "struct Struct0 { u8 field_0; u8 _pad0[31]; s32 field_32; };\nstruct Struct1 { u8 field_0; u8 _pad0[31]; s32 field_32; };\ns32 sub_0804C8F4(struct Struct0 *a0, s32 a1, s32 a2, s32 a3) {\n    s32 v0;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    struct Struct0 *v1;\n    s32 i;\n    s32 result;\n    struct Struct1 *v5;\n    s32 j;\n    i = 0;\n    v0 = 7;\n    result = 0;\n    v1 = a0;\n    do {\n        v2 = v1->field_0;\n        if ((u32)(v2 << 29) >> 29 != 0) {\n            if ((u32)*(u8 *)gUnk_030034A0 >> 6 != 0) v1->field_0 = v2 & 0 - 8 | ((u32)(v2 << 29) >> 29 | 4) & v0;\n            v3 = ((s32 (*)())v1->field_32)(i);\n            v4 = v1->field_0;\n            v1->field_0 = v4 & 0 - 8 | v3 & v0;\n            if ((v4 & 0 - 8 | v3 & v0) << 29 != 0) result++;\n        }\n        v1 = (struct Struct0 *)((u8 *)v1 + 36);\n        i++;\n    } while (i <= 15);\n    j = 16;\n    v5 = (struct Struct1 *)(struct Struct0 *)((0x90 << 2) + (u8 *)a0);\n    do {\n        if (v5->field_0 << 29 != 0) v5->field_0 = v5->field_0 & -8 | ((s32 (*)())v5->field_32)(j) & 7;\n        v5 = (struct Struct1 *)((u8 *)v5 + 36);\n        j++;\n    } while (j <= 31);\n    if ((u32)*(u8 *)gUnk_030034A0 >> 6 == 0) result = 0;\n    return result;\n}\n",
+        "source": "struct Struct0 { u8 field_0; u8 _pad0[31]; s32 field_32; };\nstruct Struct1 { u8 field_0; u8 _pad0[31]; s32 field_32; };\ns32 sub_0804C8F4(struct Struct0 *a0) {\n    s32 v0;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    struct Struct0 *v1;\n    s32 i;\n    s32 result;\n    struct Struct1 *v5;\n    s32 j;\n    i = 0;\n    v0 = 7;\n    result = 0;\n    v1 = a0;\n    do {\n        v2 = v1->field_0;\n        if ((u32)(v2 << 29) >> 29 != 0) {\n            if ((u32)*(u8 *)gUnk_030034A0 >> 6 != 0) v1->field_0 = v2 & 0 - 8 | ((u32)(v2 << 29) >> 29 | 4) & v0;\n            v3 = ((s32 (*)())v1->field_32)(i);\n            v4 = v1->field_0;\n            v1->field_0 = v4 & 0 - 8 | v3 & v0;\n            if ((v4 & 0 - 8 | v3 & v0) << 29 != 0) result++;\n        }\n        v1 = (struct Struct0 *)((u8 *)v1 + 36);\n        i++;\n    } while (i <= 15);\n    j = 16;\n    v5 = (struct Struct1 *)(struct Struct0 *)((0x90 << 2) + (u8 *)a0);\n    do {\n        if (v5->field_0 << 29 != 0) v5->field_0 = v5->field_0 & -8 | ((s32 (*)())v5->field_32)(j) & 7;\n        v5 = (struct Struct1 *)((u8 *)v5 + 36);\n        j++;\n    } while (j <= 31);\n    if ((u32)*(u8 *)gUnk_030034A0 >> 6 == 0) result = 0;\n    return result;\n}\n",
         "score": 41,
         "maxScore": 96,
         "compileErrors": null,
@@ -597222,7 +597222,7 @@
             "callNeZero": 0,
             "localGaps": 0,
             "unusedLocals": 0,
-            "placeholderParams": 4,
+            "placeholderParams": 1,
             "genericCounters": 0
           }
         }
@@ -597386,7 +597386,7 @@
             "candidates": 128
           }
         },
-        "rankSeconds": 9.46,
+        "rankSeconds": 8.09,
         "symbolsUsed": [
           {
             "name": "gBgInfo",
@@ -597587,7 +597587,7 @@
             "candidates": 240
           }
         },
-        "rankSeconds": 5.42,
+        "rankSeconds": 5.36,
         "symbolsUsed": [
           {
             "name": "gUnk_030052A4",
@@ -597761,7 +597761,7 @@
             "candidates": 5
           }
         },
-        "rankSeconds": 0.12,
+        "rankSeconds": 0.52,
         "symbolsUsed": [
           {
             "name": "gUnk_03004D84",
@@ -597919,7 +597919,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.14,
+        "rankSeconds": 0.1,
         "symbolsUsed": [
           {
             "name": "gUnk_0300081C",
@@ -598124,7 +598124,7 @@
             "withheld": 64
           }
         },
-        "rankSeconds": 7.38,
+        "rankSeconds": 7.7,
         "withheldCandidates": [
           {
             "variations": [
@@ -599222,7 +599222,7 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "struct Elem0 { u8 field_0; u8 field_1; u8 field_2; u8 _pad0[1]; };\nstruct Elem1 { s32 field_0; u8 _pad0[4]; };\nstruct Elem2 { u8 _pad0[8]; u8 field_8; u8 _pad1[2]; u8 field_11; u8 _pad2[3]; u8 field_15; u8 field_16; u8 _pad3[11]; };\nstruct Elem3 { s32 field_0; u8 field_4; u8 field_5; u8 _pad0[2]; };\nstruct Struct0 { s32 field_0; s32 field_4; u16 field_8; u8 field_10; };\nvoid UpdateEntityAnimationInfoEntries(s32 a0, s32 a1, s32 a2, s32 a3) {\n    s32 v1;\n    s32 *v2;\n    struct Elem1 *v3;\n    s32 v4;\n    u32 i;\n    struct Struct0 *v0;\n    volatile s32 *p0;\n    p0 = (s32 *)0x40000d4;\n    for (i = 0; i <= 44; i++) {\n        if (i <= 8) {\n            v0 = (struct Struct0 *)(u8 *)((u32)gUnk_03005418 + i * 12);\n        } else {\n            v0 = (struct Struct0 *)((u8 *)((u32)gUnk_03005294 + i * 12) - 108);\n        }\n        if (v0->field_0 == 0) break;\n        if (v0->field_0 != 1) {\n            if (((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_1 != 255) {\n                v1 = ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_1 - 1;\n                ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_1 = v1;\n                if ((u8)v1 == 0) {\n                    v2 = (s32 *)v0->field_0;\n                    v3 = (struct Elem1 *)v2[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_0];\n                    v4 = ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2;\n                    ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2;\n                    ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2 = v4 + 1;\n                    if (v3[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_0 == -1) {\n                        ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2;\n                        ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2 = (u8)v1;\n                        ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_1 = ((struct Elem3 *)v3)[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_4;\n                        p0[0] = ((struct Elem3 *)v3)[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_0;\n                        p0[1] = v0->field_4;\n                        p0[2] = (u32)v0->field_8 >> 1 | 0x80 << 24;\n                        ((volatile s32 *)p0)[2];\n                        ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_11 = -16 & ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_11 | (u32)(((struct Elem3 *)v3)[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_5 << 28) >> 28;\n                        ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_11 = 0xf & ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_11 | ((struct Elem3 *)v3)[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_5 << 24 >> 28 << 4;\n                    } else {\n                        if (v3[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_0 == -2) {\n                            ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_1 = ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_1 | 0xff;\n                            ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_16 = (u8)v1;\n                            ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_15 = 28;\n                            ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_8 = (u8)v1;\n                        } else {\n                            if ((u32)v3[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_0 > 9999) {\n                                if (v3[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_0 == -3) {\n                                    ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_1 = ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_1 | 0xff;\n                                } else {\n                                    ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_1 = ((struct Elem3 *)v3)[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_4;\n                                    p0[0] = ((struct Elem3 *)v3)[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_0;\n                                    p0[1] = v0->field_4;\n                                    p0[2] = (u32)v0->field_8 >> 1 | 0x80 << 24;\n                                    ((volatile s32 *)p0)[2];\n                                    ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_11 = -16 & ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_11 | (u32)(((struct Elem3 *)v3)[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_5 << 28) >> 28;\n                                    ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_11 = 0xf & ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_11 | ((struct Elem3 *)v3)[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_5 << 24 >> 28 << 4;\n                                }\n                            } else {\n                                ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_0 = v3[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_0;\n                                ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2;\n                                ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2 = (u8)v1;\n                                v3 = (struct Elem1 *)v2[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_0];\n                                ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_1 = ((struct Elem3 *)v3)[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_4;\n                                p0[0] = ((struct Elem3 *)v3)[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_0;\n                                p0[1] = v0->field_4;\n                                p0[2] = (u32)v0->field_8 >> 1 | 0x80 << 24;\n                                ((volatile s32 *)p0)[2];\n                                ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_11 = -16 & ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_11 | (u32)(((struct Elem3 *)v3)[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_5 << 28) >> 28;\n                                ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_11 = 0xf & ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_11 | ((struct Elem3 *)v3)[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_5 << 24 >> 28 << 4;\n                            }\n                        }\n                    }\n                }\n            }\n        }\n    }\n}\n",
+        "source": "struct Elem0 { u8 field_0; u8 field_1; u8 field_2; u8 _pad0[1]; };\nstruct Elem1 { s32 field_0; u8 _pad0[4]; };\nstruct Elem2 { u8 _pad0[8]; u8 field_8; u8 _pad1[2]; u8 field_11; u8 _pad2[3]; u8 field_15; u8 field_16; u8 _pad3[11]; };\nstruct Elem3 { s32 field_0; u8 field_4; u8 field_5; u8 _pad0[2]; };\nstruct Struct0 { s32 field_0; s32 field_4; u16 field_8; u8 field_10; };\nvoid UpdateEntityAnimationInfoEntries(void) {\n    s32 v1;\n    s32 *v2;\n    struct Elem1 *v3;\n    s32 v4;\n    u32 i;\n    struct Struct0 *v0;\n    volatile s32 *p0;\n    p0 = (s32 *)0x40000d4;\n    for (i = 0; i <= 44; i++) {\n        if (i <= 8) {\n            v0 = (struct Struct0 *)(u8 *)((u32)gUnk_03005418 + i * 12);\n        } else {\n            v0 = (struct Struct0 *)((u8 *)((u32)gUnk_03005294 + i * 12) - 108);\n        }\n        if (v0->field_0 == 0) break;\n        if (v0->field_0 != 1) {\n            if (((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_1 != 255) {\n                v1 = ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_1 - 1;\n                ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_1 = v1;\n                if ((u8)v1 == 0) {\n                    v2 = (s32 *)v0->field_0;\n                    v3 = (struct Elem1 *)v2[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_0];\n                    v4 = ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2;\n                    ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2;\n                    ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2 = v4 + 1;\n                    if (v3[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_0 == -1) {\n                        ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2;\n                        ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2 = (u8)v1;\n                        ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_1 = ((struct Elem3 *)v3)[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_4;\n                        p0[0] = ((struct Elem3 *)v3)[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_0;\n                        p0[1] = v0->field_4;\n                        p0[2] = (u32)v0->field_8 >> 1 | 0x80 << 24;\n                        ((volatile s32 *)p0)[2];\n                        ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_11 = -16 & ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_11 | (u32)(((struct Elem3 *)v3)[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_5 << 28) >> 28;\n                        ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_11 = 0xf & ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_11 | ((struct Elem3 *)v3)[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_5 << 24 >> 28 << 4;\n                    } else {\n                        if (v3[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_0 == -2) {\n                            ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_1 = ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_1 | 0xff;\n                            ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_16 = (u8)v1;\n                            ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_15 = 28;\n                            ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_8 = (u8)v1;\n                        } else {\n                            if ((u32)v3[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_0 > 9999) {\n                                if (v3[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_0 == -3) {\n                                    ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_1 = ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_1 | 0xff;\n                                } else {\n                                    ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_1 = ((struct Elem3 *)v3)[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_4;\n                                    p0[0] = ((struct Elem3 *)v3)[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_0;\n                                    p0[1] = v0->field_4;\n                                    p0[2] = (u32)v0->field_8 >> 1 | 0x80 << 24;\n                                    ((volatile s32 *)p0)[2];\n                                    ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_11 = -16 & ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_11 | (u32)(((struct Elem3 *)v3)[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_5 << 28) >> 28;\n                                    ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_11 = 0xf & ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_11 | ((struct Elem3 *)v3)[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_5 << 24 >> 28 << 4;\n                                }\n                            } else {\n                                ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_0 = v3[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_0;\n                                ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2;\n                                ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2 = (u8)v1;\n                                v3 = (struct Elem1 *)v2[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_0];\n                                ((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_1 = ((struct Elem3 *)v3)[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_4;\n                                p0[0] = ((struct Elem3 *)v3)[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_0;\n                                p0[1] = v0->field_4;\n                                p0[2] = (u32)v0->field_8 >> 1 | 0x80 << 24;\n                                ((volatile s32 *)p0)[2];\n                                ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_11 = -16 & ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_11 | (u32)(((struct Elem3 *)v3)[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_5 << 28) >> 28;\n                                ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_11 = 0xf & ((struct Elem2 *)&gEntityInfo)[v0->field_10].field_11 | ((struct Elem3 *)v3)[((volatile struct Elem0 *)&gEntityAnimationInfo)[i].field_2].field_5 << 24 >> 28 << 4;\n                            }\n                        }\n                    }\n                }\n            }\n        }\n    }\n}\n",
         "score": 197,
         "maxScore": 293,
         "compileErrors": null,
@@ -599237,7 +599237,7 @@
           "score": 88,
           "lines": 80,
           "gotos": 0,
-          "casts": 16,
+          "casts": 17,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0,
@@ -599254,7 +599254,7 @@
             "callNeZero": 0,
             "localGaps": 0,
             "unusedLocals": 0,
-            "placeholderParams": 4,
+            "placeholderParams": 0,
             "genericCounters": 0
           }
         }
@@ -599379,7 +599379,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.03,
+        "rankSeconds": 0.04,
         "symbolsUsed": [
           {
             "name": "INTR_CHECK",
@@ -599533,7 +599533,7 @@
             "candidates": 3
           }
         },
-        "rankSeconds": 0.11,
+        "rankSeconds": 0.09,
         "symbolsUsed": [
           {
             "name": "REG_BLDY",
@@ -599958,7 +599958,7 @@
             "withheld": 1152
           }
         },
-        "rankSeconds": 134.19,
+        "rankSeconds": 122.06,
         "withheldCandidates": [
           {
             "variations": [
@@ -657994,7 +657994,7 @@
             "withheld": 5712
           }
         },
-        "rankSeconds": 571.29,
+        "rankSeconds": 525.8,
         "withheldCandidates": [
           {
             "variations": [
@@ -893489,7 +893489,7 @@
             "candidates": 12
           }
         },
-        "rankSeconds": 4.54,
+        "rankSeconds": 4,
         "symbolsUsed": [
           {
             "name": "gBgTilemapBufs",
@@ -893684,7 +893684,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 0.29,
+        "rankSeconds": 0.31,
         "withheldCandidates": [
           {
             "variations": [
@@ -893935,7 +893935,7 @@
             "withheld": 1589
           }
         },
-        "rankSeconds": 149.12,
+        "rankSeconds": 149.91,
         "withheldCandidates": [
           {
             "variations": [
@@ -940755,7 +940755,7 @@
             "candidates": 216
           }
         },
-        "rankSeconds": 61.41,
+        "rankSeconds": 49.99,
         "withheldCandidates": [
           {
             "variations": [
