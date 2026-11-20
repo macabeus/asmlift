@@ -222,11 +222,12 @@ export interface CallSite {
    *  register this ABI never leaves empty below a filled one is then no hole either, so no register
    *  above it is an argument, and the guessed arity stops below the lowest such register
    *  (`fallbackArgc`'s `ceiling`). The holes are `parked`'s, asked per register: every register on
-   *  agbcc, which fills argument words in order; on O32 and PowerPC not a register an aligned pair
-   *  skips (a1, r4), nor the a0 a leading float leaves untouched, where the marker may stand in a
-   *  register the call skipped and caps nothing. "Some real path" is asked of the blocks filled so
-   *  far (`SsaBuilder.holdsValueOnFilledPaths`): a block not filled yet may write the register on its
-   *  way to the call, so the marker past it is no value that path brings. */
+   *  agbcc, which fills argument words in order; on PowerPC not a register an aligned pair skips
+   *  (r4, r6, r8, r10); on O32 none, since a1/a3 are a pair's skips and the two leading float slots
+   *  may leave every one of a0..a3 empty (`argRegisterHoles` `floatShadowed`): there the marker may
+   *  stand in a register the call skipped and caps nothing. "Some real path" is asked of the blocks
+   *  filled so far (`SsaBuilder.holdsValueOnFilledPaths`): a block not filled yet may write the
+   *  register on its way to the call, so the marker past it is no value that path brings. */
   readonly marker?: (v: Value, reg: string) => boolean;
   /** whether `v`, in argument register `reg`, is the scaled index a jump-table dispatch left in that
    *  very register (frontend/jump-table.ts `scaledIndexIn`): a call handed it and one not compile
@@ -1094,7 +1095,7 @@ export function callDeclarations(
     // how many argument words the decided gaps put beyond doubt
     let decidedWords = 0;
     // whether this ABI may leave argument register `r` empty below one a call fills (`argRegisterHoles`)
-    const maySkip = (r: string) => holes.skippable.has(r) || (holes.leadingFloatShadow && r === target.argRegs[0]);
+    const maySkip = (r: string) => holes.skippable.has(r) || holes.floatShadowed.has(r);
     // the lowest argument register past the stated ones that some path filled so far brings a
     // dispatch's marker to, of those the ABI never skips (`CallSite.marker`)
     const ceiling = target.argRegs.findIndex(
