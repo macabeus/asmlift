@@ -356,7 +356,14 @@ export type Stmt =
   // same-level `continue` is NOT converted. `init`/`inc` are Stmts (an `assign`); a backend that
   // cannot spell native `for` may always fall back to the `while` desugaring (Pascal does), so this
   // node never forces a loud-fail.
-  | { k: 'for'; init: Stmt; cond: Expr; inc: Stmt; body: Stmt[] }
+  // `inc` is a LIST, printed as one comma expression (`i++, j = i << 2`): it runs left to right after
+  // the body and on every `continue`, so a later step may read a name an earlier one wrote
+  // (structure.ts `forPlanAt`, A SECOND COUNTER). It is never empty. `init` stays ONE statement, the
+  // counter's (the name `cond` reads): every other stepped name's init is a statement ahead of the
+  // loop, `j = lo << 3; for (i = lo; i <= hi; i++, j = i << 2)` where a source may have written
+  // `for (i = lo, j = lo << 3; …)`. The two run the same, as the init clause runs right after the
+  // statements ahead of it; only the reading differs.
+  | { k: 'for'; init: Stmt; cond: Expr; inc: Stmt[]; body: Stmt[] }
   // `break;` / `continue;` — a loop early-exit / next-iteration jump. Emitted ONLY when the target is
   // the innermost enclosing loop (bare C break/continue cannot express a multi-level exit; a deeper
   // target declines). SGI/IDO Pascal has neither, so its backend loud-fails them (like `field`/`cast`).
@@ -1009,7 +1016,7 @@ export function mapStmtExprs(s: Stmt, f: (e: Expr) => Expr): Stmt {
     case 'dowhile':
       return { ...s, cond: f(s.cond), body: s.body.map(mapS) };
     case 'for':
-      return { ...s, init: mapS(s.init), cond: f(s.cond), inc: mapS(s.inc), body: s.body.map(mapS) };
+      return { ...s, init: mapS(s.init), cond: f(s.cond), inc: s.inc.map(mapS), body: s.body.map(mapS) };
     case 'switch':
       return {
         ...s,
@@ -1186,7 +1193,7 @@ export function stmtChildren(s: Stmt): Stmt[] {
     case 'dowhile':
       return s.body;
     case 'for':
-      return [s.init, s.inc, ...s.body];
+      return [s.init, ...s.inc, ...s.body];
     case 'switch': {
       const arms = s.cases.map((c) => c.body);
       arms.splice(s.defaultAt ?? s.cases.length, 0, s.default ?? []);
@@ -1328,7 +1335,7 @@ export function caseGotoViolation(body: readonly Stmt[]): string | null {
         }
       }
       if (s.k === 'for') {
-        const why = walk([s.init, s.inc], { labels: null, armTop: false, ends: NO_ENDS, inArm: false });
+        const why = walk([s.init, ...s.inc], { labels: null, armTop: false, ends: NO_ENDS, inArm: false });
         if (why !== null) {
           return why;
         }
@@ -1544,7 +1551,7 @@ export function renameVariables(
       return to === undefined ? s : { ...s, name: to };
     }
     const m = mapStmtLists(s, (l) => l.map(target));
-    return m.k === 'for' ? { ...m, init: target(m.init), inc: target(m.inc) } : m;
+    return m.k === 'for' ? { ...m, init: target(m.init), inc: m.inc.map(target) } : m;
   };
   return body.map((s) => target(mapStmtExprs(s, (e) => renameInExpr(e, renames, opts))));
 }

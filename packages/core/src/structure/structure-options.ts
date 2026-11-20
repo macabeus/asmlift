@@ -129,6 +129,13 @@ export interface StructureOptions extends ArithCompilerFacts {
    *  `while (1)` with that latch at the foot of the body and as a `for` whose `continue` runs it, so
    *  the differ referees the two where both lift. Inert where `forPlanAt` refuses every loop. */
   spellCountedLoopsFor?: boolean;
+  /** Let a loop `spellCountedLoopsFor` asks step SEVERAL names in its `for`'s update
+   *  (`i++, j = i << 2`; structure.ts `forPlanAt`, A SECOND COUNTER), not only its counter. rank.ts's
+   *  `/for-steps` variation: without it such a loop stays `while (1)` under `/for-continue`, and
+   *  both are one asm, so the differ referees the two. A loop a declined run asks (`ForRanking`)
+   *  takes its second counter either way, since its `while (1)` declined. Inert without
+   *  `spellCountedLoopsFor`. */
+  stepSecondCounters?: boolean;
   // Comparison-tree switch recovery: treat an `x != K` test as a case (the EQUAL side is a case
   // body). GCC freely uses `!=`; IDO prefers `==`/`<`. A compiler behavior, not an `arch ==`
   // branch — default true (permissive; the decline path keeps it sound either way).
@@ -534,12 +541,25 @@ export interface StructureHooks {
   onCaseCopied?: () => void;
   /** Fired each time a `while (1)` loop no run asked for (`ForRanking`) passes every check of
    *  `forPlanAt` — a single pure latch, a guard or plain entry, a test and update read only from the
-   *  latch, the header's params and values from outside the loop, one update copy, and the guard
-   *  (or the folded first test) read on the entry values — the one place `spellCountedLoopsFor` changes what the structurer
-   *  reads. A structuring with that option off that never fires it builds the same tree as the same
-   *  options with it on, so rank.ts skips `/for-continue` on its sibling. Not fired by
+   *  latch, the header's params and values from outside the loop, an update whose steps have an
+   *  order, and the guard (or the folded first test) read on the entry values — and would be spelled
+   *  `for` with `spellCountedLoopsFor` on: the one place that option changes what the structurer
+   *  reads. A loop stepping several names counts only under `stepSecondCounters`: without it
+   *  `/for-continue` alone leaves that loop `while (1)`, and it fires `onForStepsOffered` instead. A
+   *  structuring with that option off that never fires it builds the same tree as the same options
+   *  with it on, so rank.ts skips `/for-continue` on its sibling. Not fired by
    *  `assertDefaultAccepts`' structuring. */
   onForOffered?: () => void;
+  /** Fired each time a loop no declined run asked (`ForRanking`) passes every check of `forPlanAt`
+   *  with an update that steps several names, and stays `while (1)` because `stepSecondCounters` is
+   *  off: the one place that option changes what the structurer reads, beside
+   *  `spellCountedLoopsFor`. Fired with `spellCountedLoopsFor` off too, in place of `onForOffered`:
+   *  rank.ts enumerates `/for-steps` only beside `/for-continue`, and records a `/for-continue` it
+   *  skipped as its sibling's tree with that sibling's witnesses, so a sibling without either option
+   *  answers for what `/for-steps` would change under `/for-continue`. A structuring with it off
+   *  that never fires this builds the same tree as the same options with it on, so rank.ts skips
+   *  `/for-steps` on its sibling. Not fired by `assertDefaultAccepts`' structuring. */
+  onForStepsOffered?: () => void;
   /** Fired each time `bound-plus-one-counter-wraps` is the rule that refuses a reading of a latch's
    *  `!=` test: the one refusal of `forPlanAt` that reads how the signedness pin declared the
    *  counter, so the other pin may take the `for` this one cannot. Unheld: it fires from every

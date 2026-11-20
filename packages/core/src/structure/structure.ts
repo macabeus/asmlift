@@ -265,6 +265,37 @@ export { DefaultAcceptsMemoMisuse, DefaultAcceptsMemo } from './default-accepts-
 export { hasDivergentSharedRet } from './return-joins';
 export { functionPostDominators } from './cfg';
 
+/** Whether any loop could be a `for` whose update steps a SECOND NAME (`forPlanAt`'s A SECOND
+ *  COUNTER) — what `rank.ts` gates enumeration of `/for-steps` on. `forPlanAt` reads only a loop
+ *  structured as `while (1)` (`foreverLoops`), and its update is the copies the back edge writes,
+ *  stepping several names only where that edge hands two or more of the header's params a value
+ *  other than their own. So the loop needs both:
+ *  - a back edge (into a block that dominates its source) whose arguments differ from the header's
+ *    params in two or more places;
+ *  - a way out other than one bottom test: an exit edge from a block that is not a latch, or two
+ *    exit edges. A loop whose one exit edge leaves from its latch's `cond_br` back into the header
+ *    is the `do-while` reading's (`doWhileLoops`), which the `while (1)` readings never ask.
+ *  An OVER-approximation, the safe direction for a gate that only decides whether to enumerate:
+ *  `forShapeOf` and `forPlanAt`'s gates can still refuse the loop, and a stride
+ *  (`strideDerivedParams`) among those params is no step at all. It asks no latch shape beyond the
+ *  back edge: a raise pass after the shared lift can fold an empty `br` latch into the block that
+ *  tests (raise/latch.ts), and such a loop's exit leaves from a block that is no latch here, so it
+ *  is kept. Measured where it pays: `kleod:sub_0803F68C:agbcc`'s one stepping loop is a `do-while`
+ *  of four params, and enumerating `/for-steps` beside `/for-continue` there raised the row's peak
+ *  heap by about 11% (2.07 to 2.30 GB peak RSS) with every setting skipped by the OFF witness. */
+export function hasSecondCounterLoop(fn: Fn): boolean {
+  const dom = dominators(fn);
+  return [...analyzeLoops(fn, dom).byHeader.values()].some(
+    (nl) =>
+      (nl.exitEdges.length > 1 || nl.exitEdges.some((e) => !nl.latches.includes(e.from))) &&
+      nl.latches.some((latch) =>
+        latch.ops[latch.ops.length - 1].successors.some(
+          (sx) => sx.block === nl.header && sx.args.filter((a, i) => a !== sx.block.params[i]).length > 1,
+        ),
+      ),
+  );
+}
+
 /** THE COPY BUDGET: how many times one structuring may enter a region, per block of the function,
  *  before `structure()` stops it. A region both arms of an `if` reach with no join between them is
  *  written into each arm, and a chain of such `if`s doubles it per link — sub_0800D188 entered
@@ -344,6 +375,7 @@ function assertDefaultAccepts(
     copyEveryTailEntrant: false,
     jumpToSharedCases: false,
     spellCountedLoopsFor: false,
+    stepSecondCounters: false,
   };
   if (memo === undefined) {
     structure(fn, reset, hooks);
@@ -642,6 +674,7 @@ function structureLadder(
           onTailFallerKept: hooks.onTailFallerKept && hold(hooks.onTailFallerKept),
           onCaseCopied: hooks.onCaseCopied && hold(hooks.onCaseCopied),
           onForOffered: hooks.onForOffered && hold(hooks.onForOffered),
+          onForStepsOffered: hooks.onForStepsOffered && hold(hooks.onForStepsOffered),
           onJoinPastReturns: hooks.onJoinPastReturns && hold(hooks.onJoinPastReturns),
         },
         memo,
@@ -775,6 +808,7 @@ function structureRanked(
     copyEveryTailEntrant = false,
     jumpToSharedCases = false,
     spellCountedLoopsFor = false,
+    stepSecondCounters = false,
     switchAllowsNeqCase = true,
     switchBoundCase,
     switchArmsFollowLayout = false,
@@ -930,7 +964,8 @@ function structureRanked(
     copyReturnTails ||
     copyEveryTailEntrant ||
     jumpToSharedCases ||
-    spellCountedLoopsFor
+    spellCountedLoopsFor ||
+    stepSecondCounters
   ) {
     // The observation hooks are this setting's, not the default's: dropped for that run, which also
     // leaves it answerable from `memo`.
@@ -942,6 +977,7 @@ function structureRanked(
         onTailFallerKept: undefined,
         onCaseCopied: undefined,
         onForOffered: undefined,
+        onForStepsOffered: undefined,
         onCounterSignRefused: undefined,
         onJoinPastReturns: undefined,
         onJoinReadsAsCopies: undefined,
@@ -7113,9 +7149,11 @@ function structureRanked(
   //     keeps `i + 1` from a body that reads it, and the latch hands that register round): the
   //     update runs after the header did on every path, and the test reads it only as the variable
   //     it updates;
-  //   • the update is ONE copy, `inc`, and `g`'s copies into the header name that variable with a
-  //     value that reads no other copy's name, `init`; the rest precede the `for`;
-  //   • the test reads no variable the update writes except through its back-edge value, and no
+  //   • the update is the latch's copies, `inc`, one step per name it writes, in an order where no
+  //     step reads the old value of a name stepped ahead of it (A SECOND COUNTER, at `stepsInOrder`);
+  //     the counter is the step the test reads, and `g`'s copy into the header naming it, with a
+  //     value that reads no other copy's name, is `init`; the rest precede the `for`;
+  //   • the test reads no variable the update steps except through its back-edge value, and no
   //     inner loop's value (`latchInnerSub`);
   //   • a guard's condition is the test read on the loop's entry values (`sameAtEntry`), a load on
   //     either side read through only where it is evaluated at the test; with no guard, that test
@@ -7146,11 +7184,12 @@ function structureRanked(
   // A SIBLING'S STRIDE. IDO keeps `gE[i]` of `for (i = lo; i <= hi; i++)` in a pointer the header
   // takes beside `i`, `gE + (lo << 3)` on entry and stepped by 8 in the latch; raise/unpre.ts
   // `strideDerivedParams` proves it G(i) at every entry, by induction. `while (1)` spells it as the
-  // variable the asm holds, which reads closest to the bytes there, and the `for` cannot: its update
-  // is ONE copy. So the `for` writes the pointer nowhere — no init copy, no update copy — and renders
-  // every read of it as G of the counter's name. That is exact where the name holds the counter and
-  // each of G's other leaves holds itself at every read, and where the pointer is read nowhere the
-  // `for` does not render G:
+  // variable the asm holds, which reads closest to the bytes there. The `for` could step it as a
+  // second name (A SECOND COUNTER, `i++, p += 8`), but that keeps the pointer the compiler made and
+  // not the `gE[i]` the source wrote, a reading choice and no limit of the IR: so the `for` writes the
+  // pointer nowhere — no init copy, no update copy — and renders every read of it as G of the
+  // counter's name. That is exact where the name holds the counter and each of G's other leaves holds
+  // itself at every read, and where the pointer is read nowhere the `for` does not render G:
   //   • the param and its back-edge value are read by no edge but the back edge's own slot, by no op
   //     outside the loop, and not by the test or the counter's update (a pointer test is no counted
   //     loop's; IDO tests the pointer only where the counter is dead, and none is invented here)
@@ -7172,6 +7211,7 @@ function structureRanked(
   //     spelled `gP + (i << 3)` would load `gP` again on every trip, past the calls that may write it
   //     (`stride-leaf-reread`);
   //   • and, checked on the emitted loop, nothing the `for` spells reads the param's name.
+  // A stride beside a second counter is refused, not combined.
   /** The stride's param and its back-edge value stay inside the loop, and off its test and update. */
   const strideStaysInLoop = (
     sd: StrideDerived,
@@ -7391,7 +7431,7 @@ function structureRanked(
     inits: Stmt[];
     init: Stmt;
     cond: Expr;
-    inc: Stmt;
+    inc: Stmt[];
     /** the derived parameters' reads (A SIBLING'S STRIDE), and the names the `for` never writes */
     derived?: { reads: Map<Value, (e: (v: Value) => Expr) => Expr>; names: Set<string> };
   };
@@ -7509,29 +7549,133 @@ function structureRanked(
         strictGaps.length = gapMark;
       }
     }
-    // the update is ONE copy: not a rule of `FOR_PLAN_IV_GATES`, which every one of its fields reads
-    if (updateRecs.length !== 1) {
-      return null;
-    }
-    const iv = updateRecs[0].name;
-    const ivInit = initRecs.find((r) => r.name === iv);
-    const sub = subFor(h.params, back.args as Value[]);
-    // The plain reading renders the latch's copies and test as `argAssigns` and `exprWith` do. A
-    // latch may hold a materialized op its own reads alone use, which the `for` never
-    // renders at its position, so its test and update spell every latch op inline, and the test is
-    // checked through them for a read of the name the update writes.
+    // A SECOND COUNTER: the update steps the counter and other names, left to right, each step
+    // reading the names already stepped (their new value), its own old value, the names not yet
+    // stepped (their old value) and what the loop never writes — `for (i = lo, j = lo << 3; i <= hi;
+    // i++, j = i << 2)`, whose latch steps `i` and then recomputes `j` from the new `i`. C runs a
+    // comma update in that order, after the body and on every `continue`, as the latch does. So the
+    // one constraint is that no step reads the OLD value of a name stepped ahead of it: the steps
+    // are sorted on that relation (`stepsInOrder`), and only a cycle in it (`a = b, b = a + b`)
+    // leaves the loop `while (1)`. The counter is the step the test reads, whatever the latch's
+    // write order. Each step is spelled as `latchExpr` spells it, every latch op inline and anything
+    // else as `exprWith` does, and `readsStepped` walks it the same way. Not a rule of
+    // `FOR_PLAN_IV_GATES`, which every one of its fields reads; a stride (A SIBLING'S STRIDE) beside
+    // a second counter is refused rather than combined.
     const inlined = latch.ops.some((o) => materialize.has(o));
-    const clobbered = (v: Value, seen = new Set<Value>()): boolean => {
+    // Whether `v`, spelled with `named`'s values by their names and, where `inline` holds, every
+    // other latch op inline, reads the old value of one of `names` (hazards.ts `readsClobbered`,
+    // which stops at a named value). The update's steps and the `for`'s test both ask it.
+    const readsStepped = (
+      v: Value,
+      named: ReadonlyMap<Value, string>,
+      names: ReadonlySet<string>,
+      inline: boolean,
+      seen = new Set<Value>(),
+    ): boolean => {
       const d = defs.get(v);
-      if (!inlined || sub.has(v) || d === undefined || opBlock.get(d) !== latch) {
-        return readsClobbered(v, sub, new Set([iv]));
+      if (!inline || named.has(v) || d === undefined || opBlock.get(d) !== latch) {
+        return readsClobbered(v, named as Map<Value, string>, names as Set<string>);
       }
       if (seen.has(v)) {
         return false;
       }
       seen.add(v);
-      return d.operands.some((o) => clobbered(o, seen));
+      return d.operands.some((o) => readsStepped(o, named, names, inline, seen));
     };
+    type StepRec = (typeof updateRecs)[number];
+    // What the step `r`'s value reads of the other steps, through the latch's ops: the new values
+    // (another step's arg, which it reads by name once that step runs ahead of it) and the old ones
+    // (a value named as a step's name). An old read orders `r` ahead; a new read asks to follow.
+    const stepReads = (r: StepRec): { fresh: Set<StepRec>; old: Set<StepRec> } => {
+      const fresh = new Set<StepRec>(),
+        old = new Set<StepRec>(),
+        seen = new Set<Value>();
+      const walk = (x: Value, root: boolean): void => {
+        if (seen.has(x)) {
+          return;
+        }
+        seen.add(x);
+        const stepOf = root ? undefined : updateRecs.find((o) => o.arg === x);
+        if (stepOf !== undefined) {
+          fresh.add(stepOf);
+          return;
+        }
+        const d = defs.get(x);
+        if (d !== undefined && opBlock.get(d) === latch) {
+          d.operands.forEach((o) => walk(o, false));
+          return;
+        }
+        const nm = varName.get(x);
+        if (nm !== undefined) {
+          updateRecs.filter((o) => o.name === nm).forEach((o) => old.add(o));
+          return;
+        }
+        d?.operands.forEach((o) => walk(o, false));
+      };
+      walk(r.arg, true);
+      fresh.delete(r);
+      old.delete(r);
+      return { fresh, old };
+    };
+    // A topological sort on the old reads, in write order where it leaves a choice, taking first a
+    // step every step whose new value it reads already precedes. The order it finds is then checked
+    // as it is spelled, and refused where a step still reads a name already stepped.
+    const stepsInOrder = (): StepRec[] | null => {
+      const reads = new Map(updateRecs.map((r) => [r, stepReads(r)]));
+      const order: StepRec[] = [];
+      const left = new Set(updateRecs);
+      while (left.size > 0) {
+        // `r` is ready when no step left reads its old value
+        const ready = [...left].filter((r) => ![...left].some((o) => o !== r && reads.get(o)!.old.has(r)));
+        if (ready.length === 0) {
+          return null; // a cycle
+        }
+        const next = ready.find((r) => ![...reads.get(r)!.fresh].some((o) => left.has(o))) ?? ready[0];
+        order.push(next);
+        left.delete(next);
+      }
+      const done = new Map<Value, string>();
+      for (const r of order) {
+        if (readsStepped(r.arg, done, new Set(done.values()), true)) {
+          return null;
+        }
+        done.set(r.arg, r.name);
+      }
+      return order;
+    };
+    const stepOrder = updateRecs.length === 1 ? updateRecs : strides.length > 0 ? null : stepsInOrder();
+    if (stepOrder === null || stepOrder.length === 0) {
+      return null;
+    }
+    // the counter: the step whose new or old value the test reads, the first in step order where it
+    // reads several, and the first step where it reads none. A read the test makes only through
+    // another step's new value (`j = i + 4` tested as `hi < j`) is that step's: it counts only where
+    // no step is read directly, or the init clause would name `i` and the test `j`.
+    const testReads = (rec: StepRec, through: boolean): boolean => {
+      const seen = new Set<Value>();
+      const walk = (x: Value): boolean => {
+        if (x === rec.arg || x === rec.param || varName.get(x) === rec.name) {
+          return true;
+        }
+        if (seen.has(x) || (!through && stepOrder.some((o) => o !== rec && o.arg === x))) {
+          return false;
+        }
+        seen.add(x);
+        return defs.get(x)?.operands.some(walk) ?? false;
+      };
+      return walk(lterm.operands[0]);
+    };
+    const ivRec =
+      stepOrder.find((r) => testReads(r, false)) ?? stepOrder.find((r) => testReads(r, true)) ?? stepOrder[0];
+    const iv = ivRec.name;
+    const updateNames = new Set(stepOrder.map((r) => r.name));
+    const ivInit = initRecs.find((r) => r.name === iv);
+    const sub = subFor(h.params, back.args as Value[]);
+    // The plain reading renders the latch's copies and test as `argAssigns` and `exprWith` do. A
+    // latch may hold a materialized op its own reads alone use (`inlined`), which the `for` never
+    // renders at its position, so its test and update spell every latch op inline, and the test is
+    // checked through them for a read of a name the update writes.
+    const clobbered = (v: Value): boolean => readsStepped(v, sub, updateNames, inlined);
     const entryVals = new Map<Value, Value>();
     h.params.forEach((p, i) => entryVals.set(p, initEdge.args[i] as Value));
     h.params.forEach((_, i) => entryVals.set(back.args[i] as Value, initEdge.args[i] as Value));
@@ -7611,16 +7755,17 @@ function structureRanked(
     const exitFound = (what: string): boolean => {
       exitFindings ??= [
         ...(guardExit === null ? [] : exitSlots(guardExit.pred, guardExit.succ, initWrites)),
-        ...exitSlots(latch, latchExit, new Map([[iv, updateRecs[0].arg]])),
+        ...exitSlots(latch, latchExit, new Map(stepOrder.map((r) => [r.name, r.arg]))),
       ];
       return exitFindings.includes(what);
     };
     // Past a loop with no guard the header dominates the exit, so the code there may read the IV's
     // param itself, not through an exit param: the asm's value from before the update on the
     // latch's way out, which the `for`'s update has rewritten. A named value holds its own.
-    const ivParam = updateRecs[0].param;
+    const ivParam = ivRec.param;
+    const stepParams = new Set(stepOrder.map((r) => r.param));
     const readsIv = (v: Value, seen = new Set<Value>()): boolean => {
-      if (v === ivParam) {
+      if (stepParams.has(v)) {
         return true;
       }
       if (seen.has(v) || varName.has(v)) {
@@ -7750,8 +7895,24 @@ function structureRanked(
     ) {
       return null;
     }
+    // A SECOND COUNTER is a reading of its own: a loop no declined run asked steps several names
+    // only under `stepSecondCounters` (rank.ts `/for-steps`), so `/for-continue` keeps the reading
+    // that spells such a loop `while (1)` beside its single-counter `for` loops. With the option
+    // off, such a loop is what `/for-steps` changes and `/for-continue` alone does not, so the
+    // default reports it as `onForStepsOffered`: rank.ts records a `/for-continue` it skipped as the
+    // default's tree with the default's witnesses, and `/for-continue/for-steps` is structured only
+    // where that set holds `/for-steps`' witness (`/for-steps` is enumerated only beside it).
+    const stepsUnasked = stepOrder.length > 1 && !stepSecondCounters && !forRank.asked.has(h);
     if (offered) {
-      hooks.onForOffered?.();
+      if (stepsUnasked) {
+        hooks.onForStepsOffered?.();
+      } else {
+        hooks.onForOffered?.();
+      }
+      return null;
+    }
+    if (stepsUnasked) {
+      hooks.onForStepsOffered?.();
       return null;
     }
     droppedUndefCopies.push(...exitDrops);
@@ -7763,9 +7924,20 @@ function structureRanked(
       };
       return e;
     };
+    // the first step as one counter's update is spelled; each later one reads the steps ahead of it
+    // by their names (A SECOND COUNTER)
+    const [first, ...later] = stepOrder;
+    const stepped = new Map<Value, string>([[first.arg, first.name]]);
+    const laterIncs: Stmt[] = later.map((r) => {
+      const value = intoDeclaredTemp(r.name, latchExpr(new Map(stepped))(r.arg));
+      stepped.set(r.arg, r.name);
+      return { k: 'assign', name: r.name, value };
+    });
     const [inc] = inlined
-      ? [{ k: 'assign' as const, name: iv, value: intoDeclaredTemp(iv, latchExpr(null)(updateRecs[0].arg)) }]
-      : argAssigns(latch, h, null, keep);
+      ? [{ k: 'assign' as const, name: first.name, value: intoDeclaredTemp(first.name, latchExpr(null)(first.arg)) }]
+      : later.length > 0
+        ? [{ k: 'assign' as const, name: first.name, value: first.value }]
+        : argAssigns(latch, h, null, keep);
     const inits = [...(pre !== undefined ? sideEffects(pre) : []), ...argAssigns(entry, h, null, keep)];
     const init: Stmt | undefined =
       ivInit === undefined
@@ -7785,11 +7957,11 @@ function structureRanked(
       inits: inits.filter((st) => st !== init),
       init,
       cond: test.contIsTaken ? spelled : negateCond(spelled),
-      inc,
+      inc: [inc, ...laterIncs],
       ...(strides.length > 0
         ? {
             derived: {
-              reads: new Map(strides.map((sd) => [h.params[sd.j], strideRead(sd, updateRecs[0].param)])),
+              reads: new Map(strides.map((sd) => [h.params[sd.j], strideRead(sd, ivParam)])),
               names: new Set(strides.map((sd) => varName.get(h.params[sd.j])!)),
             },
           }

@@ -487,6 +487,64 @@ test('a case reading a register the kept dispatch idiom wrote DECLINES', () => {
   );
 });
 
+// agbcc sums the table address into the POINTER register (`add r1, r0, r1; ldr r1, [r1]`) where a
+// case reads the scaled index after the dispatch, which is then still `r0 << 2`: copied out by an
+// extra (`synthetic:jt_idxreuse:agbcc`, `add r2, r0, #0`) or read in place at an elided dispatch.
+const ptrSum = (extra: string, c0: string, load = 'ldr\tr1, [r1]\n', jump = 'r1') =>
+  'f:\n\tcmp\tr0, #0x1\n\tbhi\t.Ldef\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .Lp\n\tadd\tr1, r0, r1\n' +
+  `\t${load}${extra}\tmov\tpc, ${jump}\n.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n\t.word\t.Lc1\n` +
+  `.Lc0:\n${c0}\tbx\tlr\n.Lc1:\n\tmov\tr0, #11\n\tbx\tlr\n.Ldef:\n\tmov\tr0, #9\n\tbx\tlr\n`;
+
+test('a dispatch summing into the pointer register leaves the scaled index for the cases', () => {
+  // kept: the extra copies the index the `lsl` scaled, and the case reads the copy
+  const kept = decompile('f', ptrSum('\tadd\tr2, r0, #0\n', '\tadd\tr0, r2, r3\n'), ARMV4T_AGBCC).source;
+  expect(kept).toContain('switch (a0)');
+  expect(kept).toMatch(/case 0:\s*\n\s*return \(a0 << 2\) \+ a3;/);
+  // kept: the case reads the index register itself, which no extra rewrote
+  const inPlace = decompile('f', ptrSum('\tadd\tr2, r3, #0\n', '\tadd\tr0, r0, r2\n'), ARMV4T_AGBCC).source;
+  expect(inPlace).toMatch(/case 0:\s*\n\s*return \(a0 << 2\) \+ a3;/);
+  // elided: no extra, and the case reads the index where the idiom left it
+  const elided = decompile('f', ptrSum('', '\tadd\tr0, r0, r3\n'), ARMV4T_AGBCC).source;
+  expect(elided).toMatch(/case 0:\s*\n\s*return \(a0 << 2\) \+ a3;/);
+});
+
+test('an undeclared call in a case of an elided pointer-sum dispatch does not count the scaled index', () => {
+  // `synthetic:jt_idxcall:agbcc`: the case's `bl h` finds `i << 2` in r0, and `h()` and
+  // `h(i << 2)` compile to the same bytes, so the guessed arity refuses (`CallSite.scaledIndex`)
+  const asm = ptrSum('', '\tpush\t{lr}\n\tbl\th\n\tmov\tr0, #4\n\tpop\t{r1}\n\tbx\tr1\n');
+  expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(
+    /still holds the index the jump table's dispatch scaled .* the argument count is not decidable/,
+  );
+  // a declared arity decides it
+  expect(decompile('f', asm, ARMV4T_AGBCC, { prototypes: { h: { params: 0 } } }).source).toMatch(/h\(\);/);
+});
+
+test('a dispatch summing into the pointer register reads the scrutinee from that register before the table load', () => {
+  // agbcc's switch on a second parameter: the scrutinee is in r1, which the `ldr r1, .Lp` then
+  // overwrites. The `lsl` ran before it, so it is the idiom, not an extra reading a stale register.
+  const asm =
+    'f:\n\tcmp\tr1, #0x1\n\tbhi\t.Ldef\n\tlsl\tr0, r1, #0x2\n\tldr\tr1, .Lp\n\tadd\tr1, r0, r1\n' +
+    '\tldr\tr1, [r1]\n\tadd\tr2, r0, #0\n\tmov\tpc, r1\n.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n' +
+    '\t.word\t.Lc1\n.Lc0:\n\tadd\tr0, r2, r3\n\tbx\tlr\n.Lc1:\n\tmov\tr0, #11\n\tbx\tlr\n.Ldef:\n\tmov\tr0, #9\n\tbx\tlr\n';
+  const src = decompile('f', asm, ARMV4T_AGBCC).source;
+  expect(src).toContain('switch (a1)');
+  expect(src).toMatch(/case 0:\s*\n\s*return \(a1 << 2\) \+ a3;/);
+  // a case reading the table pointer's register still declines: it holds the code address now
+  const reads1 = asm.replace('.Lc0:\n\tadd\tr0, r2, r3', '.Lc0:\n\tadd\tr0, r1, r3');
+  expect(() => decompile('f', reads1, ARMV4T_AGBCC)).toThrow(/reads r1, which the unlifted dispatch idiom wrote/);
+});
+
+test('a dispatch summing into the pointer register still marks what the idiom wrote over', () => {
+  const stale = /a case of the (kept|elided) jump table reads (r0|r1), which the unlifted dispatch idiom wrote/;
+  // the table pointer and the code address, kept and elided
+  expect(() => decompile('f', ptrSum('\tadd\tr2, r0, #0\n', '\tadd\tr0, r1, #0\n'), ARMV4T_AGBCC)).toThrow(stale);
+  expect(() => decompile('f', ptrSum('', '\tadd\tr0, r1, #0\n'), ARMV4T_AGBCC)).toThrow(stale);
+  // the target loaded into the index register: no scaled index survives it, and an extra reading it declines
+  const overIndex = (extra: string) => ptrSum(extra, '\tadd\tr0, r0, #0\n', 'ldr\tr0, [r1]\n', 'r0');
+  expect(() => decompile('f', overIndex(''), ARMV4T_AGBCC)).toThrow(stale);
+  expect(() => decompile('f', overIndex('\tadd\tr2, r0, #0\n'), ARMV4T_AGBCC)).toThrow(/indirect\/computed jump/);
+});
+
 test('a table entry naming a dispatch block DECLINES — it jumps through a code address, not a case', () => {
   // A table case is an edge the branch counts never saw. A kept dispatch would lift it as a second
   // switch on the unscaled scrutinee (a `while (1)` re-dispatch); the asm jumps through r0, which

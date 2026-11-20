@@ -1486,7 +1486,7 @@ const retInArm = (wrap: 'none' | 'while' | 'dowhile' | 'for'): SFn => {
               k: 'for',
               init: { k: 'assign', name: 'i', value: { k: 'const', value: 0 } },
               cond,
-              inc: { k: 'assign', name: 'i', value: cond },
+              inc: [{ k: 'assign', name: 'i', value: cond }],
               body: [ret],
             },
           ]
@@ -2073,7 +2073,7 @@ test('a `for` is two Pascal statements, so a lone one still takes begin/end', ()
     k: 'for',
     init: { k: 'assign', name: 'i', value: { k: 'const', value: 0 } },
     cond: { k: 'var', name: 'i' },
-    inc: { k: 'assign', name: 'i', value: { k: 'const', value: 0 } },
+    inc: [{ k: 'assign', name: 'i', value: { k: 'const', value: 0 } }],
     body: [{ k: 'assign', name: 'i', value: { k: 'var', name: 'a0' } }],
   };
   const fn: SFn = {

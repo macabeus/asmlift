@@ -1060,7 +1060,7 @@ export function assertFrameUnionsViewed(sfn: SFn): void {
       // a `for`'s init and inc are statements of their own, outside both lists
       stmtLists(st).forEach(walk);
       if (st.k === 'for') {
-        walk([st.init, st.inc]);
+        walk([st.init, ...st.inc]);
       }
     }
   };
@@ -1131,7 +1131,7 @@ export function assertHoistsDominate(sfn: SFn, minted: ReadonlySet<string>): voi
       if (st.k === 'for') {
         walk([st.init], live);
         judge(stmtExprs(st), live);
-        walk([st.inc], new Set(live));
+        walk(st.inc, new Set(live));
         walk(st.body, new Set(live));
         continue;
       }

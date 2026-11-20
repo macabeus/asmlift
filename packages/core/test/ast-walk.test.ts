@@ -41,7 +41,7 @@ const BODY: Stmt[] = [
     k: 'for',
     init: { k: 'assign', name: 'i', value: c(0) },
     cond: { k: 'bin', op: '<', l: v('i'), r: c(8) },
-    inc: { k: 'assign', name: 'i', value: { k: 'bin', op: '+', l: v('i'), r: c(1) } },
+    inc: [{ k: 'assign', name: 'i', value: { k: 'bin', op: '+', l: v('i'), r: c(1) } }],
     body: [
       {
         k: 'dowhile',
@@ -180,7 +180,7 @@ test('the walk agrees with the recursion on 200 random bodies', () => {
             k: 'for',
             init: { k: 'assign', name: 'i', value: mkExpr(1) },
             cond: mkExpr(2),
-            inc: { k: 'assign', name: 'i', value: mkExpr(1) },
+            inc: [{ k: 'assign', name: 'i', value: mkExpr(1) }],
             body: mkBody(depth - 1),
           };
         default:

@@ -391,7 +391,7 @@ const forLoop = (n: string, init: Expr, body: Stmt[]): Extract<Stmt, { k: 'for' 
   k: 'for',
   init: { k: 'assign', name: n, value: init },
   cond: { k: 'bin', op: '<', l: { k: 'var', name: n }, r: { k: 'const', value: 10 } },
-  inc: { k: 'assign', name: n, value: { k: 'bin', op: '+', l: { k: 'var', name: n }, r: { k: 'const', value: 1 } } },
+  inc: [{ k: 'assign', name: n, value: { k: 'bin', op: '+', l: { k: 'var', name: n }, r: { k: 'const', value: 1 } } }],
   body,
 });
 const c0: Expr = { k: 'const', value: 0 };
@@ -503,7 +503,7 @@ describe('the induction-variable model', () => {
     // exists to refuse. recognizeForLoops mints exactly this shape for a list walk.
     const walkStep: Stmt = {
       ...forLoop('b', c0, [use('b')]),
-      inc: { k: 'assign', name: 'b', value: { k: 'field', base: rd('b'), name: 'field_4' } },
+      inc: [{ k: 'assign', name: 'b', value: { k: 'field', base: rd('b'), name: 'field_4' } }],
     };
     const r = coalesceUnder(COALESCE_GATES, fn([forLoop('a', c0, [use('a')]), walkStep]));
     expect(r.candidates).toHaveLength(0);
@@ -513,7 +513,7 @@ describe('the induction-variable model', () => {
   test('a `for` whose STEP re-loads a fixed address is not one either', () => {
     const reloaded: Stmt = {
       ...forLoop('b', load, [use('b')]),
-      inc: { k: 'assign', name: 'b', value: load },
+      inc: [{ k: 'assign', name: 'b', value: load }],
     };
     const r = coalesceUnder(COALESCE_GATES, fn([forLoop('a', c0, [use('a')]), reloaded]));
     expect(r.candidates).toHaveLength(0);
@@ -571,7 +571,7 @@ describe('rename', () => {
         k: 'for',
         init: { k: 'assign', name: a, value: v(a) },
         cond: v(a),
-        inc: { k: 'assign', name: a, value: v(a) },
+        inc: [{ k: 'assign', name: a, value: v(a) }],
         body: [{ k: 'exprstmt', value: v(a) }],
       },
       {

@@ -132,14 +132,14 @@ describe('statement placement — the rewrite must not MOVE or DUPLICATE stateme
           k: 'for',
           init: { k: 'assign', name: 'i', value: { k: 'const', value: 0 } },
           cond: { k: 'var', name: 'c' },
-          inc: { k: 'assign', name: 'i', value: { k: 'const', value: 1 } },
+          inc: [{ k: 'assign', name: 'i', value: { k: 'const', value: 1 } }],
           body: [{ k: 'assign', name: 'hit', value: CALL }],
         },
       ],
     };
     const s = materializeArgBases(fn)!.body[0] as Extract<Stmt, { k: 'for' }>;
     expect(s.init).toMatchObject({ k: 'assign', name: 'i' });
-    expect(s.inc).toMatchObject({ k: 'assign', name: 'i' });
+    expect(s.inc).toMatchObject([{ k: 'assign', name: 'i' }]);
     expect(s.body.map((x) => (x as { name?: string }).name)).toEqual(['p0', 'p1', 'hit']);
   });
 

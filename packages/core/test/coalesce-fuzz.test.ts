@@ -93,7 +93,7 @@ function run(sfn: SFn, sched: Schedule): Val[] {
           evalExpr(s.cond);
           for (let i = 0; i < n; i++) {
             exec(s.body);
-            exec([s.inc]);
+            exec(s.inc);
             evalExpr(s.cond);
           }
           break;
@@ -168,7 +168,7 @@ function generate(seed: number): SFn {
       } else if (r < 0.94) {
         out.push({ k: 'dowhile', cond: cond(), body: block(depth - 1) });
       } else {
-        out.push({ k: 'for', init: assign(), cond: cond(), inc: assign(), body: block(depth - 1) });
+        out.push({ k: 'for', init: assign(), cond: cond(), inc: [assign()], body: block(depth - 1) });
       }
     }
     return out;

@@ -72,7 +72,7 @@ export function readDoWhileAsFor(sfn: SFn): SFn | null {
         const c = s.cond;
         const l = c.k === 'bin' && c.l.k === 'var' && c.l.name === v ? literal(c.r) : null;
         if (k !== null && l !== null && c.k === 'bin' && holds(c.op, k, l) && fits(types.get(v), k)) {
-          out[out.length - 1] = { k: 'for', init: header.init, cond: c, inc: header.inc, body: header.body };
+          out[out.length - 1] = { k: 'for', init: header.init, cond: c, inc: [header.inc], body: header.body };
           changed = true;
           continue;
         }

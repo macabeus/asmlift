@@ -19,11 +19,13 @@ const counted = (body: Stmt[]): Stmt => ({
   k: 'for',
   init: { k: 'assign', name: 'i0', value: { k: 'const', value: 0 } },
   cond: { k: 'bin', op: '<', l: { k: 'var', name: 'i0' }, r: { k: 'const', value: 4 } },
-  inc: {
-    k: 'assign',
-    name: 'i0',
-    value: { k: 'bin', op: '+', l: { k: 'var', name: 'i0' }, r: { k: 'const', value: 1 } },
-  },
+  inc: [
+    {
+      k: 'assign',
+      name: 'i0',
+      value: { k: 'bin', op: '+', l: { k: 'var', name: 'i0' }, r: { k: 'const', value: 1 } },
+    },
+  ],
   body,
 });
 

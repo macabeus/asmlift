@@ -8,8 +8,8 @@
 // (`ForRanking`), so every fixture but the last is a jump table whose `while (1)` reading declines. Each is judged against its own IR by the trace oracle
 // (`irAgreement`), as `structure()` returns it and as it ships after `readabilityRewrites`. A derived
 // param whose two edges apply different ops or different constants is no op of the IV, so the fold
-// leaves it and the loop declines; so do a preheader that reads memory and a test that reads the IV
-// before its update. A test that reads the derived back-edge value reads the op of the updated IV,
+// leaves it and the `for` steps it second, from the IV's new value; a preheader that reads memory and
+// a test that reads the IV before its update decline. A test that reads the derived back-edge value reads the op of the updated IV,
 // and lifts. `/for-continue` takes the same readings where the default lifts.
 import { expect, test } from 'vitest';
 
@@ -148,17 +148,21 @@ test('a preheader op the body reads runs ahead of the `for`', () => {
   agrees(r);
 });
 
-test('a derived param whose two edges apply different ops refuses the `for`', () => {
-  // `lo - 3` in, `(i + 1) + 3` back: the param is no one function of the IV, and the function
-  // declines as it does with no `for` reading at all
-  const ir = srFor({ entryDerived: '%2: s32 = sub %0, %3' });
-  expect(() => judged(ir)).toThrow(/leaves its switch for a loop exit/);
+test('a derived param whose two edges apply different ops stays a variable the `for` steps second', () => {
+  // `lo - 3` in, `(i + 1) + 3` back: the param is no one function of the IV, so the fold leaves it,
+  // and the `for` steps it after the IV from the IV's new value (A SECOND COUNTER):
+  // the source `for (i = lo, j = lo << 3; i <= hi; i++, j = i << 2)` of `sw_forjt_skew`, its `j`
+  // init ahead of the `for`
+  const r = judged(srFor({ entryDerived: '%2: s32 = sub %0, %3' }));
+  expect(r.src).toMatch(/(\w+) = a0 - (\w+);\n\s*for \((\w+) = a0; a1 >= \3; \3 = \3 \+ 1, \1 = \3 \+ \2\) \{/);
+  agrees(r);
 });
 
-test('a derived param whose two edges add different constants refuses the `for`', () => {
+test('a derived param whose two edges add different constants stays a variable the `for` steps second', () => {
   // `lo + 3` in, `(i + 1) + 2` back
-  const ir = srFor({ backDerived: '%39: s32 = const {value=2}\n  %38: s32 = add %36, %39' });
-  expect(() => judged(ir)).toThrow(/leaves its switch for a loop exit/);
+  const r = judged(srFor({ backDerived: '%39: s32 = const {value=2}\n  %38: s32 = add %36, %39' }));
+  expect(r.src).toMatch(/for \((\w+) = a0; a1 >= \1; \1 = \1 \+ 1, \w+ = \1 \+ (2|\w+)\) \{/);
+  agrees(r);
 });
 
 test('two constants of one value on the two edges are one derived param', () => {

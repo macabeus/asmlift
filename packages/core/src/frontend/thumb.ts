@@ -50,9 +50,11 @@ import {
   type StaleIdiomRead,
   caseEntries,
   enterCaseTarget,
+  enterKeptDispatch,
   idiomLeaves,
   parkedIn,
   refuseStaleIdiomReads,
+  scaledIndexIn,
   staleMarker,
 } from './jump-table';
 import {
@@ -2885,12 +2887,16 @@ interface JumpTable {
   scrutReg: string;
   caseLabels: string[];
   defaultLabel: string;
-  /** What runs between the table load and the `mov pc` ({@link dispatchExtraRefusal}). */
+  /** What runs between the table load and the `mov pc` ({@link dispatchExtraRefusal}): code the
+   *  compiler placed in the dispatch, none of the idiom's own. */
   extras: Instr[];
   /** What the dispatch idiom leaves in each register it writes (index, table pointer, target;
-   *  jump-table.ts `idiomLeaves`). The `add` rewrites the index the `lsl` scaled, so every one is a
-   *  marker here: an elided dispatch writes them at the entry of each case target (`caseEntries`), a
-   *  kept one at its own block's end, save the ones its extras rewrote. */
+   *  jump-table.ts `idiomLeaves`). The table pointer and the target are markers. The index the `lsl`
+   *  scaled is one too where the `add` or the target load rewrites it; where neither does (the sum
+   *  goes into the pointer register) it is `scaled`, the scrutinee shifted by two. An elided dispatch
+   *  writes them at the entry of each case target (`caseEntries`); a kept one writes the scaled index
+   *  at its own block's entry (jump-table.ts `enterKeptDispatch`) and the markers at its end, save the
+   *  ones its extras rewrote. */
   leaves: ReadonlyMap<string, IdiomLeft>;
 }
 
@@ -3010,7 +3016,12 @@ function recoverJumpTable(
   }
   const ptrReg = ldrP.ops[0],
     ptrLabel = ldrP.ops[1]; // rP = *(PTR literal)
-  if (!isDataOp(add.mnemonic, 'add') || add.ops[0] !== idxReg) {
+  // The sum goes into either register: `add rY, rY, rP` or `add rP, rY, rP`. agbcc writes it into
+  // the pointer register when a case reads the scaled index after the dispatch (it copies it out in
+  // an extra, `add r2, r0, #0`, and the case reads `p[i]` as `r2 + p`): then the index register
+  // still holds `rX << 2` past the idiom.
+  const addrReg = add.ops[0];
+  if (!isDataOp(add.mnemonic, 'add') || (addrReg !== idxReg && addrReg !== ptrReg)) {
     return null;
   }
   // add rY, rY, rP  (either operand order) — the address = table_base + index*4, nothing else.
@@ -3043,13 +3054,25 @@ function recoverJumpTable(
   // `#0` is the spelling the corpus actually uses (`ldr r0, [r0, #0x00]`), so the check is on the
   // VALUE, not on the operand's absence.
   const { base, off, regOff } = parseAddr(ldrV.ops[1]);
-  if (base !== idxReg || off !== 0 || regOff !== undefined || ldrV.ops[0] !== movpc.ops[1]) {
+  if (base !== addrReg || off !== 0 || regOff !== undefined || ldrV.ops[0] !== movpc.ops[1]) {
     return null;
   }
   if (movpc.mnemonic !== 'mov' || movpc.ops[0] !== 'pc') {
     return null;
   }
-  const extraRefusal = dispatchExtraRefusal(extras, ldrV.ops[0], [idxReg, ptrReg, ldrV.ops[0]]);
+  // THE SCALED INDEX OUTLIVES THE IDIOM where neither the sum nor the load writes its register: it
+  // holds `rX << 2` into every case (`scaled`), the value jump-table.ts `enterCaseTarget` writes at an
+  // elided dispatch's case targets and `enterKeptDispatch` at a kept one's entry, so an extra that
+  // reads the index reads the value the hardware computed. The extras are judged against the idiom's
+  // other writes only. The idiom itself is not: its `lsl` reads the scrutinee before the `ldr rP`
+  // runs, which is right where agbcc puts the scrutinee in the register it then loads the table
+  // pointer into (`lsl r0, r1, #2; ldr r1, .L`, the switch on a second parameter).
+  const keepsIndex = addrReg !== idxReg && ldrV.ops[0] !== idxReg;
+  const extraRefusal = dispatchExtraRefusal(
+    extras,
+    ldrV.ops[0],
+    keepsIndex ? [ptrReg, ldrV.ops[0]] : [idxReg, ptrReg, ldrV.ops[0]],
+  );
   if (extraRefusal !== null) {
     refused(extraRefusal);
     return null;
@@ -3095,7 +3118,9 @@ function recoverJumpTable(
   if (!blockLabels.has(defaultLabel) || caseLabels.some((l) => !blockLabels.has(l))) {
     return null;
   }
-  const leaves = idiomLeaves([idxReg, ptrReg, ldrV.ops[0]].map((reg) => ({ reg, scaled: false })));
+  const leaves = idiomLeaves(
+    [idxReg, ptrReg, ldrV.ops[0]].map((reg) => ({ reg, scaled: keepsIndex && reg === idxReg })),
+  );
   return { scrutReg, caseLabels, defaultLabel, extras, leaves };
 }
 
@@ -6652,6 +6677,9 @@ function openBlockCursor(fill: ThumbFill, ab: AsmBlock, bi: number): BlockCursor
   const walk = makeFrameWalk({ argRegs: target.argRegs, start });
   const jt = text.tables.get(ab);
   const dispatchScrutinee = jt && jt.extras.length > 0 ? ssa.readVar(reg(jt.scrutReg), bi) : null;
+  if (jt && dispatchScrutinee !== null) {
+    enterKeptDispatch(jt.leaves, dispatchScrutinee, irb.ops, (r, v) => ssa.writeVar(reg(r), bi, v));
+  }
   return { ab, bi, irb, walk, pendingCmp, noCmpWhy, consumed: null, dispatchScrutinee };
 }
 
@@ -7662,6 +7690,9 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
     bi,
     // what an elided or kept dispatch left in an argument register is no argument
     parked: parkedIn(fill.staleIdiomValues, reg),
+    // …and the scrutinee an elided pointer-sum dispatch scaled in place (`recoverJumpTable`'s
+    // `keepsIndex`) is no argument a guess may count: `h()` and `h(i << 2)` compile alike there
+    scaledIndex: scaledIndexIn(fill.staleIdiomValues, reg),
     read: (r) => ssa.readVar(r, bi),
     write: (r, v) => writeData(r, bi, v),
     // ARGUMENT WORD `k` past the registers is a word of this frame's outgoing area, at [sp,#0]
@@ -7770,12 +7801,15 @@ function lowerTerminator(fill: ThumbFill, cur: BlockCursor): void {
     // a branch and already sent every value past N-1 to the default, so its switch is `exhaustive`.
     const scrut = cur.dispatchScrutinee ?? readVar(reg(jt.scrutReg), bi);
     // What the unlifted idiom left in the registers no extra rewrote is no value the lift models: on
-    // the hardware the case blocks see the scaled index, the table's address and the case's own code
-    // address. Each is a marker here, and a read of one declines (`refuseStaleIdiomReads`). The
+    // the hardware the case blocks see the table's address and the case's own code address, and the
+    // scaled index where the sum or the load rewrote it. Each is a marker here, and a read of one
+    // declines (`refuseStaleIdiomReads`). A scaled index the idiom left intact was written at the
+    // block's entry (`enterKeptDispatch`), and is the value it holds unless an extra rewrote it. The
     // elided form cannot put them here, since its bounds block's default path never ran the idiom: it
     // writes them at each case target's entry instead (`openBlockCursor`).
     if (cur.dispatchScrutinee !== null) {
-      for (const r of [...jt.leaves.keys()].filter((r) => !jt.extras.some((ins) => ins.ops[0] === r))) {
+      const opaque = [...jt.leaves].filter(([, left]) => left === 'opaque').map(([r]) => r);
+      for (const r of opaque.filter((r) => !jt.extras.some((ins) => ins.ops[0] === r))) {
         ssa.writeVar(
           reg(r),
           bi,

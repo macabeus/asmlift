@@ -245,7 +245,7 @@ function collect(body: Stmt[], path: Stmt[][], loop: boolean[], idxPath: number[
       // rather than grow a second recursion this REFUSES the whole function — loud decline over a
       // silently unreachable definition. Delete this when `stmtLists` makes collect/rewrite share
       // one traversal.
-      if (stmtLists(s.init).length > 0 || stmtLists(s.inc).length > 0) {
+      if (stmtLists(s.init).length > 0 || s.inc.some((x) => stmtLists(x).length > 0)) {
         st.compound = true;
       }
       // `init` and `inc` are STATEMENTS, so their expressions are reached by neither `stmtExprs`
@@ -254,7 +254,7 @@ function collect(body: Stmt[], path: Stmt[][], loop: boolean[], idxPath: number[
       // assignment need not dominate it (`for (i = p0[3]; …)` after an `if` arm that defines p0).
       // `init` runs once, at this list's cadence; `inc` runs every iteration, like the condition.
       stmtExprs(s.init).forEach((e) => visit(e, false));
-      stmtExprs(s.inc).forEach((e) => visit(e, true));
+      s.inc.flatMap(stmtExprs).forEach((e) => visit(e, true));
     }
     for (const child of stmtLists(s)) {
       collect(child, [...path, child], [...loop, repeats], [...idxPath, i], st);
@@ -843,7 +843,7 @@ export function applyScopedBasePlan(sfn: SFn, { entries: plan, repoint, compound
           ...s,
           init: rewriteStmt(s.init),
           cond: point(s.cond),
-          inc: rewriteStmt(s.inc),
+          inc: s.inc.map(rewriteStmt),
           body: rewriteList(s.body),
         };
       case 'switch':

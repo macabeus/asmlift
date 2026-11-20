@@ -215,7 +215,7 @@ function baseReads(body: Stmt[], out: Set<string>): void {
       // walker asymmetry `l3/scopebase.ts`'s `collect` calls out. A read missed here is a device
       // read the rule below cannot see.
       walk(s.init);
-      walk(s.inc);
+      s.inc.forEach(walk);
     }
     for (const child of stmtLists(s)) {
       child.forEach(walk);

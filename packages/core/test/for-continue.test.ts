@@ -7,11 +7,15 @@
 // case body binds to the switch). Every fixture is judged against its own IR by the trace oracle
 // (`irAgreement`), as `structure()` returns it and as it ships after `readabilityRewrites`. The
 // `for` takes a guard that is its test, a guard whose exit edge passes a relay block, an exit that
-// takes the IV, no guard where its first test folds to true, and an update the header computes. It
-// refuses a guard that is not the loop's test, a constant first test that leaves, two updates, a
+// takes the IV, no guard where its first test folds to true, an update the header computes, and a
+// second update ordered after the first where it reads it, three steps sorted on the old values they
+// read, and an init clause naming the counter the test reads. It refuses a guard that is not the
+// loop's test, a constant first test that leaves, two updates each reading the other's old value, a
 // latch with an effect, an exit that takes the IV from before its update and an update from a call,
 // and those fixtures lift through the rerun's `while (1)` instead, judged the same way; a relay
 // something else enters refuses it too, and that fixture declines.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -19,7 +23,10 @@ import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { readabilityRewrites } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
-import { structure } from '../src/structure/structure';
+import { enumerateCandidates } from '../src/rank';
+import { hasSecondCounterLoop, structure } from '../src/structure/structure';
+import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation } from '../src/variation-tokens';
 import { irAgreement } from './helpers';
 
 const SEEDS = Array.from({ length: 2000 }, (_, i) => i + 1);
@@ -176,13 +183,97 @@ test('a relay block an arm enters too refuses the `for`', () => {
   expect(() => judged(ir)).toThrow(/leaves its switch for a loop exit/);
 });
 
-test('a latch that runs a second update refuses the `for`', () => {
-  // two loop variables would need a comma in the `for`'s update, which L3 does not spell
-  const ir = forJt()
+/** `forJt` with a second loop variable `s`, entered as `lo` and stepped after the counter by `step`,
+ *  which the latch writes from `%36` (the counter's new value) and `%50` (its own old one); case 6
+ *  calls `k(s)` */
+const twoSteps = (step: string): string =>
+  forJt()
     .replace('^bb1(%5: s32):', '^bb1(%5: s32, %50: s32):')
     .replace('^bb1(%0)', '^bb1(%0, %0)')
-    .replace('cond_br %37, ^bb12(), ^bb1(%36)', '%51: s32 = add %50, %36\n  cond_br %37, ^bb12(), ^bb1(%36, %51)')
+    .replace('cond_br %37, ^bb12(), ^bb1(%36)', `${step}\n  cond_br %37, ^bb12(), ^bb1(%36, %51)`)
     .replace('%34: s32 = call %5 {target="k"}', '%34: s32 = call %50 {target="k"}');
+
+test('a latch that runs a second update after the counter lifts as a `for` stepping both, in order', () => {
+  // A SECOND COUNTER: `s += i` reads the counter the first step just wrote, as the latch's `add`
+  // reads `i + 1`, and a `continue` runs both steps
+  const { src, agreement, shipped } = judged(twoSteps('%51: s32 = add %50, %36'));
+  expect(src).toMatch(/for \((\w+) = a0; a1 >= \1; \1 = \1 \+ 1, (\w+) = \2 \+ \1\) \{/);
+  expect(src).not.toContain('while (1)');
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
+});
+
+test('a second update that reads the counter from before its step runs first', () => {
+  // `s = i * 2` of the OLD `i`: the counter cannot step first, so `s`'s step does; the `for`'s init
+  // is still the counter's, the name its test reads
+  const { src, agreement, shipped } = judged(twoSteps('%53: s32 = const {value=2}\n  %51: s32 = mul %5, %53'));
+  expect(src).toMatch(/for \((\w+) = a0; a1 >= \1; (\w+) = \1 \* 2, \1 = \1 \+ 1\) \{/);
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBeGreaterThan(SEEDS.length / 4); // a run whose `s` overflows is not judged
+});
+
+test("a counter the latch writes after a second update is still the `for`'s counter", () => {
+  // `s += 3` in the latch's first slot, `i + 1` in its second, and the test reads `i`: the init
+  // clause is `i`'s, whichever order the steps take, since neither reads the other
+  const ir = forJt()
+    .replace('^bb1(%5: s32):', '^bb1(%50: s32, %5: s32):')
+    .replace('^bb1(%0)', '^bb1(%0, %0)')
+    .replace(
+      'cond_br %37, ^bb12(), ^bb1(%36)',
+      '%53: s32 = const {value=3}\n  %51: s32 = add %50, %53\n  cond_br %37, ^bb12(), ^bb1(%51, %36)',
+    )
+    .replace('%34: s32 = call %5 {target="k"}', '%34: s32 = call %50 {target="k"}');
+  const { src, agreement, shipped } = judged(ir);
+  expect(src).toMatch(/for \((\w+) = a0; a1 >= \1; [^)]*\b\1 = \1 \+ 1\b[^)]*\) \{/);
+  expect(src).toMatch(/for \([^)]*\b(\w+) = \1 \+ 3\b[^)]*\) \{/);
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBeGreaterThan(0);
+});
+
+test('the counter is the step the test reads directly, not one it reaches through a later step', () => {
+  // `i++, j = i + 4` tested on `j`: `j`'s new value reads `i`'s, so a walk through the steps finds
+  // both, and the counter is `j`, the one the compare names, whose init the `for` clause holds
+  const ir = forJt({
+    guard:
+      '%2: s32 = const {value=4}\n  %3: s32 = add %0, %2\n  %4: u32 = icmp_slt %1, %3\n  cond_br %4, ^bb12(), ^bb1(%0, %3)',
+    latch:
+      '%35: s32 = const {value=1}\n  %36: s32 = add %5, %35\n  %38: s32 = const {value=4}\n  %39: s32 = add %36, %38\n' +
+      '  %37: u32 = icmp_slt %1, %39\n  cond_br %37, ^bb12(), ^bb1(%36, %39)',
+  })
+    .replace('^bb1(%5: s32):', '^bb1(%5: s32, %50: s32):')
+    .replace('%34: s32 = call %5 {target="k"}', '%34: s32 = call %50 {target="k"}');
+  const { src, agreement, shipped } = judged(ir);
+  expect(src).toMatch(/for \((\w+) = [^;]*; a1 >= \1; (\w+) = \2 \+ 1, \1 = \2 \+ 4\) \{/);
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBeGreaterThan(0);
+});
+
+test("three steps are ordered by what each reads of the others, not by the latch's write order", () => {
+  // `i += c`, `b += 1`, `c += b`, written in that order: `c` must step after `i`, which reads its old
+  // value, and before `b`, whose old value it reads, so the one order is `i`, `c`, `b`
+  const ir = forJt()
+    .replace('^bb1(%5: s32):', '^bb1(%5: s32, %50: s32, %60: s32):')
+    .replace('^bb1(%0)', '^bb1(%0, %0, %0)')
+    .replace('%36: s32 = add %5, %35', '%36: s32 = add %5, %60')
+    .replace(
+      'cond_br %37, ^bb12(), ^bb1(%36)',
+      '%51: s32 = add %50, %35\n  %61: s32 = add %60, %50\n  cond_br %37, ^bb12(), ^bb1(%36, %51, %61)',
+    )
+    .replace('%34: s32 = call %5 {target="k"}', '%34: s32 = call %50 {target="k"}');
+  const { src, agreement, shipped } = judged(ir);
+  expect(src).toMatch(/for \((\w+) = a0; a1 >= \1; \1 = \1 \+ (\w+), \2 = \2 \+ (\w+), \3 = \3 \+ 1\) \{/);
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBeGreaterThan(0);
+});
+
+test('two updates that each read the other from before its step refuse the `for`', () => {
+  // `s = i` beside a counter stepped from `s`: either order reads a name the other step already wrote
+  const ir = twoSteps('%51: s32 = add %5, %35').replace('%36: s32 = add %5, %35', '%36: s32 = add %50, %35');
   refusesFor(ir);
 });
 
@@ -378,4 +469,90 @@ test('/for-continue is not offered where a later check of the `for` refuses it',
   expect(off.src).toContain('while (1)');
   expect(off.offered).toBe(0);
   expect(structured(ir, true).src).toBe(off.src);
+});
+
+// `/for-steps` (rank.ts, `stepSecondCounters`): a loop whose latch also steps a second name is a
+// `for` under `/for-continue` only with it, so `/for-continue` alone keeps that loop's `while (1)`.
+// Its OFF structuring reports the loop only where `/for-continue` asks it. The default reports the
+// loop as `/for-continue`'s, since rank.ts reaches the pair through `/for-steps` alone, which is the
+// default's tree and is recorded with the default's witnesses.
+const tailRetSteps = tailRet
+  .replace('^bb1(%5: s32):', '^bb1(%5: s32, %50: s32):')
+  .replace('^bb1(%0)', '^bb1(%0, %0)')
+  .replace('cond_br %37, ^bb12(), ^bb1(%36)', '%51: s32 = add %50, %36\n  cond_br %37, ^bb12(), ^bb1(%36, %51)')
+  .replace('%34: s32 = call %5 {target="k"}', '%34: s32 = call %50 {target="k"}');
+
+const stepsStructured = (spellCountedLoopsFor: boolean, stepSecondCounters: boolean) => {
+  const fn = parse(tailRetSteps);
+  verify(fn);
+  recoverTypes(fn);
+  let offered = 0,
+    steps = 0;
+  const sfn = structure(
+    fn,
+    { spellCountedLoopsFor, stepSecondCounters },
+    { onForOffered: () => offered++, onForStepsOffered: () => steps++ },
+  );
+  return { src: cBackend.emit(sfn), offered, steps, agreement: irAgreement(tailRetSteps, sfn, SEEDS) };
+};
+
+test('/for-steps spells a second counter `/for-continue` alone leaves as `while (1)`', () => {
+  // the default reports the loop as what `/for-steps` changes beside `/for-continue`, not as what
+  // `/for-continue` alone changes: that one builds the default's tree, so its witness is exact
+  const plain = stepsStructured(false, false);
+  expect(plain.src).toContain('while (1)');
+  expect([plain.offered, plain.steps > 0]).toEqual([0, true]);
+  // `/for-steps` alone is the default's tree, which is why rank.ts enumerates it only beside
+  // `/for-continue`
+  expect(stepsStructured(false, true).src).toBe(plain.src);
+  const forOnly = stepsStructured(true, false);
+  expect(forOnly.src).toBe(plain.src);
+  expect([forOnly.offered, forOnly.steps > 0]).toEqual([0, true]);
+  const both = stepsStructured(true, true);
+  expect(both.src).toMatch(/for \((\w+) = a0; a1 >= \1; \1 = \1 \+ 1, (\w+) = \2 \+ \1\) \{/);
+  expect([both.offered, both.steps]).toEqual([0, 0]);
+  for (const r of [plain, forOnly, both]) {
+    expect(r.agreement.disagree).toBe(0);
+    expect(r.agreement.judged).toBe(SEEDS.length);
+  }
+});
+
+// THE ENUMERATION GATE (rank-variations.ts, `/for-steps`' `sharedGate`, structure.ts
+// `hasSecondCounterLoop`): a function with no loop that both steps two of its header's params on a
+// back edge and leaves other than by one bottom test enumerates no `/for-steps` setting at all. Its OFF sibling's witness would skip every one of them
+// anyway, but the settings themselves cost heap on a large function (a near-limit real row's peak
+// rose by about 11% with the fan unchanged).
+test('/for-steps is enumerated only where a back edge steps two header params', () => {
+  const gateOn = (ir: string): boolean => {
+    const fn = parse(ir);
+    verify(fn);
+    return hasSecondCounterLoop(fn);
+  };
+  expect(gateOn(tailRetSteps)).toBe(true);
+  // one counter, and a `while (1)` with no params, step nothing a second time
+  expect(gateOn(tailRet)).toBe(false);
+  expect(gateOn(foreverJt)).toBe(false);
+  // two steps, but the loop's one way out is its bottom test: the `do-while` reading's, never asked
+  // as a `for`
+  const doWhileSteps = `fn dws {
+^bb0(%0: s32, %1: s32):
+  br ^bb1(%0, %0)
+^bb1(%2: s32, %3: s32):
+  %4: s32 = call %3 {target="k"}
+  %5: s32 = const {value=1}
+  %6: s32 = add %2, %5
+  %7: s32 = add %3, %6
+  %8: u32 = icmp_slt %6, %1
+  cond_br %8, ^bb1(%6, %7), ^bb2()
+^bb2():
+  ret
+}`;
+  expect(gateOn(doWhileSteps)).toBe(false);
+  // a function with no loop reports the variation as gated, and no candidate carries it
+  const asm = readFileSync(join(import.meta.dirname, 'corpus/agbcc-clamp0.s'), 'utf8');
+  const sym = (/^\s*\.global\s+(\w+)/m.exec(asm) ?? /^(\w+):/m.exec(asm))![1];
+  const gated: string[] = [];
+  const cands = enumerateCandidates(sym, asm, ARMV4T_AGBCC, { onVariationGated: (v) => gated.push(v) });
+  expect(gated).toContain('for-steps');
+  expect(cands.some((c) => hasVariation(c.variations, 'for-steps'))).toBe(false);
 });

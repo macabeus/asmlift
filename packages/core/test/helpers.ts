@@ -462,7 +462,7 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
             if (sig === 'return' || sig.startsWith('end:') || sig === 'break') {
               break;
             }
-            exec([s.inc]);
+            exec(s.inc);
           }
           if (left !== 'none') {
             return resume(i, left);

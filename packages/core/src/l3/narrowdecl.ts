@@ -167,7 +167,7 @@ function rewriteWrites(body: Stmt[], name: string, rewrite: (value: Expr) => Exp
   const stmt = (s: Stmt): Stmt => {
     const own = s.k === 'assign' && s.name === name ? { ...s, value: rewrite(s.value) } : s;
     const nested = mapStmtLists(own, (list) => list.map(stmt));
-    return nested.k === 'for' ? { ...nested, init: stmt(nested.init), inc: stmt(nested.inc) } : nested;
+    return nested.k === 'for' ? { ...nested, init: stmt(nested.init), inc: nested.inc.map(stmt) } : nested;
   };
   return body.map(stmt);
 }
