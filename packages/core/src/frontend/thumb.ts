@@ -5601,6 +5601,9 @@ function prologueSavedRegs(entry: AsmBlock): { saved: ReadonlySet<string>; carri
  *  leading run too, so the two readings of one idiom agree: `mov r0, r8; add r0, #1; push {r0}`
  *  saves no r8. It is restored by `pop {rLow}; mov rHi, rLow` likewise, and that `pop` restores no
  *  `rLow`: agbcc's `pop {r3, r4}; mov r8, r3; mov sl, r4; pop {r4-r7}` hands r4 sl's word first.
+ *  Where the word it loads is rHi's own, that `mov` is the restore's and is returned as
+ *  `restoreCopies` for the fill to skip: lifted, it reads rLow, which some path may never have
+ *  written, and an unwritten r3 there is the caller's fourth argument.
  *
  *  THE RESTORE ENDS THE SAVE. Past it the register holds the caller's value again, so a read there
  *  is the caller's value and a write there is one the caller sees, neither of them a local's —
@@ -5644,6 +5647,7 @@ function bodySavedRegs(
   leaked: ReadonlyMap<string, Instr>;
   copied: ReadonlyMap<string, Instr>;
   returned: ReadonlyMap<string, Instr>;
+  restoreCopies: ReadonlySet<Instr>;
 } {
   // What each instruction saves, restores and otherwise names; the staging `mov`s first.
   const savesHi = new Map<Instr, string>(); // `mov rLow, rHi` ⇒ rHi, where rLow is pushed unchanged
@@ -5719,6 +5723,7 @@ function bodySavedRegs(
   const leaked = new Map<string, Instr>();
   const copied = new Map<string, Instr>();
   const returned = new Map<string, Instr>();
+  const restoreCopies = new Set<Instr>();
   const word = (r: string) => canonReg(r) ?? r;
   const walk = (b: number, record: boolean): State => {
     const cur = new Set(stateIn[b]!.cur);
@@ -5792,6 +5797,9 @@ function bodySavedRegs(
         holds.set(word(x.ops[0]), word(savesHi.get(x)!));
       }
       const restores = own === null ? named : named.filter(own);
+      if (record && own !== null && restoresHi.has(x) && restores.length > 0) {
+        restoreCopies.add(x);
+      }
       const uses =
         x.mnemonic === 'push'
           ? []
@@ -5888,6 +5896,7 @@ function bodySavedRegs(
     leaked,
     copied,
     returned,
+    restoreCopies,
   };
 }
 
@@ -6453,6 +6462,9 @@ interface ThumbFill {
   /** …and each one a return may hand back so (`bodySavedRegs`'s `returned`): refused unless the
    *  function's own declaration returns nothing. */
   readonly poppedReturns: ReadonlyMap<string, Instr>;
+  /** Each staged restore's `mov rHi, rLow` that loads rHi's own saved word (`bodySavedRegs`'s
+   *  `restoreCopies`): the restore's, not the function's, so the fill skips it. */
+  readonly restoreCopies: ReadonlySet<Instr>;
 }
 
 /** EVERY STAGE BEFORE THE FILL, in their refusal order: the text, the CFG, the target's scratch
@@ -6602,6 +6614,7 @@ function thumbFillOf(
     caseEntries: elidedCaseEntries(cfg, text.tables),
     poppedForeign: body.leaked,
     poppedCopies: body.copied,
+    restoreCopies: body.restoreCopies,
     poppedReturns: body.returned,
   };
 }
@@ -6707,8 +6720,8 @@ function fillThumbBlock(fill: ThumbFill, ab: AsmBlock, bi: number): void {
     switch (ins.mnemonic) {
       case 'mov':
       case 'movs': {
-        if (fill.frame.saveCarriers.has(ins)) {
-          break; // the save's staging copy, not the function's (`prologueSavedRegs`)
+        if (fill.frame.saveCarriers.has(ins) || fill.restoreCopies.has(ins)) {
+          break; // the save's or the restore's staging copy, not the function's
         }
         lowerMov(fill, cur, ins);
         break;

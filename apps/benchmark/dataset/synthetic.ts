@@ -4633,6 +4633,29 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void nine();\nvoid stkbody_none(int *p, int n);',
     proto: { stkbody_none: { returnsVoid: true }, nine: { returnsVoid: true } },
   },
+  // A CALLEE BODY'S STAGED HIGH-REGISTER RESTORE READS NO ARGUMENT (frontend/thumb.ts
+  // `bodySavedRegs`, `restoreCopies`). agbcc restores r8-sl through `pop {r3, r4, r5}; mov r8, r3; …`,
+  // and where some path reaches that restore without writing r3 (here `hiw`'s `a >= 8` exit), lifted
+  // as the function's own `mov` it read r3's entry value: `hiw`'s body bounded its caller's guess at
+  // four words, so `hirst_call`'s r1/r2 pass-throughs under its stored r3 declined. Read as the
+  // restore's, the body reads r0 alone and the call is `hiw(a + 1)` (kl2dct sub_0802C910 and
+  // sub_08036F18 have such a callee). agbcc only: no other frontend stages a save through a low
+  // register.
+  {
+    sym: 'hirst_call',
+    src:
+      'extern int g0, g1, g2, g3, g4, g5, g6, g7, g8, g9;\nextern int gx;\n' +
+      'void hiw(a) unsigned char a;\n{\n    int i;\n    if (a < 8) {\n' +
+      '        int x0 = g0, x1 = g1, x2 = g2, x3 = g3, x4 = g4, x5 = g5, x6 = g6, x7 = g7, x8 = g8;\n' +
+      '        for (i = a; i < a + 8; i++) {\n' +
+      '            g9 += x0 * i + x1; x0 += x2; x1 ^= x3; x2 += x4 * i; x3 -= x5; x4 += x6; x5 ^= x7; x6 += x8 * i; x7++; x8 += a;\n' +
+      '        }\n    }\n}\n' +
+      'void hirst_call(int a, int b, int c, int d)\n{\n    gx = d;\n    hiw(a + 1);\n}',
+    features: [],
+    toolchains: ['agbcc'],
+    ctx: 'extern int gx;\nvoid hiw();\nvoid hirst_call(int a, int b, int c, int d);',
+    proto: { hirst_call: { returnsVoid: true }, hiw: { returnsVoid: true } },
+  },
   // `spillarg` is `spill10` with a genuine outgoing argument under the spills: `five(i, 1, 2, 3,
   // v0)` stages argument 5 at [sp,#0] before every call and agbcc moves the spills above it, to
   // [sp,#4]..[sp,#0x20]. Several reach `bl five` unread, so the declaration (`five` takes one stack
