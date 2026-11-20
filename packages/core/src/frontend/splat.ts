@@ -166,11 +166,17 @@ export function isSplatMips(asm: string): boolean {
  *  may shadow a real mnemonic (`.macro nop`, `.macro addiu a,b,c`) with no warning (measured,
  *  mips-linux-gnu-as 2.42), so an addressed line naming one runs the macro's body, not the
  *  instruction written. `*` stands for a name this reader cannot read (`.macro \\x`), which matches
- *  every mnemonic. KNOWN GAP: a macro an `.include` defines is not seen here. */
+ *  every mnemonic, and so does a line that leaves a comment, string or character constant open.
+ *  KNOWN GAP: a macro an `.include` defines is not seen here. */
 function definedMacros(lines: string[]): Set<string> {
   const names = new Set<string>();
   for (const raw of lines) {
-    for (const st of splatStatements(raw) ?? [raw]) {
+    const sts = splatStatements(raw);
+    if (sts === null) {
+      names.add('*'); // a line this reader cannot cut may hide a `.macro` in what it leaves open
+      continue;
+    }
+    for (const st of sts) {
       const t = bareStatement(st).replace(/^(?:[\w.$]+:\s*)+/, '');
       const m = t.match(/^\.macro\b\s*([^\s,]*)/i);
       if (m) {
@@ -189,6 +195,19 @@ function definedMacros(lines: string[]): Set<string> {
 export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
   const lines = asm.split('\n');
   const macros = definedMacros(lines);
+  // A line that leaves a comment, string or character constant open hides from this reader what
+  // gas assembles after it (a `*/ .macro nop` on the next line is a macro definition, measured), so
+  // it declines wherever the reader reads it: before the function and inside it alike.
+  const readStatements = (raw: string): string[] => {
+    const sts = splatStatements(raw);
+    if (sts === null) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${raw.trim()}' leaves a comment, string or character constant open at the end of ` +
+          `its line, so this reader cannot tell which statements gas assembles`,
+      );
+    }
+    return sts;
+  };
   const macroCall = (statement: string): void => {
     const call = statement.match(INSN_LINE)?.[2].toLowerCase();
     if (call !== undefined && (macros.has(call) || macros.has('*'))) {
@@ -229,7 +248,7 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
     // the body is (never, under `.if 0`), which this reader does not model.
     let depth = 0;
     for (const raw of lines.slice(0, glabels[at].line)) {
-      for (const st of splatStatements(raw) ?? []) {
+      for (const st of readStatements(raw)) {
         const d = st.trim().match(LINE_DIRECTIVE)?.[1].toLowerCase();
         depth +=
           d === undefined ? 0 : /^(?:if\w*|macro|rept|irpc?)$/.test(d) ? 1 : /^(?:endif|endm|endr)$/.test(d) ? -1 : 0;
@@ -247,16 +266,7 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
   const instrs: DisasmInstr[] = [];
   const labelAddr = new Map<string, number>();
   let pending: string[] = [];
-  const statements = slice.flatMap((raw) => {
-    const sts = splatStatements(raw);
-    if (sts === null) {
-      throw new FrontendUnsupportedError(
-        `cannot lift '${name}': '${raw.trim()}' leaves a comment, string or character constant open at the end of ` +
-          `its line, so this reader cannot tell which statements gas assembles`,
-      );
-    }
-    return sts;
-  });
+  const statements = slice.flatMap(readStatements);
   // the section the lines before the slice leave current: a plain `.text` / `.section .text`, or
   // anything else (not modelled: a stack form before the function reads as another section)
   let inOtherSection = false;
@@ -288,7 +298,7 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
     }
   };
   for (const raw of lines.slice(0, sliceFrom)) {
-    for (const st of splatStatements(raw) ?? []) {
+    for (const st of readStatements(raw)) {
       const t = st.trim();
       // `.set push` / `.set pop` save and restore the reorder state (measured: a `pop` back to
       // `.set reorder` before the function lets gas fill its delay slot); not modelled.

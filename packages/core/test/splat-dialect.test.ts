@@ -672,6 +672,22 @@ describe('an addressed line that calls a macro the file defines declines', () =>
       /calls 'nop'/,
     );
   });
+  // e16: a line before the function that leaves a `/*` open was skipped, so the next line,
+  // `*/ .macro nop`, read as one statement starting with `*/` and the macro went unseen (gas: the
+  // call runs it, a0 + 1; main lifted a0 + 1 + 4). Such a line now declines before the function as it
+  // does inside it. e17 (`*/ .set reorder`) is the control, which declined already.
+  test.each([
+    [
+      'e16',
+      '/* a\n*/ .macro nop\n.set reorder\n.word 0\n/* b\n*/ .endm\n.set noreorder\n.text\nglabel f\n    /* 0FC 800000FC 00000000 */  nop\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+    ],
+    [
+      'e17',
+      '/* a\n*/ .set reorder\n.set noreorder\n/* b\n*/ .set reorder\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+    ],
+  ])('%s: a line before the function that leaves a comment open declines', (_probe, asm) => {
+    expect(() => decompile('f', asm, MIPS_IDO)).toThrow(/'\/\* a' leaves a comment, string or character constant open/);
+  });
   // KNOWN GAP (traps/20261120-071902Z-MERGE462-addressed-line-can-be-a-gas-macro-call.md, probe d24): a
   // macro an `.include` defines is not seen, so d17 with its `.macro nop` moved into `m2.inc` still lifts
   // a0 + 1 + 4 where gas gives a0 + 1. Declining every addressed line after an `.include` would cost
