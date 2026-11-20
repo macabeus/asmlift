@@ -572,10 +572,52 @@ describe('on Thumb (agbcc), a callee body in the same input bounds the arity gue
     }).source;
     expect(src).toContain('rnd()');
     expect(src).not.toMatch(/rnd\([^)]/);
-    // synthetic:jt_rndjoinst:agbcc: with no body, r0 is counted, and the marker it may hold refuses
-    expect(() =>
-      decompile('jt_rndjoin', `\t.code\t16\n\t.text\n\t.thumb_func\n${join}`, ARMV4T_AGBCC, { prototypes: protos }),
-    ).toThrow(/a case of the elided jump table reads r0/);
+    // synthetic:jt_rndjoinst:agbcc: with no body, the marker the default edge brings in r0 is a
+    // ceiling (frontend/call-plan.ts `CallSite.marker`), and the call takes none there either
+    const bare = decompile('jt_rndjoin', `\t.code\t16\n\t.text\n\t.thumb_func\n${join}`, ARMV4T_AGBCC, {
+      prototypes: protos,
+    }).source;
+    expect(bare).toContain('rnd()');
+    expect(bare).not.toMatch(/rnd\([^)]/);
+  });
+});
+
+// A DISPATCH'S MARKER IS A CEILING ON A GUESSED ARITY where argument words fill in order (frontend/
+// call-plan.ts `CallSite.marker`). synthetic:jt_mark:agbcc, `void cb(); void jt_mark(int i) { switch
+// (i) { case 0: gx = 5; cb(); break; … case 2: cb(); break; case 4: gB = 2; cb(); break; … } }`: agbcc
+// cross-jumps cases 0, 2 and 4 into one `bl cb` that case 2's dispatch edge enters directly, so on
+// that path r0 holds the case's code address and r1 the table's, and no argument of the one call is
+// there. The guess stopped at nothing and read the marker; the store's 5 that case 0 leaves in r0 is
+// the same bytes as `cb(5)` only where nothing proves otherwise.
+describe("on Thumb (agbcc), a dispatch's marker in an argument register caps the arity guess", () => {
+  const jtMark =
+    '\t.code\t16\n\t.text\n\t.thumb_func\n' +
+    'jt_mark:\n\tpush\t{lr}\n\tcmp\tr0, #6\n\tbhi\t.L3\t@cond_branch\n\tlsl\tr0, r0, #2\n' +
+    '\tldr\tr1, .L15\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n.L16:\n\t.align\t2, 0\n' +
+    '.L15:\n\t.word\t.L11\n\t.align\t2, 0\n\t.align\t2, 0\n.L11:\n\t.word\t.L4\n\t.word\t.L5\n' +
+    '\t.word\t.L14\n\t.word\t.L7\n\t.word\t.L8\n\t.word\t.L9\n\t.word\t.L10\n.L4:\n\tldr\tr1, .L17\n' +
+    '\tmov\tr0, #5\n\tstr\tr0, [r1]\n.L14:\n\tbl\tcb\n\tb\t.L3\n.L18:\n\t.align\t2, 0\n.L17:\n' +
+    '\t.word\tgx\n.L5:\n\tldr\tr1, .L19\n\tmov\tr0, #1\n\tstrb\tr0, [r1]\n\tb\t.L3\n.L20:\n' +
+    '\t.align\t2, 0\n.L19:\n\t.word\tgB\n.L7:\n\tldr\tr1, .L21\n\tmov\tr0, #7\n\tstrb\tr0, [r1]\n' +
+    '\tb\t.L3\n.L22:\n\t.align\t2, 0\n.L21:\n\t.word\tgC\n.L8:\n\tldr\tr1, .L23\n\tmov\tr0, #2\n' +
+    '\tstrb\tr0, [r1]\n\tb\t.L14\n.L24:\n\t.align\t2, 0\n.L23:\n\t.word\tgB\n.L9:\n\tldr\tr1, .L25\n' +
+    '\tmov\tr0, #9\n\tstrh\tr0, [r1]\n\tb\t.L3\n.L26:\n\t.align\t2, 0\n.L25:\n\t.word\tgH\n.L10:\n' +
+    '\tbl\tcb\n.L3:\n\tpop\t{r0}\n\tbx\tr0\n';
+  const prototypes: Prototypes = { jt_mark: { params: ['s32'], returnsVoid: true }, cb: { returnsVoid: true } };
+  test('a cross-jumped call the dispatch enters takes no argument at or above the marker', () => {
+    const src = decompile('jt_mark', jtMark, ARMV4T_AGBCC, { prototypes }).source;
+    expect(src).toContain('cb()');
+    expect(src).not.toMatch(/cb\([^)]/);
+  });
+  test('…and on an ABI that can leave a register empty below a filled one, the marker is read and refuses', () => {
+    for (const holes of [
+      { evenWordAlignedArgs: true as const },
+      { fpu: { argRegs: ['f0'], returnReg: 'f0', slots: 'leading' as const } },
+    ]) {
+      expect(() => decompile('jt_mark', jtMark, { ...ARMV4T_AGBCC, ...holes }, { prototypes })).toThrow(
+        /a case of the elided jump table reads r0/,
+      );
+    }
   });
 });
 

@@ -117,6 +117,7 @@ import {
   entersBetween,
   idiomLeaves,
   makeTableBases,
+  markerIn,
   parkedIn,
   refuseReachableDispatch,
   refuseStaleIdiomReads,
@@ -1657,6 +1658,7 @@ function liftOnce(
   );
   const staleIdiom = new Map<Value, StaleIdiomRead>();
   const parked = parkedIn(staleIdiom);
+  const marker = markerIn(staleIdiom);
   const scaledIndex = scaledIndexIn(staleIdiom);
   /** What this frontend defines registers with that is no argument: a pending `@ha` half and a
    *  table base. NOT a marker an elided dispatch left (`staleIdiom`): a case may copy one
@@ -2757,6 +2759,7 @@ function liftOnce(
             // a pending `@ha` half and a table base are no argument
             placeholders,
             parked,
+            marker,
             scaledIndex,
             guess: {
               // a gap in the argument registers refuses, naming this address (`fallbackArgc`)

@@ -77,6 +77,7 @@ import {
   entersBetween,
   idiomLeaves,
   makeTableBases,
+  markerIn,
   parkedIn,
   refuseReachableDispatch,
   refuseStaleIdiomReads,
@@ -1736,6 +1737,7 @@ function liftOnce(
   );
   const staleIdiom = new Map<Value, StaleIdiomRead>();
   const parked = parkedIn(staleIdiom);
+  const marker = markerIn(staleIdiom);
   const scaledIndex = scaledIndexIn(staleIdiom);
   // O32 passes the words past a0..a3 on the stack, returns a word in v0, and returns every struct
   // and union through a hidden pointer in a0 (`aggregateReturn: 'memory'`). This lowering builds no
@@ -3086,6 +3088,7 @@ function liftOnce(
         // a pending `%hi` half and a table base are no argument
         placeholders,
         parked,
+        marker,
         scaledIndex,
         guess: {
           // a gap in the argument registers refuses, naming this address (`fallbackArgc`)

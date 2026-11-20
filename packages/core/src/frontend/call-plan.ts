@@ -213,6 +213,17 @@ export interface CallSite {
    *  dropped with everything else there (`mov r2,r1` ahead of `bl g` lifts `g(…)` without it), which
    *  only hand asm meets: no compiler copies a marker. */
   readonly parked?: (v: Value, reg: string) => boolean;
+  /** whether `v`, in argument register `reg`, is a marker a jump-table dispatch left in that very
+   *  register, parked or not (frontend/jump-table.ts `markerIn`). A MIXED case target's marker
+   *  stands for what its other paths brought too, so the register is no value the case lacks; but on
+   *  the path through the dispatch it holds the table's address or the case's code address, and the
+   *  call is one instruction on every path, so a register some path brings it to is none of the
+   *  call's arguments (a defined program whose callee read it would read a code address there). Where
+   *  argument words fill in order (`argRegisterHoles` none, no floating-point argument registers:
+   *  agbcc), no register above it is one either, and the guessed arity stops below it
+   *  (`fallbackArgc`'s `ceiling`). Elsewhere a hole may sit under it: an O32 leading float leaves a0
+   *  untouched, a `long long` skips a1, so the marker may stand in a register the call skipped. */
+  readonly marker?: (v: Value, reg: string) => boolean;
   /** whether `v`, in argument register `reg`, is the scaled index a jump-table dispatch left in that
    *  very register (frontend/jump-table.ts `scaledIndexIn`): a call handed it and one not compile
    *  alike, so a guessed arity that counts it refuses */
@@ -1078,10 +1089,17 @@ export function callDeclarations(
     const resultOwed: Array<() => void> = [];
     // how many argument words the decided gaps put beyond doubt
     let decidedWords = 0;
+    // the lowest argument register past the stated ones that some path brings a dispatch's marker
+    // to, where the ABI fills argument words in order (`CallSite.marker`)
+    const ceiling =
+      holes.skippable.size === 0 && !holes.leadingFloatShadow && target.fpu === undefined
+        ? target.argRegs.findIndex((r, k) => k >= floor && ssa.holdsValue(r, bi, (v) => site.marker?.(v, r) === true))
+        : -1;
     const argc =
       widths === null
         ? fallbackArgc(ssa, target.argRegs, bi, {
             accept: mayPass,
+            ceiling: ceiling < 0 ? undefined : ceiling,
             bound: bodyWords,
             leftover,
             gap: { name, at: guess.at, fail },
@@ -1137,7 +1155,7 @@ export function callDeclarations(
           k >= floor &&
           ssa.hasReachingDef(r, bi, (v) => site.parked?.(v, r) === true || site.scaledIndex?.(v, r) === true),
       );
-      parkedInArgs ||= markedAt >= 0;
+      parkedInArgs ||= markedAt >= 0 || ceiling >= 0;
       const call = typeof guess.at === 'number' ? `at 0x${guess.at.toString(16)}` : guess.at;
       const last = target.argRegs[argc - 1];
       // the blocks since the dispatch on the way to the call: a path stops at a `switch_br`'s block

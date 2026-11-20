@@ -13273,8 +13273,10 @@ export const SYNTHETIC: SynthSpec[] = [
   //      question about its VALUE counts it; call-plan.ts `leftover` asks of each WRITE that reaches
   //      the call whether an instruction, the copy included, read it after
   //      (`SsaBuilder.readAfterEveryReachingWrite`). jt_rndjoin lifts `rnd()` on agbcc, as `--proto
-  //      '{"thunk_GetRandomValue":{"params":0}}'` lifts the real one. jt_rndjoinst has no body and
-  //      must STAY declined on agbcc, the soundness control.
+  //      '{"thunk_GetRandomValue":{"params":0}}'` lifts the real one. jt_rndjoinst has no body: the
+  //      marker the inner default edge brings in r0 is the table target on that path, so on agbcc,
+  //      which fills argument words in order, the one `bl rnd` takes no argument at or above r0
+  //      (frontend/call-plan.ts `CallSite.marker`, jt_mark below), and it lifts `rnd()` too.
   //  16. sretpuretail / sretpuretail_exit (sub_08014230). Three return arms in one loop. agbcc
   //      cross-jumps two of them after reload (toplev.c:3164; jump.c:1961-1991 `find_cross_jump`) into
   //      one PURE block, the `p.kind = seg->kind` insert reading the strength-reduced element pointer,
@@ -14231,6 +14233,24 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
     ctx: 'struct E { u16 x, y; u8 pad[11]; u8 kind; u8 pad3[12]; };\nextern struct E gE[];\nu8 rnd();\nvoid jt_rndjoinst(u8 i);',
     proto: { jt_rndjoinst: { params: ['u8'], returnsVoid: true }, rnd: { returns: 'u8' } },
+  },
+  // A DISPATCH'S MARKER IS A CEILING ON A GUESSED ARITY (frontend/call-plan.ts `CallSite.marker`;
+  // kl2dct sub_0800B804, sub_08043154). agbcc cross-jumps cases 0, 2 and 4 into one `bl cb` that case
+  // 2's dispatch edge enters directly, with r0 the case's code address and r1 the table's on that
+  // path. The call is one instruction, so no argument of it is in r0, and agbcc fills argument words
+  // in order, so none is above it: `cb()`, where the guess read the marker and declined. O32 and
+  // PowerPC can leave a register empty below a filled one (`argRegisterHoles`, an FP argument), so a
+  // marker caps nothing there and those cells keep what they had.
+  {
+    sym: 'jt_mark',
+    src:
+      'extern int gx; extern u8 gB, gC; extern u16 gH;\nextern void cb();\nvoid jt_mark(s32 i)\n{\n    switch (i) {\n' +
+      '    case 0: gx = 5; cb(); break;\n    case 1: gB = 1; break;\n    case 2: cb(); break;\n' +
+      '    case 3: gC = 7; break;\n    case 4: gB = 2; cb(); break;\n    case 5: gH = 9; break;\n    case 6: cb(); break;\n    }\n}',
+    features: ['dense'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'extern int gx; extern u8 gB, gC; extern u16 gH;\nvoid cb();\nvoid jt_mark(s32 i);',
+    proto: { jt_mark: { returnsVoid: true }, cb: { returnsVoid: true } },
   },
   {
     sym: 'sretpuretail',
