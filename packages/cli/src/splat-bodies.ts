@@ -19,13 +19,18 @@
 // need not reach (kl2dct's omits the `-I` its Makefile passes for `<string.h>`). It then requires
 // all of the following:
 //   - exactly one source file of the project includes `<dir>/<name>.s` by that macro, and exactly
-//     one header defines the macro;
+//     one header defines the macro. The site is read off the units, not off decomp.yaml's
+//     `paths.asm`/`paths.nonmatchings`: a file under those paths that no unit includes is no code the
+//     build links, and the compile below must spell the `dir` the unit's own include passes. A name
+//     two sites include (a second unit, or a commented-out line) gives no body;
 //   - the file defines the label once and marks it `.weak` nowhere;
 //   - the unit's object defines `<name>` as one non-weak Thumb FUNC, as long as its ELF range
 //     (elf-bodies.ts `functionRange` on both);
 //   - every byte of the object's range equals the ELF's, except a word a relocation of the object
-//     fills: an `R_ARM_ABS32` pool word, or an `R_ARM_THM_CALL` `bl` pair whose ELF target is the one
-//     FUNC the relocation's own symbol names.
+//     fills, and that one is the word the link wrote: an `R_ARM_ABS32` word whose ELF value is its
+//     symbol's linked address plus the addend in place (a jump table's word against the function's
+//     own section included, placed where the link put that section), or an `R_ARM_THM_CALL` `bl`
+//     pair whose ELF target is the one FUNC the relocation's own symbol names.
 // Any other relocation in the range, and any miss above, gives no body. The callee then keeps what
 // elf-bodies.ts gave it, byte for byte. So does a unit that does not compile, an assembler the command
 // cannot find included.
@@ -132,7 +137,8 @@ export function definesOnce(text: string, name: string): boolean {
 interface Relocation {
   offset: number;
   type: number;
-  sym: { name: string; type: number };
+  /** the relocation's symbol in the object: its name, type, value and section */
+  sym: { name: string; type: number; value: number; shndx: number };
 }
 
 /** The relocations of an object's section `shndx`; undefined where any is RELA (ARM objects carry REL). */
@@ -161,7 +167,12 @@ function relocationsOf(image: ElfImage, shndx: number): Relocation[] | undefined
       out.push({
         offset: u32(at),
         type: info & 0xff,
-        sym: { name: bytes.toString('latin1', nameAt, nameEnd < 0 ? nameAt : nameEnd), type: bytes[ent + 12] & 0xf },
+        sym: {
+          name: bytes.toString('latin1', nameAt, nameEnd < 0 ? nameAt : nameEnd),
+          type: bytes[ent + 12] & 0xf,
+          value: u32(ent + 4),
+          shndx: littleEndian ? bytes.readUInt16LE(ent + 14) : bytes.readUInt16BE(ent + 14),
+        },
       });
     }
   }
@@ -203,6 +214,46 @@ function blTarget(image: ElfImage, at: number, pc: number): number | undefined {
   return (pc + 4 + off) >>> 0;
 }
 
+/** Whether the `R_ARM_ABS32` word `at` bytes into `ours` (the object's range of the function) is
+ *  the word the link wrote `at` bytes into `range`: `(S + A) | T`, the addend `A` read in place (ARM
+ *  objects carry REL). A word against a symbol of the function's own section (a jump table's
+ *  `.4byte .Lcase`, which gas relocates against the section) places `S` by where the link put that
+ *  section, which the function's own range says; one against a named symbol elsewhere takes `S` off
+ *  the linked image's one definition of that name. Any other word (a section symbol of another
+ *  section, a name defined twice or nowhere) is no word this check can place, and gives no body: a
+ *  file whose table names another case assembles to the same instructions. */
+function abs32Agrees(
+  linked: ElfImage,
+  range: FunctionRange,
+  obj: ElfImage,
+  ours: FunctionRange,
+  at: number,
+  sym: Relocation['sym'],
+): boolean {
+  const word = (image: ElfImage, r: FunctionRange): number => {
+    const { bytes, littleEndian } = image.elf;
+    const o = fileOffset(image, r) + at;
+    return littleEndian ? bytes.readUInt32LE(o) : bytes.readUInt32BE(o);
+  };
+  const addend = word(obj, ours);
+  let s: number;
+  let thumb: number;
+  if (sym.shndx === ours.shndx) {
+    thumb = sym.type === STT_FUNC ? sym.value & 1 : 0;
+    s = range.start + ((sym.value & ~thumb) - ours.start);
+  } else if (sym.type === STT_SECTION) {
+    return false;
+  } else {
+    const defs = linked.symbols.filter((d) => d.name === sym.name && d.shndx !== 0);
+    if (defs.length !== 1) {
+      return false;
+    }
+    thumb = linked.arm && defs[0].type === STT_FUNC ? defs[0].value & 1 : 0;
+    s = defs[0].value & ~thumb;
+  }
+  return ((s + addend) | thumb) >>> 0 === word(linked, range);
+}
+
 /** Whether `object`'s `name` is the code `linked`'s `name` is, relocated words aside (see the
  *  header). */
 export function assemblesToLinked(linked: ElfImage, object: Uint8Array, name: string): boolean {
@@ -234,6 +285,8 @@ export function assemblesToLinked(linked: ElfImage, object: Uint8Array, name: st
       if (r.sym.type === STT_SECTION || target === undefined || thumbFuncAt(linked, target) !== r.sym.name) {
         return false;
       }
+    } else if (!abs32Agrees(linked, range, obj, ours, at, r.sym)) {
+      return false;
     }
     for (let k = 0; k < 4; k++) {
       masked.add(at + k);
