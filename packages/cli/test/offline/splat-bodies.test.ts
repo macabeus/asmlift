@@ -7,7 +7,9 @@
 //   arm-none-eabi-ld -T arm.ld -e rd0 -o linked.elf linked.o
 //   arm-none-eabi-as -mcpu=arm7tdmi -o obj/<name>.o asm/nonmatchings/m/<name>.s
 // rd0 reads no argument (a `bl helper` and a `.4byte gp` pool word, both relocated), and rd1 reads r0.
-// stale's file moves 2 into r0 where the linked code moves 1. wk's file marks it `.weak`. wrongbl's
+// sel dispatches through a jump table, and selstale's file is sel with the table's second word one
+// instruction past the case the linked table enters. stale's file moves 2 into r0 where the linked
+// code moves 1. wk's file marks it `.weak`. wrongbl's
 // file calls helper2 where the linked code calls helper. dup is included by two units. The compile
 // command copies the object of the name its unit includes, as the project's assembler would write it.
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -65,6 +67,13 @@ describe('a project file is a body only where its object is the linked code', ()
     expect(assemblesToLinked(LINKED, object('wk'), 'wk')).toBe(false);
     // another function's object
     expect(assemblesToLinked(LINKED, object('rd0'), 'stale')).toBe(false);
+  });
+  test('a relocated word is masked only where it is the word the link wrote', () => {
+    // sel's jump table is relocated against its own section, its pool word against gp
+    expect(assemblesToLinked(LINKED, object('sel'), 'sel')).toBe(true);
+    // every instruction agrees, and the table's second word enters one instruction past case 1's
+    // `str r2`: that body reads no r2, and a caller's bound would drop the argument the linked one reads
+    expect(assemblesToLinked(LINKED, object('selstale'), 'sel')).toBe(false);
   });
   test('a label defined once and nowhere weak', () => {
     const text = (n: string) => readFileSync(join(FIXTURE, 'asm/nonmatchings/m', `${n}.s`), 'latin1');
