@@ -319,22 +319,22 @@ export function unitCompileFromCommand(
   };
 }
 
-/** The body each callee in `callees` has in the project's assembly, where the build proves it (see
- *  the header): a listing, which the core lifts as it would the same text in the input; and the file
- *  each was read from, relative to `root`, which the `[proto]` note names (callees.ts
- *  `guessedArityNote`) where it would otherwise name the ELF. */
-export async function calleeBodiesFromProjectAsm(
+/** The callees of `callees` whose project file {@link calleeBodiesFromProjectAsm} compiles: one
+ *  site includes it under the root, its linked range is Thumb, and the file defines it once (see the
+ *  header). Each with the file's text and the header to include. What the build then proves of each
+ *  is the compile's; this is every body that pass may read, which is what a reader holding the
+ *  CLI's bodies frozen (the bench's vendoring) must refuse to read less than. */
+export function projectAsmCandidates(
   root: string,
   linked: ElfImage,
   callees: readonly string[],
-  compile: UnitCompile,
   { header, sites }: ProjectAsm = projectAsm(root),
-): Promise<{ bodies: Record<string, CalleeBody>; files: Record<string, string> }> {
-  const bodies: Record<string, CalleeBody> = {};
-  const files: Record<string, string> = {};
+): Array<{ callee: string; header: string; site: IncludeAsmSite; text: string }> {
+  const out: Array<{ callee: string; header: string; site: IncludeAsmSite; text: string }> = [];
   for (const callee of callees) {
     const site = header === undefined ? undefined : includingUnit(sites, callee);
     if (
+      header === undefined ||
       site === undefined ||
       relative(root, site.asm).startsWith('..') ||
       functionRange(linked, callee)?.thumb !== true
@@ -347,9 +347,27 @@ export async function calleeBodiesFromProjectAsm(
     } catch {
       continue;
     }
-    if (!definesOnce(text, callee)) {
-      continue;
+    if (definesOnce(text, callee)) {
+      out.push({ callee, header, site, text });
     }
+  }
+  return out;
+}
+
+/** The body each callee in `callees` has in the project's assembly, where the build proves it (see
+ *  the header): a listing, which the core lifts as it would the same text in the input; and the file
+ *  each was read from, relative to `root`, which the `[proto]` note names (callees.ts
+ *  `guessedArityNote`) where it would otherwise name the ELF. */
+export async function calleeBodiesFromProjectAsm(
+  root: string,
+  linked: ElfImage,
+  callees: readonly string[],
+  compile: UnitCompile,
+  asm: ProjectAsm = projectAsm(root),
+): Promise<{ bodies: Record<string, CalleeBody>; files: Record<string, string> }> {
+  const bodies: Record<string, CalleeBody> = {};
+  const files: Record<string, string> = {};
+  for (const { callee, header, site, text } of projectAsmCandidates(root, linked, callees, asm)) {
     const object = await compile(`#include "${header}"\nINCLUDE_ASM("${site.dir}", ${callee});\n`);
     if (object !== undefined && assemblesToLinked(linked, object, callee)) {
       bodies[callee] = { kind: 'listing', text };
