@@ -180,7 +180,8 @@ export function guessedArityCallees(
  *  what the body answered settled only the registers the caller did not set up for the call. A
  *  callee in `sized` (core `DecompileResult.calleeStackSized`, with the stack words its call was laid
  *  out at) was no guess: it is named on a line of its own, as sized by the stack words its body
- *  loads. */
+ *  loads. A callee in `files` had its body read off that file of the project's assembly, proven to
+ *  assemble to the linked code (splat-bodies.ts), and the note names the file instead of the ELF. */
 export function guessedArityNote(
   asm: string,
   self: string,
@@ -190,11 +191,13 @@ export function guessedArityNote(
   relocs?: readonly Reloc[],
   asked?: ReadonlyMap<string, number>,
   sized?: ReadonlyMap<string, number>,
+  files?: ReadonlyMap<string, string>,
 ): string {
   const all = guessedArityCallees(asm, self, target, prototypes, symbols, relocs);
   const bodySized = all.filter((n) => sized?.has(n));
   const guessed = all.filter((n) => !asked?.has(n) && !sized?.has(n));
-  const within = all.filter((n) => asked?.has(n) && !sized?.has(n));
+  const within = all.filter((n) => asked?.has(n) && !sized?.has(n) && !files?.has(n));
+  const withinAsm = all.filter((n) => asked?.has(n) && !sized?.has(n) && files?.has(n));
   const remedy = (n: string) => `pass --proto '{"${n}":{"params":N}}' if a guess is wrong\n`;
   const words = (n: number) => `${n} argument word${n === 1 ? '' : 's'}`;
   return (
@@ -206,8 +209,15 @@ export function guessedArityNote(
       ? ''
       : `asmlift: [proto] ${within.length} callee(s) have no declared arity, guessed from the argument registers, ` +
         'each register the call left unset checked against what its body in tools.asmlift.elf reads: ' +
-        `${within.map((n) => `${n} (at most ${asked!.get(n)} argument word${asked!.get(n) === 1 ? '' : 's'})`).join(', ')} — ` +
+        `${within.map((n) => `${n} (at most ${words(asked!.get(n)!)})`).join(', ')} — ` +
         remedy(within[0])) +
+    (withinAsm.length === 0
+      ? ''
+      : `asmlift: [proto] ${withinAsm.length} callee(s) have no declared arity, guessed from the argument registers, ` +
+        "each register the call left unset checked against what its body in the project's asm reads, where that " +
+        'file assembles to the code in tools.asmlift.elf: ' +
+        `${withinAsm.map((n) => `${n} (${files!.get(n)}, at most ${words(asked!.get(n)!)})`).join(', ')} — ` +
+        remedy(withinAsm[0])) +
     (bodySized.length === 0
       ? ''
       : `asmlift: [proto] ${bodySized.length} callee(s) have no declared arity, each call sized by the incoming ` +

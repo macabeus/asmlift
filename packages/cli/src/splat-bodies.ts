@@ -43,7 +43,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 
 import { renderCc } from './compile-command';
-import { type ElfImage, type FunctionRange, functionRange, readElfImage } from './elf-bodies';
+import { type ElfImage, type FunctionRange, calleeAt, functionRange, readElfImage } from './elf-bodies';
 
 const SHT_SYMTAB = 2;
 const SHT_RELA = 4;
@@ -185,23 +185,6 @@ const fileOffset = (image: ElfImage, range: FunctionRange): number => {
   return s.offset + (range.start - s.addr);
 };
 
-/** The one FUNC whose Thumb entry is `addr` in the linked image: its name, where no other symbol
- *  defines that name. */
-function thumbFuncAt(image: ElfImage, addr: number): string | undefined {
-  const names = new Set(
-    image.symbols
-      .filter((s) => s.type === STT_FUNC && (s.value & ~1) === addr && (s.value & 1) === 1)
-      .map((s) => s.name),
-  );
-  if (names.size !== 1) {
-    return undefined;
-  }
-  const [name] = names;
-  return image.symbols.filter((s) => s.name === name && s.shndx !== 0 && s.shndx < 0xff00).length === 1
-    ? name
-    : undefined;
-}
-
 /** Where the Thumb `bl` pair at `at` (file offset) of address `pc` branches. */
 function blTarget(image: ElfImage, at: number, pc: number): number | undefined {
   const { bytes, littleEndian } = image.elf;
@@ -282,7 +265,11 @@ export function assemblesToLinked(linked: ElfImage, object: Uint8Array, name: st
     }
     if (r.type === R_ARM_THM_CALL) {
       const target = blTarget(linked, fileOffset(linked, range) + at, range.start + at);
-      if (r.sym.type === STT_SECTION || target === undefined || thumbFuncAt(linked, target) !== r.sym.name) {
+      if (
+        r.sym.type === STT_SECTION ||
+        target === undefined ||
+        calleeAt(linked, range, target, { thumb: true }) !== r.sym.name
+      ) {
         return false;
       }
     } else if (!abs32Agrees(linked, range, obj, ours, at, r.sym)) {
@@ -333,15 +320,18 @@ export function unitCompileFromCommand(
 }
 
 /** The body each callee in `callees` has in the project's assembly, where the build proves it (see
- *  the header): a listing, which the core lifts as it would the same text in the input. */
+ *  the header): a listing, which the core lifts as it would the same text in the input; and the file
+ *  each was read from, relative to `root`, which the `[proto]` note names (callees.ts
+ *  `guessedArityNote`) where it would otherwise name the ELF. */
 export async function calleeBodiesFromProjectAsm(
   root: string,
   linked: ElfImage,
   callees: readonly string[],
   compile: UnitCompile,
   { header, sites }: ProjectAsm = projectAsm(root),
-): Promise<Record<string, CalleeBody>> {
+): Promise<{ bodies: Record<string, CalleeBody>; files: Record<string, string> }> {
   const bodies: Record<string, CalleeBody> = {};
+  const files: Record<string, string> = {};
   for (const callee of callees) {
     const site = header === undefined ? undefined : includingUnit(sites, callee);
     if (
@@ -363,7 +353,8 @@ export async function calleeBodiesFromProjectAsm(
     const object = await compile(`#include "${header}"\nINCLUDE_ASM("${site.dir}", ${callee});\n`);
     if (object !== undefined && assemblesToLinked(linked, object, callee)) {
       bodies[callee] = { kind: 'listing', text };
+      files[callee] = relative(root, site.asm);
     }
   }
-  return bodies;
+  return { bodies, files };
 }
