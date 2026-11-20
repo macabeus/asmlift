@@ -26,8 +26,9 @@ afterAll(() => scratchDirs.forEach((d) => rmSync(d, { recursive: true, force: tr
 const DEFINE =
   '#define INCLUDE_ASM(DIR, NAME) asm(".pushsection .text\\n.syntax unified\\n.include \\"" DIR "/" #NAME ".s\\"\\n.syntax divided\\n.popsection\\n")\n';
 const HEADER = `${DEFINE}asm(".include \\"include/macros.s\\"\\n");\n`;
-// the generated unit is ignored: the object of the probe it stands for is copied
-const copy = (obj: string) => `test -f {{inputPath}} && cp obj/${obj}.o {{outputPath}}`;
+// the generated unit is ignored: copy.sh copies the object of the probe it stands for (the command
+// itself must be shell-literal, asm-includes.ts)
+const COPY = 'sh copy.sh {{inputPath}} {{outputPath}}';
 
 interface Variant {
   /** lines after the base header */
@@ -44,7 +45,8 @@ const lift = async ({ header = '', command, linked, edit }: Variant, withCompile
   cpSync(FIXTURE, root, { recursive: true, verbatimSymlinks: true });
   writeFileSync(join(root, 'include/include_asm.h'), HEADER + header);
   edit?.(root);
-  const compiler = command ?? copy(linked);
+  const compiler = command ?? COPY;
+  writeFileSync(join(root, 'copy.sh'), `cp obj/${linked}.o "$2"\n`);
   writeFileSync(
     join(root, 'decomp.yaml'),
     `name: test\nplatform: gba\nversions: []\ntools:\n  asmlift:\n    target: agbcc\n    elf: elf/${linked}.elf\n` +
@@ -68,10 +70,14 @@ describe('CLI (agbcc): a header or command that may bring gas a macro unseen giv
       { header: 'asm(".mac" "ro movs rd, imm\\n adds \\\\rd, \\\\imm\\n.endm\\n");\n', linked: 'shadowed' },
     ],
     ['v3d hex escape', { header: 'asm("\\x2einclude \\"include/evil.s\\"\\n");\n', linked: 'shadowed' }],
+    ['v5 -include on the command', { command: `${COPY} -include include/evil.h`, linked: 'shadowed' }],
+    ['w1 a shell variable spelling -include', { command: `X=-include\n${COPY} $X include/evil.h`, linked: 'shadowed' }],
     [
-      'v5 -include on the command',
-      { command: `true -include include/evil.h && ${copy('shadowed')}`, linked: 'shadowed' },
+      'w2 a command substitution spelling -include',
+      { command: `${COPY} $(echo LWluY2x1ZGU= | base64 -d) include/evil.h`, linked: 'shadowed' },
     ],
+    ['w3 shell quoting spelling -include', { command: `${COPY} "-"include include/evil.h`, linked: 'shadowed' }],
+    ['$CPPFLAGS from the environment', { command: `${COPY} $CPPFLAGS`, linked: 'shadowed' }],
     ['v7 symlink and ..', { header: 'asm(".include \\"lnk/../m2.s\\"\\n");\n', linked: 'shadowed' }],
   ])('%s: no body, the lift without a compile command', async (_, v) => {
     const plain = await lift(v, false);

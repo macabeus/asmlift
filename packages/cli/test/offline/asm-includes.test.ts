@@ -53,14 +53,33 @@ describe('the -I directories of a compile command', () => {
       '-U INCLUDE_ASM',
       '-I ../inc',
       '-I-',
+      // the command runs in a shell: every word must be shell-literal
+      '$X include/evil.h',
+      '$(echo LWluY2x1ZGU= | base64 -d) x.h',
+      '"-"include x.h',
+      '$CPPFLAGS',
+      '`echo -include` x.h',
+      "-in''clude x.h",
+      '-I "include"',
+      'x.c | tee y',
+      'x.c > y; z',
+      'env CPATH=evil x.c',
+      '*.c',
     ]) {
       expect(includeSearchFromCommand('/p', `cc -E -I include ${flag} x.c`), flag).toBeUndefined();
     }
+    for (const line of ['X=-include', '. ./env.sh', 'source env.sh', 'eval cc', 'exec cc']) {
+      expect(includeSearchFromCommand('/p', `${line}\ncc -E -I include x.c`), line).toBeUndefined();
+    }
+    expect(includeSearchFromCommand('/p', 'cc -E -I"include" {{inputPath}}')).toEqual({
+      cwd: '/p',
+      dirs: ['/p/include'],
+    });
     // kl2dct's command
     expect(
       includeSearchFromCommand(
         '/p',
-        'cc -E -x c -nostdinc -undef -I include {{inputPath}} -o {{outputPath}}.i\n' +
+        'set -e\ncc -E -x c -nostdinc -undef -I include {{inputPath}} -o {{outputPath}}.i\n' +
           './tools/agbcc/bin/agbcc {{outputPath}}.i -o {{outputPath}}.s -mthumb-interwork -Wimplicit -O2 -fhex-asm -DNONMATCHING\n' +
           'arm-none-eabi-as -mcpu=arm7tdmi {{outputPath}}.s -o {{outputPath}}',
       ),

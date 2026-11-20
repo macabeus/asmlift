@@ -22,8 +22,10 @@ const FIXTURE = join(import.meta.dirname, 'fixtures/splat-bodies-macro');
 const scratchDirs: string[] = [];
 afterAll(() => scratchDirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
 
-// the name the generated unit includes, and its object copied to the output
-const COPY = "n=$(sed -n 's/^INCLUDE_ASM(.*, \\(.*\\));$/\\1/p' {{inputPath}}); cp obj/$n.o {{outputPath}}";
+// the name the generated unit includes, and its object copied to the output, by a script the
+// command runs: the command itself must be shell-literal (asm-includes.ts)
+const COPY = 'sh copy.sh {{inputPath}} {{outputPath}}';
+const COPY_SH = 'n=$(sed -n \'s/^INCLUDE_ASM(.*, \\(.*\\));$/\\1/p\' "$1"); cp obj/$n.o "$2"\n';
 
 /** A copy of the fixture with `edit` applied, whose decomp.yaml states `compiler` (or none). */
 const project = (compiler: string | undefined, callee: string, edit?: (root: string) => void) => {
@@ -31,6 +33,7 @@ const project = (compiler: string | undefined, callee: string, edit?: (root: str
   scratchDirs.push(root);
   cpSync(FIXTURE, root, { recursive: true });
   edit?.(root);
+  writeFileSync(join(root, 'copy.sh'), COPY_SH);
   writeFileSync(
     join(root, 'decomp.yaml'),
     'name: test\nplatform: gba\nversions: []\ntools:\n  asmlift:\n    target: agbcc\n    elf: linked.elf\n' +
@@ -73,7 +76,7 @@ describe('CLI (agbcc): a body whose text calls an included macro is no body', ()
     expect(await lift(COPY, 'kfn', headerIncludes('include/missing.inc'))).toBe(await lift(undefined, 'kfn'));
   });
   test('an include found through the command\u2019s -I is read', async () => {
-    const viaI = `true -I include && ${COPY}`;
+    const viaI = `true -I include\n${COPY}`;
     // without the -I, macros.s is not found: no body
     expect(await lift(COPY, 'kfn', headerIncludes('macros.s'))).toBe(await lift(undefined, 'kfn'));
     expect(await lift(viaI, 'kfn', headerIncludes('macros.s'))).toContain('kfn(3);');
