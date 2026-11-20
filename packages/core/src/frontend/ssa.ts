@@ -123,6 +123,13 @@ export interface SsaBuilder {
    *  value this function named reaches it here on some path. A path that brings the destroyed bytes
    *  and one that brings a value still answer yes, and the read that follows refuses at `finish`. */
   holdsValue(reg: string, b: number, accept?: (v: Value) => boolean): boolean;
+  /** {@link holdsValue} asked of the paths whose every block is filled so far: one through a block
+   *  not filled yet brings nothing, where {@link holdsValue} walks through it to its predecessors.
+   *  Such a block may write `reg` once filled, so a value the walk finds past it is one that path
+   *  may never bring. A question whose yes must be what some real path brings asks this one: a
+   *  guessed arity's marker ceiling (frontend/call-plan.ts `ceiling`), where a case target laid out
+   *  after the call writes the register on its way in (`case 2: n = a + 3; goto L;`). */
+  holdsValueOnFilledPaths(reg: string, b: number, accept: (v: Value) => boolean): boolean;
   /** The MUST question beside {@link hasReachingDef}'s MAY one: whether EVERY path into the end of
    *  block `b` brings a definition of `reg` that `accept` takes, with no call destroying it since
    *  (`noteCall`). A path from the entry that defines nothing answers no — the register holds the
@@ -1303,9 +1310,18 @@ export function makeSsaBuilder(
     obligedParams[b].set(key, p);
   };
 
-  const reaches = (reg: string, b: number, accept: (v: Value) => boolean, throughCalls: boolean): boolean => {
+  const reaches = (
+    reg: string,
+    b: number,
+    accept: (v: Value) => boolean,
+    throughCalls: boolean,
+    throughUnfilled = true,
+  ): boolean => {
     const walk = (at: number, seen: Set<number>): boolean => {
       if (!throughCalls && clobberedLocal[at].has(reg)) {
+        return false;
+      }
+      if (!throughUnfilled && at !== b && !filled[at]) {
         return false;
       }
       const own = defs[at].get(reg);
@@ -1326,6 +1342,8 @@ export function makeSsaBuilder(
     reaches(reg, b, accept, true);
   const holdsValue = (reg: string, b: number, accept: (v: Value) => boolean = () => true): boolean =>
     reaches(reg, b, accept, false);
+  const holdsValueOnFilledPaths = (reg: string, b: number, accept: (v: Value) => boolean): boolean =>
+    reaches(reg, b, accept, false, false);
   const everyReachingDef = (reg: string, b: number, accept: (v: Value) => boolean): boolean => {
     if (!filled.every(Boolean)) {
       throw new Error('everyReachingDef: asked before every block is filled');
@@ -1788,6 +1806,7 @@ export function makeSsaBuilder(
     ensureParam,
     hasReachingDef,
     holdsValue,
+    holdsValueOnFilledPaths,
     everyReachingDef,
     entryValue,
     holdsEntryValue,

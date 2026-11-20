@@ -609,15 +609,64 @@ describe("on Thumb (agbcc), a dispatch's marker in an argument register caps the
     expect(src).toContain('cb()');
     expect(src).not.toMatch(/cb\([^)]/);
   });
-  test('…and on an ABI that can leave a register empty below a filled one, the marker is read and refuses', () => {
-    for (const holes of [
-      { evenWordAlignedArgs: true as const },
-      { fpu: { argRegs: ['f0'], returnReg: 'f0', slots: 'leading' as const } },
-    ]) {
-      expect(() => decompile('jt_mark', jtMark, { ...ARMV4T_AGBCC, ...holes }, { prototypes })).toThrow(
-        /a case of the elided jump table reads r0/,
-      );
-    }
+  test('…on an ABI with holes, the marker caps the guess in a register the ABI never skips', () => {
+    // an aligned pair skips only odd words (O32 a1, PowerPC r4): r0 is filled under any filled register
+    const src = decompile('jt_mark', jtMark, { ...ARMV4T_AGBCC, evenWordAlignedArgs: true }, { prototypes }).source;
+    expect(src).toContain('cb()');
+    expect(src).not.toMatch(/cb\([^)]/);
+  });
+  test('…and in one a leading float may leave empty, it caps nothing, so the marker is read and refuses', () => {
+    const fpu = { argRegs: ['f0'], returnReg: 'f0', slots: 'leading' as const };
+    expect(() => decompile('jt_mark', jtMark, { ...ARMV4T_AGBCC, fpu }, { prototypes })).toThrow(
+      /a case of the elided jump table reads r0/,
+    );
+  });
+});
+
+// A MARKER ONLY A PATH THROUGH A BLOCK NOT FILLED YET BRINGS caps nothing: the block may write the
+// register on its way to the call (frontend/ssa.ts `holdsValueOnFilledPaths`). agbcc, `void m6(int i,
+// int a) { int n; switch (i) { case 0: gx = a; goto M; case 1: n = a; L: g(7, n); gy = a; break; case 2:
+// M: n = a + 3; goto L; case 3: … } }`: case 2's block, which writes r1 with a + 3 and branches to the
+// call, is laid out after it, and case 0 (r1 still the table base) branches into case 2. Every path into
+// `bl g` writes r1, so the marker is no value any path brings, and `g(7)` would drop n. m7 is the same
+// source with case 2's block laid out before the call's.
+describe('on Thumb (agbcc), a marker ceiling asks only the blocks filled so far', () => {
+  const head = '\t.code\t16\n\t.text\n\t.thumb_func\n';
+  const m6 =
+    'm6:\n\tpush\t{r4, lr}\n\tadd\tr4, r1, #0\n\tcmp\tr0, #0x5\n\tbhi\t.L3\t@cond_branch\n' +
+    '\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L15\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n' +
+    '.L16:\n\t.align\t2, 0\n.L15:\n\t.word\t.L12\n\t.align\t2, 0\n\t.align\t2, 0\n.L12:\n' +
+    '\t.word\t.L4\n\t.word\t.L6\n\t.word\t.L5\n\t.word\t.L9\n\t.word\t.L10\n\t.word\t.L11\n.L4:\n' +
+    '\tldr\tr0, .L17\n\tstr\tr4, [r0]\n\tb\t.L5\n.L18:\n\t.align\t2, 0\n.L17:\n\t.word\tgx\n' +
+    '.L6:\n\tadd\tr1, r4, #0\n.L7:\n\tmov\tr0, #0x7\n\tbl\tg\n\tldr\tr0, .L19\n\tstr\tr4, [r0]\n' +
+    '\tb\t.L3\n.L20:\n\t.align\t2, 0\n.L19:\n\t.word\tgy\n.L5:\n\tadd\tr1, r4, #0x3\n\tb\t.L7\n' +
+    '.L9:\n\tldr\tr1, .L21\n\tmov\tr0, #0x3\n\tb\t.L14\n.L22:\n\t.align\t2, 0\n.L21:\n' +
+    '\t.word\tgy\n.L10:\n\tldr\tr1, .L23\n\tmov\tr0, #0x4\n\tb\t.L14\n.L24:\n\t.align\t2, 0\n' +
+    '.L23:\n\t.word\tgz\n.L11:\n\tldr\tr1, .L25\n\tmov\tr0, #0x9\n.L14:\n\tstr\tr0, [r1]\n.L3:\n' +
+    '\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.L26:\n\t.align\t2, 0\n.L25:\n\t.word\tgx\n\n';
+  const m7 =
+    'm7:\n\tpush\t{r4, lr}\n\tadd\tr4, r1, #0\n\tcmp\tr0, #0x5\n\tbhi\t.L3\t@cond_branch\n' +
+    '\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L15\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n' +
+    '.L16:\n\t.align\t2, 0\n.L15:\n\t.word\t.L12\n\t.align\t2, 0\n\t.align\t2, 0\n.L12:\n' +
+    '\t.word\t.L4\n\t.word\t.L5\n\t.word\t.L8\n\t.word\t.L9\n\t.word\t.L10\n\t.word\t.L11\n.L4:\n' +
+    '\tldr\tr0, .L17\n\tstr\tr4, [r0]\n.L5:\n\tadd\tr1, r4, #0x3\n\tb\t.L7\n.L18:\n' +
+    '\t.align\t2, 0\n.L17:\n\t.word\tgx\n.L8:\n\tadd\tr1, r4, #0\n.L7:\n\tmov\tr0, #0x7\n' +
+    '\tbl\tg\n\tldr\tr0, .L19\n\tstr\tr4, [r0]\n\tb\t.L3\n.L20:\n\t.align\t2, 0\n.L19:\n' +
+    '\t.word\tgy\n.L9:\n\tldr\tr1, .L21\n\tmov\tr0, #0x3\n\tb\t.L14\n.L22:\n\t.align\t2, 0\n' +
+    '.L21:\n\t.word\tgy\n.L10:\n\tldr\tr1, .L23\n\tmov\tr0, #0x4\n\tb\t.L14\n.L24:\n' +
+    '\t.align\t2, 0\n.L23:\n\t.word\tgz\n.L11:\n\tldr\tr1, .L25\n\tmov\tr0, #0x9\n.L14:\n' +
+    '\tstr\tr0, [r1]\n.L3:\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.L26:\n\t.align\t2, 0\n.L25:\n' +
+    '\t.word\tgx\n\n';
+  const protos = (name: string): Prototypes => ({ [name]: { params: ['s32', 's32'], returnsVoid: true } });
+  test('a case target laid out after the call writes r1: no ceiling, and the read declines as before', () => {
+    expect(() => decompile('m6', head + m6, ARMV4T_AGBCC, { prototypes: protos('m6') })).toThrow(
+      /'bl g' in block '\.L7' has no prototype, and r1/,
+    );
+  });
+  test('…and laid out before it, the call keeps n', () => {
+    const src = decompile('m7', head + m7, ARMV4T_AGBCC, { prototypes: protos('m7') }).source;
+    expect(src).toMatch(/g\(7, v\d+\)/);
+    expect(src).not.toMatch(/g\(7\)/);
   });
 });
 
