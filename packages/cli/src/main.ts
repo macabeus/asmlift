@@ -793,6 +793,8 @@ export async function runCli(
   // run did not use. The bodies of those the input does not define are read off the linked ELF
   // (elf-bodies.ts), and bound what each can read of its arguments as an inline body would.
   let calleeBodies: CalleeBodies | undefined;
+  // the project file each body read off the project's assembly came from, which the note names
+  let calleeBodyFiles: ReadonlyMap<string, string> | undefined;
   if (toolCfg?.elf) {
     const elfPath = resolve(configDir!, toolCfg.elf);
     const outside = elfBodyCallees(asm, name, unitTarget, prototypes, symbols, asmData?.relocs, moduleFlag);
@@ -815,7 +817,9 @@ export async function runCli(
         const compile =
           objInput?.compileUnit ??
           unitCompileFromCommand(toolCfg.compiler!, configDir!, flagsResolution.fill, flagsResolution.cc);
-        Object.assign(read.bodies, await calleeBodiesFromProjectAsm(configDir!, image, thumb, compile));
+        const project = await calleeBodiesFromProjectAsm(configDir!, image, thumb, compile);
+        Object.assign(read.bodies, project.bodies);
+        calleeBodyFiles = new Map(Object.entries(project.files));
       }
       calleeBodies = Object.keys(read.bodies).length === 0 ? undefined : read.bodies;
     }
@@ -841,6 +845,7 @@ export async function runCli(
       asmData?.relocs,
       new Map(Object.entries(asked)),
       new Map(Object.entries(sized)),
+      calleeBodyFiles,
     );
   // a note that names its own tag (`[own-return]`) carries it; every other one is the arity bound's
   const ownArityNote = (notes: readonly string[]) =>

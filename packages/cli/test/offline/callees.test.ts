@@ -208,6 +208,28 @@ describe('guessedArityNote', () => {
     ]);
   });
 
+  // a body read off the project's assembly (cli splat-bodies.ts) is named by its file
+  it('names a callee whose body in the project asm the lift asked by that file', () => {
+    const note = guessedArityNote(
+      LBG,
+      'LoadBGTilemapData',
+      ARMV4T_AGBCC,
+      { DecompressAlloc: { params: 2 } },
+      undefined,
+      undefined,
+      new Map([['thunk_HeapFree', 1]]),
+      undefined,
+      new Map([['thunk_HeapFree', 'asm/nonmatchings/m/thunk_HeapFree.s']]),
+    );
+    expect(note.split('\n')).toEqual([
+      'asmlift: [proto] 1 callee(s) have no declared arity, guessed from the argument registers, each register the ' +
+        "call left unset checked against what its body in the project's asm reads, where that file assembles to the " +
+        'code in tools.asmlift.elf: thunk_HeapFree (asm/nonmatchings/m/thunk_HeapFree.s, at most 1 argument word) — ' +
+        'pass --proto \'{"thunk_HeapFree":{"params":N}}\' if a guess is wrong',
+      '',
+    ]);
+  });
+
   // a call the lift sized off its callee's stack loads (core `DecompileResult.calleeStackSized`) is no guess
   it('names a callee whose call its own body sized as that, not as a guess', () => {
     const note = guessedArityNote(

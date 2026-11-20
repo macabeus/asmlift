@@ -108,6 +108,15 @@ describe('CLI (agbcc): a guessed Thumb callee is bounded by its proven body in t
     expect((await run(undefined, callee)).stdout).toContain(`return ${callee}(3, &gp);`);
     expect((await run(COPY, callee)).stdout).toContain(proven);
   });
+  // the note names the project file a body was read from, not the ELF whose halfwords bound nothing
+  test('the [proto] note names the project file that bounded the guess', async () => {
+    const { stderr } = await run(COPY, 'rd1');
+    expect(stderr).toContain(
+      "checked against what its body in the project's asm reads, where that file assembles to the code in " +
+        'tools.asmlift.elf: rd1 (asm/nonmatchings/m/rd1.s, at most 1 argument word)',
+    );
+    expect(stderr).not.toContain('what its body in tools.asmlift.elf reads');
+  });
   // each refusal leaves the run as it is with no compile command to prove a body by
   test.each(['stale', 'wk', 'wrongbl', 'dup'])('%s keeps today\u2019s output', async (callee) => {
     expect(await run(COPY, callee)).toEqual(await run(undefined, callee));
