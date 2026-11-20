@@ -114,6 +114,41 @@ const keepsSplatSection = (line: string): boolean =>
     line,
   );
 
+// What one top-level statement does to gas's reorder mode, read as an ALLOWLIST: a literal
+// unlabelled `.set noreorder` / `.set reorder` sets it, and the statements below provably leave it
+// alone. Anything else (a macro call, an `.include`, a labelled or unknown directive, a `.set`
+// whose option is not a literal word, a spelling through `\x` or `\()`) may set it in text this
+// reader does not expand, so the mode becomes unknown. The safe directives are #459's
+// `keepsSplatSection` list (its `.set` taken out and read here), the section switches and the data
+// directives. gas compares the option case-sensitively (`.set REORDER` is not reorder), so only the
+// directive name is read without case.
+const bareStatement = (statement: string): string => statement.replace(/\/\*.*?\*\//g, ' ').trim();
+type ReorderEffect = 'noreorder' | 'reorder' | 'safe' | 'unknown';
+const SPLAT_MARKER = /^(?:glabel|endlabel|dlabel|enddlabel|jlabel|alabel|nonmatching)\b/;
+const SAFE_SET = /^\.set\s+(?:noat|at|mips\d+(?:r\d+)?|gp=\d+|fp=\d+|[A-Za-z_$][\w.$]*\s*,.*)$/i;
+function reorderEffect(statement: string): ReorderEffect {
+  if (INSN_LINE.test(statement)) {
+    return 'safe';
+  }
+  const t = bareStatement(statement);
+  const mode = t.match(/^\.[sS][eE][tT]\s+(no)?reorder$/);
+  if (mode) {
+    return mode[1] === undefined ? 'reorder' : 'noreorder';
+  }
+  if (t === '' || /^[\w.$]+:$/.test(t) || SPLAT_MARKER.test(t)) {
+    return 'safe';
+  }
+  // a label on a data directive (a jump table's `jpt_400130: .word .L004000D4`) is data alone; on
+  // any other directive the label hides what the directive is
+  if (DATA_DIRECTIVE.test(t.replace(/^(?:[\w.$]+:\s*)+/, ''))) {
+    return 'safe';
+  }
+  if (/^\.set\b/i.test(t)) {
+    return SAFE_SET.test(t) ? 'safe' : 'unknown';
+  }
+  return SECTION_SWITCH.test(t) || keepsSplatSection(t) ? 'safe' : 'unknown';
+}
+
 // A directive that decides which lines gas assembles: conditional assembly, macro definition and
 // repetition (the Thumb frontend's LINE_DIRECTIVES).
 const LINE_DIRECTIVE = /^\.(if\w*|else\w*|endif|rept|irpc?|endr|macro|endm|exitm)\b/i;
@@ -196,24 +231,34 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
   let inOtherSection = false;
   // `.set reorder` lets gas fill and move delay slots itself (measured: it inserts a nop after a
   // `jr`), so a function assembled under it is not the instruction stream written. The reader
-  // reads every slot as written; it declines under an explicit `.set reorder`. A file that never
-  // says `.set noreorder` is read as written too: Splat's per-function files never say it, because
-  // INCLUDE_ASM sets `.set noreorder` around the `.include` (measured: wrapped so, gas assembles the
-  // text's own words). An `.include` before the function may set either mode in text this reader
-  // never sees, so it forgets the mode (`unknown`) until a later `.set`. A mode set in a
-  // conditional, macro or repeated body is set as that body is assembled (never under `.if 0`, nor
-  // in a macro nothing invokes, measured), which this reader does not model, so it declines.
-  let reorder: boolean | 'unknown' = false;
+  // reads every slot as written, so it declines an instruction unless the mode is noreorder. A
+  // file that never sets the mode is read as noreorder: Splat's per-function files never say it,
+  // because INCLUDE_ASM sets `.set noreorder` around the `.include` (measured: wrapped so, gas
+  // assembles the text's own words). The mode is known only from a literal top-level `.set
+  // (no)reorder` (`reorderEffect`); any other statement off its allowlist makes it unknown until
+  // the next literal one. Every statement inside a conditional, macro or repeated body does too,
+  // since gas assembles the body as its condition, invocation or count says (measured: `.if 0`
+  // skips a `.set noreorder`); an empty body changes nothing.
+  let reorder = false as boolean | 'unknown';
+  let unknownBy = '';
   let depth = 0;
+  const readMode = (t: string): void => {
+    const d = t.match(LINE_DIRECTIVE)?.[1].toLowerCase();
+    if (d !== undefined) {
+      depth += /^(?:if\w*|macro|rept|irpc?)$/.test(d) ? 1 : /^(?:endif|endm|endr)$/.test(d) ? -1 : 0;
+      return;
+    }
+    const effect = reorderEffect(t);
+    if (effect === 'unknown' || (depth !== 0 && bareStatement(t) !== '')) {
+      reorder = 'unknown';
+      unknownBy = t;
+    } else if (effect !== 'safe') {
+      reorder = effect === 'reorder';
+    }
+  };
   for (const raw of lines.slice(0, sliceFrom)) {
     for (const st of splatStatements(raw) ?? []) {
       const t = st.trim();
-      const d = t.match(LINE_DIRECTIVE)?.[1].toLowerCase();
-      depth +=
-        d === undefined ? 0 : /^(?:if\w*|macro|rept|irpc?)$/.test(d) ? 1 : /^(?:endif|endm|endr)$/.test(d) ? -1 : 0;
-      if (/^\.include\b/i.test(t)) {
-        reorder = 'unknown';
-      }
       // `.set push` / `.set pop` save and restore the reorder state (measured: a `pop` back to
       // `.set reorder` before the function lets gas fill its delay slot); not modelled.
       if (/^\.set\s+(?:push|pop)\b/i.test(t)) {
@@ -221,16 +266,7 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
           `cannot lift '${name}': '${t}' saves or restores assembler options this reader does not track`,
         );
       }
-      const ro = t.match(/^\.set\s+(no)?reorder\b/i);
-      if (ro && depth !== 0) {
-        throw new FrontendUnsupportedError(
-          `cannot lift '${name}': '${t}' sits inside a conditional, macro or repeated body before the function, ` +
-            `so this reader cannot tell whether gas fills the delay slots itself`,
-        );
-      }
-      if (ro) {
-        reorder = ro[1] === undefined;
-      }
+      readMode(t);
       const sw = t.match(SECTION_SWITCH);
       if (sw) {
         inOtherSection = !isPlainText(sw);
@@ -254,6 +290,7 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
           `this reader reads every line as written`,
       );
     }
+    readMode(line);
     if (/^(glabel|endlabel|dlabel|jlabel)\b/.test(line) || /^nonmatching\b/.test(line)) {
       continue; // function/data markers and the objdiff scratch header
     }
@@ -280,10 +317,6 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': '${line}' saves or restores assembler options this reader does not track`,
       );
-    }
-    const ro = line.match(/^\.set\s+(no)?reorder\b/i);
-    if (ro) {
-      reorder = ro[1] === undefined;
     }
     // Inside the function, a directive that can emit bytes between instructions: a move of the
     // location counter (`.set ., .+4`, `. = …`, measured: a nop in the delay slot) or an
@@ -315,12 +348,6 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
       continue;
     }
     const m = line.match(INSN_LINE);
-    if (m && reorder === 'unknown') {
-      throw new FrontendUnsupportedError(
-        `cannot lift '${name}': an \`.include\` before the function may set the reorder mode, and no ` +
-          `\`.set noreorder\` follows it, so this reader cannot tell whether gas fills the delay slots itself`,
-      );
-    }
     if (m && reorder === true) {
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': '${line}' is assembled under \`.set reorder\`, where gas fills delay slots itself`,
@@ -329,6 +356,13 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
     if (m && inOtherSection) {
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': '${line}' is assembled into another section than the function's \`.text\``,
+      );
+    }
+    if (m && reorder === 'unknown') {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${unknownBy}' may set the reorder mode (it is not a literal top-level ` +
+          `\`.set (no)reorder\` nor a statement known to leave the mode alone), and no \`.set noreorder\` follows ` +
+          `it, so this reader cannot tell whether gas fills the delay slots itself`,
       );
     }
     if (!m) {
