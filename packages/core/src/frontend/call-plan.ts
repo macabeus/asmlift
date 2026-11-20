@@ -221,18 +221,16 @@ export interface CallSite {
    *  call's arguments (a defined program whose callee read it would read a code address there). A
    *  register this ABI never leaves empty below a filled one is then no hole either, so no register
    *  above it is an argument, and the guessed arity stops below the lowest such register
-   *  (`fallbackArgc`'s `ceiling`). The holes are `parked`'s, asked per register: every register on
-   *  agbcc, which fills argument words in order; on PowerPC not a register an aligned pair skips
-   *  (r4, r6, r8, r10); on O32 none, since a1/a3 are a pair's skips and the two leading float slots
-   *  may leave every one of a0..a3 empty (`argRegisterHoles` `floatShadowed`): there the marker may
-   *  stand in a register the call skipped and caps nothing. "Some real path" is asked of the blocks
-   *  filled so far (`SsaBuilder.holdsValueOnFilledPaths`): a block not filled yet may write the
-   *  register on its way to the call, so the marker past it is no value that path brings — nor of an
-   *  `exhaustive` switch's default edge, which no path takes. The answer therefore depends on the
-   *  order blocks are filled in: a marker only a block laid out after the call brings caps nothing
-   *  here, and the read of it declines, as it did with no ceiling. Asking it order-free would need
-   *  every Thumb instruction's register writes off the asm, and a write that list missed would cap
-   *  the guess below a real argument. */
+   *  (`fallbackArgc`'s `ceiling`). The holes are `parked`'s, asked per register (`argRegisterHoles`):
+   *  none on agbcc, which fills argument words in order; r4, r6, r8 and r10 on PowerPC; every one of
+   *  a0..a3 on O32, where a marker may stand in a register the call skipped. "Some real path" is
+   *  asked of the blocks filled so far (`SsaBuilder.holdsValueOnFilledPaths`): a block not filled yet
+   *  may write the register on its way to the call, so the marker past it is no value that path
+   *  brings — nor of an `exhaustive` switch's default edge, which no path takes. The answer therefore
+   *  depends on the order blocks are filled in: a marker only a block laid out after the call brings
+   *  caps nothing here, and the read of it declines as any marker read does. Asking it order-free
+   *  would need every Thumb instruction's register writes off the asm, and a write that list missed
+   *  would cap the guess below a real argument. */
   readonly marker?: (v: Value, reg: string) => boolean;
   /** whether `v`, in argument register `reg`, is the scaled index a jump-table dispatch left in that
    *  very register (frontend/jump-table.ts `scaledIndexIn`): a call handed it and one not compile

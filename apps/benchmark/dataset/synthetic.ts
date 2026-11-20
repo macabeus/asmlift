@@ -4635,10 +4635,10 @@ export const SYNTHETIC: SynthSpec[] = [
   },
   // A CALLEE BODY'S STAGED HIGH-REGISTER RESTORE READS NO ARGUMENT (frontend/thumb.ts
   // `bodySavedRegs`, `restoreCopies`). agbcc restores r8-sl through `pop {r3, r4, r5}; mov r8, r3; …`,
-  // and where some path reaches that restore without writing r3 (here `hiw`'s `a >= 8` exit), lifted
-  // as the function's own `mov` it read r3's entry value: `hiw`'s body bounded its caller's guess at
-  // four words, so `hirst_call`'s r1/r2 pass-throughs under its stored r3 declined. Read as the
-  // restore's, the body reads r0 alone and the call is `hiw(a + 1)` (kl2dct sub_0802C910 and
+  // and some path reaches that restore without writing r3 (here `hiw`'s `a >= 8` exit). Lifted as the
+  // function's own `mov`, it reads r3's entry value and bounds the caller's guess at four words, and
+  // `hirst_call`'s r1/r2 pass-throughs under its stored r3 decline. Read as the restore's, the body
+  // reads r0 alone and the call is `hiw(a + 1)` (kl2dct sub_0802C910 and
   // sub_08036F18 have such a callee). agbcc only: no other frontend stages a save through a low
   // register.
   {
@@ -4656,13 +4656,13 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'extern int gx;\nvoid hiw();\nvoid hirst_call(int a, int b, int c, int d);',
     proto: { hirst_call: { returnsVoid: true }, hiw: { returnsVoid: true } },
   },
-  // A CALLEE BODY'S RETURN THROUGH r0 HANDS BACK NO ARGUMENT (frontend/callee-body.ts,
-  // `Frontend.bareReturnClobbersReturnReg`). agbcc returns from a function that pushed lr with
-  // `pop {r0}; bx r0`, which the Thumb frontend lifts as a bare `ret`, and a bare return on a
-  // call-free path counted the first argument word as read: `cb`, which loads r0 before reading it,
-  // bounded its caller's guess at one word, and `bxr0_call` passed the `&gy` its store left in r0
-  // (`cb(&gy)`: the same bytes, an argument the source never passed). Read as the return address it
-  // is, the bound is 0 and the call `cb()` (kl2dct sub_08047848, sub_0802F05C and sub_0803953C are
+  // A CALLEE BODY'S RETURN THROUGH r0 HANDS BACK NO ARGUMENT (frontend/callee-body.ts
+  // `returnsUntouched`, `ret` `viaReturnReg`). agbcc returns from a function that pushed lr with
+  // `pop {r0}; bx r0`, which the Thumb frontend lifts as a bare `ret`. Counted as a bare return on a
+  // call-free path, it would read the first argument word: `cb`, which loads r0 before reading it,
+  // would bound its caller's guess at one word, and `bxr0_call` would pass the `&gy` its store left in
+  // r0 (`cb(&gy)`: the same bytes, an argument the source never passed). Read as the return address
+  // it is, the bound is 0 and the call `cb()` (kl2dct sub_08047848, sub_0802F05C and sub_0803953C are
   // such callees). agbcc only: no other target returns through its first argument register.
   {
     sym: 'bxr0_call',
@@ -14238,10 +14238,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // kl2dct sub_0800B804, sub_08043154). agbcc cross-jumps cases 0, 2 and 4 into one `bl cb` that case
   // 2's dispatch edge enters directly, with r0 the case's code address and r1 the table's on that
   // path. The call is one instruction, so no argument of it is in r0, and agbcc fills argument words
-  // in order, so none is above it: `cb()`, where the guess read the marker and declined. The ceiling
+  // in order, so none is above it: `cb()`, where a guess that read the marker would decline. The ceiling
   // stands only in a register the ABI never leaves empty below a filled one (`argRegisterHoles`):
   // every one on agbcc, none on O32 (a1/a3 an aligned pair's skips, a0..a3 the two leading float
-  // slots' shadow), and on PowerPC each but r4/r6/r8/r10. jt_mark's cells there keep what they had;
+  // slots' shadow), and on PowerPC each but r4/r6/r8/r10. jt_mark's other cells reach no ceiling;
   // jt_markpass:mwcc_242_81 is a PowerPC call the ceiling lifts. jt_mark:agbcc lifts `cb()` and
   // misses on its structuring; jt_markfall:agbcc is the cell that matches through the ceiling.
   {
@@ -14256,8 +14256,8 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { jt_mark: { returnsVoid: true }, cb: { returnsVoid: true } },
   },
   // agbcc: case 0 falls into case 1's `bl cb`, which case 1's dispatch edge enters with r0 the case's
-  // code address and r1 the table's; case 0 brings 5 and gx's address there. Main read r0 and
-  // declined; the ceiling stops at r0: `cb()`, the source's
+  // code address and r1 the table's; case 0 brings 5 and gx's address there. The ceiling stops at
+  // r0: `cb()`, the source's
   {
     sym: 'jt_markfall',
     src:
@@ -14271,8 +14271,8 @@ export const SYNTHETIC: SynthSpec[] = [
   },
   // mwcc_242_81 keeps p2 in r31 and builds the table base in r5 (`lis r5,@20@ha; addi r5,r5,@20@l`);
   // case 0 falls into case 1's `g2(gx, p2)`, which the dispatch edge enters with r5 the table's. r5
-  // is no pair's skip on PowerPC, so the guess stops below it: `g2(gx, p2)`, where main read r5 and
-  // declined. Every call's arity is the source's
+  // is no pair's skip on PowerPC, so the guess stops below it: `g2(gx, p2)`, where reading r5 would
+  // decline. Every call's arity is the source's
   {
     sym: 'jt_markpass',
     src:

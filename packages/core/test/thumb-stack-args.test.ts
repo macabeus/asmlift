@@ -322,8 +322,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     });
 
     // A staged restore's `mov rHi, rLow` is the restore's, not the function's: where some path
-    // reaches agbcc's `pop {r3}; mov r8, r3` without writing r3, lifted it read r3's entry value and
-    // minted a1-a3 for a function of one argument.
+    // reaches agbcc's `pop {r3}; mov r8, r3` without writing r3, lifted as the function's it reads r3's
+    // entry value and mints a1-a3 for a function of one argument.
     test('…and a staged restore reads no argument from the low register it restores through', () => {
       const lift = (body: string) =>
         decompile(
