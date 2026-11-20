@@ -59,16 +59,46 @@ export function isPlainPath(path: string): boolean {
 // flags handed to the assembler or preprocessor (`-Wa,`, `-Wp,`, `-Xassembler`, `-Xpreprocessor`),
 // a response file (`@file`), a `-D`/`-U` naming anything with `asm` in it (it would rewrite the
 // header's `asm(…)` or INCLUDE_ASM), and an `-I` whose directory is not plain (`-I $(D)`, `-I-`).
+//
+// The command runs in a shell, which can spell any flag the words do not (`X=-include` then `$X`,
+// `$(… | base64 -d)`, `"-"include`, `$CPPFLAGS`). So before any flag is read, EVERY WORD MUST BE
+// SHELL-LITERAL (an allowlist, like the header's): words are split on blanks and line breaks, and
+// each is the template's `{{…}}` placeholders and {@link LITERAL_WORD} characters only, or exactly
+// `-I"<dir>"`. Any other character (`$`, a backtick, a quote, `\`, `(`, `)`, `<`, `>`, `|`, `&`, `;`,
+// `*`, `?`, `[`, `~`, `!`, `#`, `{`, …), a `NAME=value` word anywhere (an assignment, or one `env`
+// hands the compile: `CPATH=…`), or a line starting `.`, `source`, `eval` or `exec` gives no search.
 const REFUSED_FLAG = /^(?:-i|--include|-Wa,|-Wp,|-Xassembler|-Xpreprocessor|@)/;
+const LITERAL_WORD = /^[A-Za-z0-9_./+,=:-]*$/;
+const QUOTED_I = /^-I"[\w.+/-]+"$/;
+const REFUSED_COMMAND_WORD = new Set(['.', 'source', 'eval', 'exec']);
+
+/** Whether `command` is words a shell reads as written (see above). */
+function shellLiteral(command: string): boolean {
+  for (const line of command.split('\n')) {
+    const words = line.split(/[ \t]+/).filter((w) => w !== '');
+    if (words.length > 0 && REFUSED_COMMAND_WORD.has(words[0])) {
+      return false;
+    }
+    for (const w of words) {
+      if (/^[A-Za-z_]\w*=/.test(w) || !(QUOTED_I.test(w) || LITERAL_WORD.test(w.replace(/\{\{\w+\}\}/g, '')))) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
 const PLAIN_DIR = (d: string) => /^[\w.+/-]+$/.test(d) && d !== '-' && !d.split('/').includes('..');
 
 /** The `-I` directories a compile command and its flags spell, in order, resolved against `cwd`;
- *  undefined where the command carries any flag the list above refuses. */
+ *  undefined where the command is not shell-literal or carries any flag the list above refuses. */
 export function includeSearchFromCommand(
   cwd: string,
   command: string,
   flags: readonly string[] = [],
 ): IncludeSearch | undefined {
+  if (!shellLiteral(command) || !flags.every((f) => shellLiteral(f))) {
+    return undefined;
+  }
   const words = `${command} ${flags.join(' ')}`.split(/\s+/).filter((w) => w !== '');
   const dirs: string[] = [];
   for (let k = 0; k < words.length; k++) {

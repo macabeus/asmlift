@@ -39,10 +39,13 @@ const project = (compiler: string | undefined, asm: string) => {
       (compiler === undefined ? '' : `    compiler: ${JSON.stringify(compiler)}\n`),
   );
   writeFileSync(join(root, 'f.s'), asm);
+  writeFileSync(join(root, 'copy.sh'), COPY_SH);
   return join(root, 'f.s');
 };
-// the name the generated unit includes, and its object copied to the output
-const COPY = "n=$(sed -n 's/^INCLUDE_ASM(.*, \\(.*\\));$/\\1/p' {{inputPath}}); cp obj/$n.o {{outputPath}}";
+// the name the generated unit includes, and its object copied to the output, by a script the
+// command runs: the command itself must be shell-literal (asm-includes.ts)
+const COPY = 'sh copy.sh {{inputPath}} {{outputPath}}';
+const COPY_SH = 'n=$(sed -n \'s/^INCLUDE_ASM(.*, \\(.*\\));$/\\1/p\' "$1"); cp obj/$n.o "$2"\n';
 
 describe('a project file is a body only where its object is the linked code', () => {
   test('the one unit and the one header', () => {
