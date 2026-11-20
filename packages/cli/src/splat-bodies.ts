@@ -26,6 +26,14 @@
 //   - the file defines the label once and marks it `.weak` nowhere;
 //   - the unit's object defines `<name>` as one non-weak Thumb FUNC, as long as its ELF range
 //     (elf-bodies.ts `functionRange` on both);
+//   - the text reads as the bytes it assembles to: the header's and the file's `.include` chain
+//     resolves the way gas resolves it (asm-includes.ts), and no statement of the file, nor any word
+//     of the header, names a macro that chain, the header or the file defines. A macro under an
+//     instruction's name (`.macro mov rd, imm` / `add \rd, \imm`) makes gas assemble a line as
+//     another instruction, and the core reads the file's lines as written. The function-marker
+//     macros the Thumb frontend reads (`thumb_func_start`, `thumb_func_end`, …: kl2dct's and pret's
+//     macros.inc) are the exception, where every definition of one holds only the zero-byte
+//     directives its name says. A name the chain cannot read refuses every body;
 //   - every byte of the object's range equals the ELF's, except a word a relocation of the object
 //     fills, and that one is the word the link wrote: an `R_ARM_ABS32` word whose ELF value is its
 //     symbol's linked address plus the addend in place (a jump table's word against the function's
@@ -42,6 +50,7 @@ import { createRunner } from '@match-kit/compiler';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 
+import { type IncludeSearch, definedMacros, includeOperands, readIncludes } from './asm-includes';
 import { renderCc } from './compile-command';
 import { type ElfImage, type FunctionRange, calleeAt, functionRange, readElfImage } from './elf-bodies';
 
@@ -288,6 +297,93 @@ export function assemblesToLinked(linked: ElfImage, object: Uint8Array, name: st
   return true;
 }
 
+/** The marker macros the Thumb frontend reads by name (thumb.ts), each with the directives a
+ *  definition of it may hold: those emit no byte inside the function, and none gives the function
+ *  another instruction set than its name says. */
+const MARKER_MACROS: ReadonlyMap<string, ReadonlySet<string>> = (() => {
+  const start = ['.align', '.global', '.globl', '.type'];
+  const thumb = new Set([...start, '.thumb', '.thumb_func']);
+  return new Map([
+    ['thumb_func_start', thumb],
+    ['non_word_aligned_thumb_func_start', thumb],
+    ['arm_func_start', new Set([...start, '.arm'])],
+    ['thumb_func_end', new Set(['.size'])],
+    ['arm_func_end', new Set(['.size'])],
+  ]);
+})();
+
+/** Whether `name`, a macro with `bodies`, is a marker the Thumb frontend reads as what gas does. */
+const isMarker = (name: string, bodies: ReadonlyArray<readonly string[] | undefined>): boolean => {
+  const allowed = MARKER_MACROS.get(name);
+  return (
+    allowed !== undefined &&
+    bodies.every((b) => b !== undefined && b.every((st) => allowed.has(st.split(/\s/)[0].toLowerCase())))
+  );
+};
+
+/** Whether the core reads the callee's `text` as the bytes the compile of `header` plus that file
+ *  assembles (see the header): the include chain of both resolves under `search`, and no statement
+ *  of the file, nor any word of the header, calls a macro other than a {@link MARKER_MACROS} one. */
+export function readsAsAssembled(header: string, text: string, search: IncludeSearch): boolean {
+  // the header is C: an `#include` brings text this reader does not follow
+  if (/^\s*#\s*include\b/m.test(header)) {
+    return false;
+  }
+  // its `.include`s are inside strings (`asm(".include \"include/macros.inc\"\n")`), but for the
+  // INCLUDE_ASM macro's own, whose path its arguments spell: that one is the file
+  const headerPaths: string[] = [];
+  for (const line of header.split('\n')) {
+    for (const m of line.matchAll(/(?<![\w.$])\.include(?![\w.$])(.*)/gi)) {
+      const literal = m[1].match(/^\s+\\"([^"\\\n]+)\\"/);
+      if (literal !== null) {
+        headerPaths.push(literal[1]);
+      } else if (!(/^\s+\\""/.test(m[1]) && /^\s*#\s*define\s+INCLUDE_ASM\b/.test(line))) {
+        return false;
+      }
+    }
+  }
+  const ownPaths = includeOperands(text);
+  const chain = ownPaths === undefined ? undefined : readIncludes([...headerPaths, ...ownPaths], search);
+  if (chain === undefined) {
+    return false;
+  }
+  const macros = new Map(chain.macros);
+  for (const own of [definedMacros(header), definedMacros(text)]) {
+    for (const [n, bodies] of own) {
+      macros.set(n, [...(macros.get(n) ?? []), ...bodies]);
+    }
+  }
+  if (macros.has('*')) {
+    return false;
+  }
+  const calls = (word: string): boolean => {
+    const bodies = macros.get(word.toLowerCase());
+    return bodies !== undefined && !isMarker(word.toLowerCase(), bodies);
+  };
+  if ([...header.matchAll(/[A-Za-z_.$][\w.$]*/g)].some((w) => calls(w[0]))) {
+    return false;
+  }
+  for (const line of text.split('\n')) {
+    if (/^\s*\.include\s+"[^"\\\n]+"\s*(?:@.*)?$/i.test(line)) {
+      continue;
+    }
+    // a line that could hide where a statement starts from this plain reading (a string, a
+    // character constant, `;`, a block comment, a macro argument) gives no body
+    if (/["';\\]|\/\*|\*\//.test(line)) {
+      return false;
+    }
+    const t = line.replace(/@.*$/, '').trim();
+    if (t.startsWith('#')) {
+      continue;
+    }
+    const head = t.replace(/^(?:(?:[A-Za-z_.$][\w.$]*|\d+):\s*)+/, '').match(/^[\w.$]+/)?.[0];
+    if (head !== undefined && calls(head)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /** Compiles a C source with the project's own compiler command, to an object's bytes; undefined
  *  where it does not compile. The seam the offline tests fake. */
 export type UnitCompile = (source: string) => Promise<Uint8Array | undefined>;
@@ -363,11 +459,30 @@ export async function calleeBodiesFromProjectAsm(
   linked: ElfImage,
   callees: readonly string[],
   compile: UnitCompile,
+  /** where the compile's assembler finds an `.include` (asm-includes.ts); undefined ⇒ no body */
+  search: IncludeSearch | undefined,
   asm: ProjectAsm = projectAsm(root),
 ): Promise<{ bodies: Record<string, CalleeBody>; files: Record<string, string> }> {
   const bodies: Record<string, CalleeBody> = {};
   const files: Record<string, string> = {};
+  if (search === undefined) {
+    return { bodies, files };
+  }
+  const headerText = new Map<string, string | undefined>();
   for (const { callee, header, site, text } of projectAsmCandidates(root, linked, callees, asm)) {
+    if (!headerText.has(header)) {
+      let t: string | undefined;
+      try {
+        t = readFileSync(header, 'latin1');
+      } catch {
+        t = undefined;
+      }
+      headerText.set(header, t);
+    }
+    const h = headerText.get(header);
+    if (h === undefined || !readsAsAssembled(h, text, search)) {
+      continue;
+    }
     const object = await compile(`#include "${header}"\nINCLUDE_ASM("${site.dir}", ${callee});\n`);
     if (object !== undefined && assemblesToLinked(linked, object, callee)) {
       bodies[callee] = { kind: 'listing', text };

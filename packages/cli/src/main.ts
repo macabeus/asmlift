@@ -39,6 +39,7 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { includeSearchFromCommand } from './asm-includes';
 import { guessedArityNote } from './callees';
 import { type CommandCompilers, compilersFromCommand } from './compile-command';
 import { type AsmliftToolConfig, type UnitCompiler, asmliftBlock, resolveTarget } from './config';
@@ -817,7 +818,13 @@ export async function runCli(
         const compile =
           objInput?.compileUnit ??
           unitCompileFromCommand(toolCfg.compiler!, configDir!, flagsResolution.fill, flagsResolution.cc);
-        const project = await calleeBodiesFromProjectAsm(configDir!, image, thumb, compile);
+        const project = await calleeBodiesFromProjectAsm(
+          configDir!,
+          image,
+          thumb,
+          compile,
+          includeSearchFromCommand(configDir!, toolCfg.compiler!, flagsResolution.fill),
+        );
         Object.assign(read.bodies, project.bodies);
         calleeBodyFiles = new Map(Object.entries(project.files));
       }
