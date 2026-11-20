@@ -1,7 +1,7 @@
 {
   "generatedBy": "pnpm regen:declines-census (scripts/regen-decline-census.ts) — do not hand-edit",
-  "distinctMessages": 330,
-  "residueTotal": 134,
+  "distinctMessages": 331,
+  "residueTotal": 135,
   "residueByFile": [
     {
       "file": "frontend/thumb.ts",
@@ -80,8 +80,9 @@
     },
     {
       "file": "frontend/splat.ts",
-      "count": 17,
+      "count": 18,
       "messages": [
+        "cannot lift 'X': 'X' calls 'X', a name a \\`.macro\\` in this file defines, and gas expands the macro before it reads an instruction of that name, which this reader does not do",
         "cannot lift 'X': 'X' inside the function can emit fill between instructions, which this reader does not model",
         "cannot lift 'X': 'X' inside the function changes which lines are assembled, and this reader reads every line as written",
         "cannot lift 'X': 'X' is assembled into another section than the function's \\`.text\\`",

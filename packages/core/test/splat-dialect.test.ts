@@ -636,3 +636,54 @@ describe('the reorder mode is known only from a literal top-level `.set`', () =>
     expect(() => decompile('f', `.set REORDER\n${fn}`, MIPS_IDO)).toThrow(/may set the reorder mode/);
   });
 });
+
+// gas expands a macro BEFORE it reads a machine instruction of that name, and a macro may shadow a
+// real mnemonic with no warning (mips-linux-gnu-as 2.42 -march=vr4300, harness as above). d01: an
+// addressed `m` whose macro says `.set reorder`, after the `.set noreorder` (gas a0 + 1). d17: a
+// `.macro nop` saying `.set reorder` and `.word 0`, called by f's addressed `nop` (gas a0 + 1).
+// d26: a `.macro addiu a,b,c` emitting `addiu v0,a0,2` (gas a0 + 2). Main lifted a0 + 1 + 4, a0 + 1 + 4
+// and a0 + 1. An addressed line naming a macro the file defines now declines, wherever it sits.
+describe('an addressed line that calls a macro the file defines declines', () => {
+  test.each([
+    [
+      'd01',
+      '.macro m\n.set reorder\n.endm\n.set noreorder\n.text\n    /* 0F0 800000F0 00000000 */  m\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      'm',
+    ],
+    [
+      'd17',
+      '.macro nop\n.set reorder\n.word 0\n.endm\n.set noreorder\n.text\nglabel f\n    /* 0FC 800000FC 00000000 */  nop\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      'nop',
+    ],
+    [
+      'd26',
+      '.macro addiu a,b,c\n.word 0x24820002\n.endm\n.set noreorder\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 00000000 */   nop\nendlabel f\n',
+      'addiu',
+    ],
+  ])('%s', (_probe, asm, call) => {
+    expect(() => decompile('f', asm, MIPS_IDO)).toThrow(
+      new RegExp(`calls '${call}', a name a \`\\.macro\` in this file defines`),
+    );
+  });
+  test('a macro name is read without case, and inside a body that never runs', () => {
+    const fn =
+      'glabel f\n    /* 100 80000100 03E00008 */  jr         $ra\n    /* 104 80000104 00000000 */   NOP\nendlabel f\n';
+    expect(() => decompile('f', `.set noreorder\n.if 0\n.macro Nop\n.endm\n.endif\n.text\n${fn}`, MIPS_IDO)).toThrow(
+      /calls 'nop'/,
+    );
+  });
+  // KNOWN GAP (traps/20261120-071902Z-MERGE462-addressed-line-can-be-a-gas-macro-call.md, probe d24): a
+  // macro an `.include` defines is not seen, so d17 with its `.macro nop` moved into `m2.inc` still lifts
+  // a0 + 1 + 4 where gas gives a0 + 1. Declining every addressed line after an `.include` would cost
+  // the whole-file Splat sources that open with `.include "macro.inc"`; whether to read included files
+  // is the user's call. This pins today's behaviour so a change to it is seen.
+  test('d24: a macro from an `.include` is not seen (known gap)', () => {
+    expect(
+      decompile(
+        'f',
+        '.include "m2.inc"\n.set noreorder\n.text\nglabel f\n    /* 0FC 800000FC 00000000 */  nop\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+        MIPS_IDO,
+      ).source,
+    ).toContain('a0 + 1 + 4');
+  });
+});

@@ -160,6 +160,27 @@ export function isSplatMips(asm: string): boolean {
   return /^\s*glabel\s+\S+/m.test(asm) || INSN_SIGNAL.test(asm);
 }
 
+/** The name of every `.macro` the text defines, lower-cased (gas reads a macro name without
+ *  case), wherever it sits: inside a body, under `.if 0`, after a `.purgem`, so the set errs toward
+ *  declining. gas expands a macro BEFORE it reads a machine instruction of that name, and a macro
+ *  may shadow a real mnemonic (`.macro nop`, `.macro addiu a,b,c`) with no warning (measured,
+ *  mips-linux-gnu-as 2.42), so an addressed line naming one runs the macro's body, not the
+ *  instruction written. `*` stands for a name this reader cannot read (`.macro \\x`), which matches
+ *  every mnemonic. KNOWN GAP: a macro an `.include` defines is not seen here. */
+function definedMacros(lines: string[]): Set<string> {
+  const names = new Set<string>();
+  for (const raw of lines) {
+    for (const st of splatStatements(raw) ?? [raw]) {
+      const t = bareStatement(st).replace(/^(?:[\w.$]+:\s*)+/, '');
+      const m = t.match(/^\.macro\b\s*([^\s,]*)/i);
+      if (m) {
+        names.add(/^[A-Za-z_.$][\w.$]*$/.test(m[1]) ? m[1].toLowerCase() : '*');
+      }
+    }
+  }
+  return names;
+}
+
 /** Parse Splat-dialect text into one function's `DisasmInstr[]`. When `glabel` markers are present
  *  the text is sliced to exactly `name` (an absent symbol declines LOUD — emitting some other
  *  function's body under the requested name is the silent miscompile the cardinal rule forbids);
@@ -167,6 +188,16 @@ export function isSplatMips(asm: string): boolean {
  *  map, so an unresolved `.L` target declines here rather than crashing deep in the frontend. */
 export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
   const lines = asm.split('\n');
+  const macros = definedMacros(lines);
+  const macroCall = (statement: string): void => {
+    const call = statement.match(INSN_LINE)?.[2].toLowerCase();
+    if (call !== undefined && (macros.has(call) || macros.has('*'))) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${statement}' calls '${call}', a name a \`.macro\` in this file defines, and gas ` +
+          `expands the macro before it reads an instruction of that name, which this reader does not do`,
+      );
+    }
+  };
 
   // Slice to the requested function: `glabel NAME` … its `endlabel`/the next `glabel`/EOF.
   const glabels: { line: number; sym: string }[] = [];
@@ -266,6 +297,7 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
           `cannot lift '${name}': '${t}' saves or restores assembler options this reader does not track`,
         );
       }
+      macroCall(t);
       readMode(t);
       const sw = t.match(SECTION_SWITCH);
       if (sw) {
@@ -347,6 +379,7 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
       }
       continue;
     }
+    macroCall(line);
     const m = line.match(INSN_LINE);
     if (m && reorder === true) {
       throw new FrontendUnsupportedError(
