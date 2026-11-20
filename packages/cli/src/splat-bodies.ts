@@ -1,5 +1,5 @@
-// asmlift — the body of a guessed Thumb callee, read off the project's own assembly where the
-// project's own build proves it is the code the link kept.
+// asmlift — the body of a guessed Thumb callee, read off the project's own assembly where asmlift
+// itself shows that text is the code the link kept.
 //
 // A callee the input does not hold is bounded by its body (core frontend/callee-body.ts), and
 // elf-bodies.ts reads that body off the linked ELF. The MIPS and PowerPC frontends read objdump text,
@@ -10,56 +10,44 @@
 // that it has not decompiled (`INCLUDE_ASM("asm/nonmatchings/<module>", <name>)`, the Splat and
 // romlift convention), and the file is in the frontend's own input format.
 //
-// THE FILE IS A BODY ONLY WHERE THE PROJECT'S OWN BUILD SHOWS IT IS THE LINKED CODE. The text may be
-// stale or hand-edited, and a bound read off text that does not assemble to the linked bytes is a
-// bound on another function. So the CLI compiles, with the project's own compiler command
-// (`tools.asmlift.compiler`, and so whatever assembler that command invokes), a unit holding the
-// project's own `INCLUDE_ASM` header and that one `INCLUDE_ASM` line. That is the include the
-// project's unit makes, without the rest of the unit, whose headers a candidate compile command
-// need not reach (kl2dct's omits the `-I` its Makefile passes for `<string.h>`). It then requires
-// all of the following:
+// THE FILE IS A BODY ONLY WHERE ITS TEXT, AS ASMLIFT READS IT, IS THE LINKED CODE. The text may be
+// stale or hand-edited, and a bound read off text that is not the linked bytes is a bound on another
+// function. Nor may the proof run the project's build: its header, include chain and compile command
+// are C and shell, and each can hand gas a macro under an instruction's name (`.macro movs rd, imm` /
+// `adds \rd, \imm`) that the core never sees, so the build's bytes would agree with the ELF while
+// the text the core reads says something else (review probes: `#import`, string concatenation, a hex
+// escape, `-include`, `$X`, `"-"include`, a `cd` line, `-{{flags}}`, a `..` through a symlink). So
+// asmlift ASSEMBLES THE FILE ITSELF, in an environment only asmlift defines ({@link controlledSources}):
+// a fresh directory holding one source, which is asmlift's own definitions of the marker macros the
+// Thumb frontend reads ({@link MARKER_PRELUDE}) followed by the file's text, assembled by GNU as
+// ({@link assembleWith}) with no `-I`. Whatever the project's build does, the comparison is then
+// between the text the core reads and the bytes that were linked. It requires all of the following:
 //   - exactly one source file of the project includes `<dir>/<name>.s` by that macro, and exactly
 //     one header defines the macro. The site is read off the units, not off decomp.yaml's
 //     `paths.asm`/`paths.nonmatchings`: a file under those paths that no unit includes is no code the
-//     build links, and the compile below must spell the `dir` the unit's own include passes. A name
-//     two sites include (a second unit, or a commented-out line) gives no body;
-//   - the file defines the label once and marks it `.weak` nowhere;
-//   - the unit's object defines `<name>` as one non-weak Thumb FUNC, as long as its ELF range
-//     (elf-bodies.ts `functionRange` on both);
-//   - the text reads as the bytes it assembles to: the header is the allowlisted C form
-//     ({@link headerIncludes}), the compile command carries no flag asm-includes.ts refuses, the
-//     header's and the file's `.include` chain resolves the way gas resolves it (asm-includes.ts),
-//     and no statement of the file names a macro that chain or the file defines. A macro under an
-//     instruction's name (`.macro mov rd, imm` / `add \rd, \imm`) makes gas assemble a line as
-//     another instruction, and the core reads the file's lines as written. The function-marker
-//     macros the Thumb frontend reads (`thumb_func_start`, `thumb_func_end`, …: kl2dct's and pret's
-//     macros.inc) are the exception, where every definition of one holds only the zero-byte
-//     directives its name says. A name the chain cannot read refuses every body;
+//     build links. A name two sites include (a second unit, or a commented-out line) gives no body;
+//   - the file defines the label once, marks it `.weak` nowhere, and holds no `.include` (an
+//     included file is the project's environment, which this proof does not read);
+//   - the controlled assembly succeeds: any macro but the markers, a missing file, an unknown
+//     symbol in an immediate makes gas fail, and that gives no body;
+//   - its object defines `<name>` as one non-weak Thumb FUNC, as long as its ELF range (elf-bodies.ts
+//     `functionRange` on both);
 //   - every byte of the object's range equals the ELF's, except a word a relocation of the object
 //     fills, and that one is the word the link wrote: an `R_ARM_ABS32` word whose ELF value is its
 //     symbol's linked address plus the addend in place (a jump table's word against the function's
 //     own section included, placed where the link put that section), or an `R_ARM_THM_CALL` `bl`
 //     pair whose ELF target is the one FUNC the relocation's own symbol names.
 // Any other relocation in the range, and any miss above, gives no body. The callee then keeps what
-// elf-bodies.ts gave it, byte for byte. So does a unit that does not compile, an assembler the command
-// cannot find included.
+// elf-bodies.ts gave it, byte for byte. So does a host with no assembler.
 //
 // NOT FOR MIPS OR POWERPC: there the ELF's own disassembly already bounds the registers (elf-bodies.ts,
 // #378), so a second reading of the same bytes adds nothing.
 import type { CalleeBody } from '@asmlift/core/frontend/callee-body';
-import { createRunner } from '@match-kit/compiler';
-import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 
-import {
-  type IncludeSearch,
-  definedMacros,
-  includeOperands,
-  isPlainPath,
-  readIncludes,
-  resolveInclude,
-} from './asm-includes';
-import { renderCc } from './compile-command';
 import { type ElfImage, type FunctionRange, calleeAt, functionRange, readElfImage } from './elf-bodies';
 
 const SHT_SYMTAB = 2;
@@ -305,164 +293,97 @@ export function assemblesToLinked(linked: ElfImage, object: Uint8Array, name: st
   return true;
 }
 
-/** The marker macros the Thumb frontend reads by name (thumb.ts), each with the directives a
- *  definition of it may hold: those emit no byte inside the function, and none gives the function
- *  another instruction set than its name says. */
-const MARKER_MACROS: ReadonlyMap<string, ReadonlySet<string>> = (() => {
-  const start = ['.align', '.global', '.globl', '.type'];
-  const thumb = new Set([...start, '.thumb', '.thumb_func']);
-  return new Map([
-    ['thumb_func_start', thumb],
-    ['non_word_aligned_thumb_func_start', thumb],
-    ['arm_func_start', new Set([...start, '.arm'])],
-    ['thumb_func_end', new Set(['.size'])],
-    ['arm_func_end', new Set(['.size'])],
-  ]);
-})();
+// THE MARKER MACROS, as asmlift defines them for its own assembly of a project file. The Thumb
+// frontend (core thumb.ts) reads `thumb_func_start NAME` and `non_word_aligned_thumb_func_start NAME`
+// as "a Thumb function NAME starts at the next label", `arm_func_start NAME` as an ARM-mode function
+// it refuses, and `thumb_func_end`/`arm_func_end` as nothing. These definitions are pret's and
+// kl2dct's include/macros.inc, which mean exactly that: zero bytes inside the function, the label a
+// global function of that instruction set (`.thumb_func` marks the Thumb bit), the `.size` closing
+// it. No other macro is defined, so a file calling any other (a `_local` marker the frontend does
+// not read included) fails to assemble and gives no body.
+export const MARKER_PRELUDE = [
+  '.macro thumb_func_start name',
+  '.align 2, 0',
+  '.global \\name',
+  '.thumb',
+  '.thumb_func',
+  '.type \\name, %function',
+  '.endm',
+  '.macro non_word_aligned_thumb_func_start name',
+  '.global \\name',
+  '.thumb',
+  '.thumb_func',
+  '.type \\name, %function',
+  '.endm',
+  '.macro arm_func_start name',
+  '.align 2, 0',
+  '.global \\name',
+  '.arm',
+  '.type \\name, %function',
+  '.endm',
+  '.macro thumb_func_end name',
+  '.size \\name, .-\\name',
+  '.endm',
+  '.macro arm_func_end name',
+  '.size \\name, .-\\name',
+  '.endm',
+].join('\n');
 
-/** Whether `name`, a macro with `bodies`, is a marker the Thumb frontend reads as what gas does. */
-const isMarker = (name: string, bodies: ReadonlyArray<readonly string[] | undefined>): boolean => {
-  const allowed = MARKER_MACROS.get(name);
-  return (
-    allowed !== undefined &&
-    bodies.every((b) => b !== undefined && b.every((st) => allowed.has(st.split(/\s/)[0].toLowerCase())))
-  );
-};
-
-// THE HEADER IS C, and what gas reads of it is what the preprocessor and the compiler make of it:
-// string concatenation, escapes, `#import`, macros, a command's `-include`. No scan of its source
-// recovers that, so the header is an ALLOWLIST (fail-closed by construction): every line is blank, a
-// whole-line comment, an include guard (`#ifndef X` then `#define X`, and `#endif`), the INCLUDE_ASM
-// `#define` in the one form {@link INCLUDE_ASM_DEFINE} reads, or exactly
-// `asm(".include \"<plain path>\"\n");` (asm-includes.ts `isPlainPath`). Anything else gives no body.
-const HEADER_STATEMENT = String.raw`(?:\.pushsection \.text|\.popsection|\.syntax (?:unified|divided)|\.text)\\n`;
-/** `#define INCLUDE_ASM(DIR, NAME) asm("<statements>.include \"" DIR "/" #NAME ".s\"\n<statements>")`,
- *  each statement one of {@link HEADER_STATEMENT} (kl2dct's define, and the bare one). */
-const INCLUDE_ASM_DEFINE = new RegExp(
-  String.raw`^#define INCLUDE_ASM\((\w+), ?(\w+)\) asm\("(?:${HEADER_STATEMENT})*\.include \\"" \1 "/" #\2 "\.s\\"\\n(?:${HEADER_STATEMENT})*"\);?$`,
-);
-const HEADER_INCLUDE = /^asm\("\.include \\"([^"\\]+)\\"\\n"\);$/;
-
-/** The files the header `.include`s, in order, where it is the allowlisted form above. */
-export function headerIncludes(header: string): string[] | undefined {
-  const out: string[] = [];
-  let guard: string | undefined;
-  for (const raw of header.split('\n')) {
-    const line = raw.trim();
-    if (line.endsWith('\\') || line.includes('??')) {
-      return undefined; // a line splice (or a trigraph's) joins the next line to this one
-    }
-    const expected = guard;
-    guard = undefined;
-    if (line === '') {
-      guard = expected;
-      continue;
-    }
-    if (/^\/\/.*$/.test(line) || /^\/\*(?:(?!\*\/).)*\*\/$/.test(line)) {
-      guard = expected;
-      continue;
-    }
-    const ifndef = line.match(/^#ifndef (\w+)$/);
-    if (ifndef) {
-      guard = ifndef[1];
-      continue;
-    }
-    if (line === '#endif' || (expected !== undefined && line === `#define ${expected}`)) {
-      continue;
-    }
-    if (INCLUDE_ASM_DEFINE.test(line)) {
-      continue;
-    }
-    const inc = line.match(HEADER_INCLUDE);
-    if (inc === null || !isPlainPath(inc[1])) {
-      return undefined;
-    }
-    out.push(inc[1]);
+/** The sources asmlift assembles for a project file's `text`, one per dialect; undefined where the
+ *  text `.include`s anything (see the header). The Thumb frontend reads both `.syntax divided` and
+ *  `.syntax unified` (thumb.ts `isDataOp`: a project's split files carry no `.syntax` of their own,
+ *  and its INCLUDE_ASM may wrap them in either), and the register reads it takes from a line are the
+ *  same in both, so the file is a body where either dialect assembles it to the linked bytes. gas's
+ *  default, divided, is tried first. */
+export function controlledSources(text: string): string[] | undefined {
+  if (/(?<![\w.$])\.include(?![\w.$])/i.test(text)) {
+    return undefined;
   }
-  return out;
+  return ['divided', 'unified'].map((d) => `${MARKER_PRELUDE}\n.syntax ${d}\n${text}\n`);
 }
 
-/** Whether the core reads the callee's `text` as the bytes the compile of `header` plus that file
- *  assembles (see the header): the header is the allowlisted form, the include chain of both
- *  resolves under `search`, and no statement of the file calls a macro other than a
- *  {@link MARKER_MACROS} one. */
-export function readsAsAssembled(header: string, text: string, search: IncludeSearch): boolean {
-  const headerPaths = headerIncludes(header);
-  if (headerPaths === undefined) {
-    return false;
-  }
-  const ownPaths = includeOperands(text);
-  const chain = ownPaths === undefined ? undefined : readIncludes([...headerPaths, ...ownPaths], search);
-  if (chain === undefined) {
-    return false;
-  }
-  const macros = new Map(chain.macros);
-  for (const [n, bodies] of definedMacros(text)) {
-    macros.set(n, [...(macros.get(n) ?? []), ...bodies]);
-  }
-  if (macros.has('*')) {
-    return false;
-  }
-  const calls = (word: string): boolean => {
-    const bodies = macros.get(word.toLowerCase());
-    return bodies !== undefined && !isMarker(word.toLowerCase(), bodies);
-  };
-  for (const line of text.split('\n')) {
-    if (/^\s*\.include\s+"[^"\\\n]+"\s*(?:@.*)?$/i.test(line)) {
-      continue;
-    }
-    // a line that could hide where a statement starts from this plain reading (a string, a
-    // character constant, `;`, a block comment, a macro argument) gives no body
-    if (/["';\\]|\/\*|\*\//.test(line)) {
-      return false;
-    }
-    const t = line.replace(/@.*$/, '').trim();
-    if (t.startsWith('#')) {
-      continue;
-    }
-    const head = t.replace(/^(?:(?:[A-Za-z_.$][\w.$]*|\d+):\s*)+/, '').match(/^[\w.$]+/)?.[0];
-    if (head !== undefined && calls(head)) {
-      return false;
-    }
-  }
-  return true;
-}
+/** Assembles one {@link controlledSources} source for `callee` to an object's bytes; undefined where it
+ *  does not assemble. The seam the offline tests fake. */
+export type BodyAssemble = (source: string, callee: string) => Promise<Uint8Array | undefined>;
 
-/** Compiles a C source with the project's own compiler command, to an object's bytes; undefined
- *  where it does not compile. The seam the offline tests fake. */
-export type UnitCompile = (source: string) => Promise<Uint8Array | undefined>;
+/** The flags of asmlift's assembly: the GBA's CPU, as the Thumb frontend and the pinned toolchain
+ *  (@asmlift/toolchains `TOOLCHAIN.asFlags`) assume. Interworking marks the object, not the code. */
+const AS_FLAGS = ['-mcpu=arm7tdmi', '-mthumb-interwork'];
 
-/** {@link UnitCompile} with the project's `compiler` command template, run where the decomp.yaml is,
- *  with the flags and compiler name the run resolved (flags.ts), as a candidate compile runs. */
-export function unitCompileFromCommand(
-  command: string,
-  cwd: string,
-  flags: readonly string[] | undefined,
-  cc: string | undefined,
-): UnitCompile {
-  return async (source) => {
-    try {
-      const runner = createRunner(renderCc(command, cc), { cwd, flags });
+/** {@link BodyAssemble} with GNU as for ARM: `ASMLIFT_ARM_AS`, else `arm-none-eabi-as` on PATH (the
+ *  binary the pinned toolchain names), run in a fresh directory holding only the source. */
+export function assembleWith(as: string = process.env.ASMLIFT_ARM_AS ?? 'arm-none-eabi-as'): BodyAssemble {
+  return (source) =>
+    new Promise((done) => {
+      let dir: string | undefined;
       try {
-        const outcome = await runner.compile(source, { ext: 'c' });
-        try {
-          return outcome.kind === 'ok' ? new Uint8Array(readFileSync(outcome.object)) : undefined;
-        } finally {
-          outcome[Symbol.dispose]();
+        dir = mkdtempSync(join(tmpdir(), 'asmlift-body-'));
+        writeFileSync(join(dir, 'body.s'), source);
+      } catch {
+        if (dir !== undefined) {
+          rmSync(dir, { recursive: true, force: true });
         }
-      } finally {
-        await runner.dispose();
+        done(undefined);
+        return;
       }
-    } catch {
-      return undefined;
-    }
-  };
+      const at = dir;
+      execFile(as, [...AS_FLAGS, '-o', 'body.o', 'body.s'], { cwd: at, timeout: 60_000 }, (error) => {
+        let object: Uint8Array | undefined;
+        try {
+          object = error === null ? new Uint8Array(readFileSync(join(at, 'body.o'))) : undefined;
+        } catch {
+          object = undefined;
+        }
+        rmSync(at, { recursive: true, force: true });
+        done(object);
+      });
+    });
 }
 
-/** The callees of `callees` whose project file {@link calleeBodiesFromProjectAsm} compiles: one
+/** The callees of `callees` whose project file {@link calleeBodiesFromProjectAsm} assembles: one
  *  site includes it under the root, its linked range is Thumb, and the file defines it once (see the
- *  header). Each with the file's text and the header to include. What the build then proves of each
- *  is the compile's; this is every body that pass may read, which is what a reader holding the
+ *  header). Each with the file's text. What the assembly then proves of each is its own; this is
+ *  every body that pass may read, which is what a reader holding the
  *  CLI's bodies frozen (the bench's vendoring) must refuse to read less than. */
 export function projectAsmCandidates(
   root: string,
@@ -494,51 +415,27 @@ export function projectAsmCandidates(
   return out;
 }
 
-/** The body each callee in `callees` has in the project's assembly, where the build proves it (see
- *  the header): a listing, which the core lifts as it would the same text in the input; and the file
- *  each was read from, relative to `root`, which the `[proto]` note names (callees.ts
- *  `guessedArityNote`) where it would otherwise name the ELF. */
+/** The body each callee in `callees` has in the project's assembly, where asmlift's own assembly of
+ *  it proves it (see the header): a listing, which the core lifts as it would the same text in the
+ *  input; and the file each was read from, relative to `root`, which the `[proto]` note names
+ *  (callees.ts `guessedArityNote`) where it would otherwise name the ELF. */
 export async function calleeBodiesFromProjectAsm(
   root: string,
   linked: ElfImage,
   callees: readonly string[],
-  compile: UnitCompile,
-  /** where the compile's assembler finds an `.include` (asm-includes.ts); undefined ⇒ no body */
-  search: IncludeSearch | undefined,
+  assemble: BodyAssemble,
   asm: ProjectAsm = projectAsm(root),
 ): Promise<{ bodies: Record<string, CalleeBody>; files: Record<string, string> }> {
   const bodies: Record<string, CalleeBody> = {};
   const files: Record<string, string> = {};
-  if (search === undefined) {
-    return { bodies, files };
-  }
-  const headerText = new Map<string, string | undefined>();
-  for (const { callee, header, site, text } of projectAsmCandidates(root, linked, callees, asm)) {
-    if (!headerText.has(header)) {
-      let t: string | undefined;
-      try {
-        t = readFileSync(header, 'latin1');
-      } catch {
-        t = undefined;
+  for (const { callee, site, text } of projectAsmCandidates(root, linked, callees, asm)) {
+    for (const source of controlledSources(text) ?? []) {
+      const object = await assemble(source, callee);
+      if (object !== undefined && assemblesToLinked(linked, object, callee)) {
+        bodies[callee] = { kind: 'listing', text };
+        files[callee] = relative(root, site.asm);
+        break;
       }
-      headerText.set(header, t);
-    }
-    const h = headerText.get(header);
-    // the file gas includes is the one read: its `dir` a plain path, found one way by gas's search
-    const own = isPlainPath(site.dir) ? resolveInclude(`${site.dir}/${callee}.s`, search) : undefined;
-    let read: string | undefined;
-    try {
-      read = realpathSync(site.asm);
-    } catch {
-      read = undefined;
-    }
-    if (h === undefined || own === undefined || own !== read || !readsAsAssembled(h, text, search)) {
-      continue;
-    }
-    const object = await compile(`#include "${header}"\nINCLUDE_ASM("${site.dir}", ${callee});\n`);
-    if (object !== undefined && assemblesToLinked(linked, object, callee)) {
-      bodies[callee] = { kind: 'listing', text };
-      files[callee] = relative(root, site.asm);
     }
   }
   return { bodies, files };
