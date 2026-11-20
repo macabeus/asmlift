@@ -39,6 +39,11 @@ export interface Frontend {
    *  frontend's input format, loads (frontend/callee-body.ts `CalleeStackWords`), asked of a callee
    *  whose body does not lift; absent where this frontend reads no entry */
   entryStackWords?: EntryStackWords;
+  /** whether a `ret` this frontend leaves without an operand is one that branched through the return
+   *  register, so that it hands back no value the caller left there (Thumb `pop {r0}; bx r0`: every
+   *  other Thumb return reads r0); absent where a bare `ret` is a return no path wrote that register
+   *  for (PowerPC), which still holds the caller's first argument (frontend/callee-body.ts) */
+  bareReturnClobbersReturnReg?: boolean;
 }
 
 /** THE FUNCTION'S OWN DECLARATION, as a call lowering reads it (frontend/call-plan.ts

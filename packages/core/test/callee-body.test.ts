@@ -9,6 +9,7 @@ import { describe, expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
 import { type CalleeBodies, calleeBodyBounds } from '../src/frontend/callee-body';
+import { frontendFor } from '../src/frontend/registry';
 import { decompile, liftStamped } from '../src/pipeline';
 import type { Prototypes } from '../src/proto';
 import { TOOLCHAIN_TARGETS, type TargetDescription } from '../src/target';
@@ -31,6 +32,7 @@ const boundsOf = (
         entryReadCalls,
       }),
     external,
+    frontendFor(target),
   );
 const read = (bound: (c: string) => number | undefined, names: string[]) =>
   Object.fromEntries(names.map((n) => [n, bound(n) ?? 'none']));
@@ -254,6 +256,17 @@ describe('a return the body left the return register untouched for', () => {
     const caller = '\t.code\t16\n\t.text\n\t.thumb_func\nf:\n\tbx\tlr\n';
     expect(boundsOf(id, t)('id')).toBe(1);
     expect(boundsOf(caller, t, undefined, {}, { id: { kind: 'listing', text: id } })('id')).toBe(1);
+  });
+  // agbcc's interworking return `pop {r0}; bx r0` branches through r0: it hands back the return
+  // address, not the caller's first argument (kl2dct sub_08047848 loads r0 first and was bounded at 1)
+  test('agbcc: a return through r0 hands back no argument', () => {
+    const t = TOOLCHAIN_TARGETS.agbcc.description;
+    const via =
+      '\t.code\t16\n\t.text\n\t.thumb_func\nvia:\n\tpush\t{lr}\n\tldr\tr0, .L3\n\tmov\tr1, #0x1\n' +
+      '\tstr\tr1, [r0]\n\tpop\t{r0}\n\tbx\tr0\n.L3:\n\t.word\tgN\n';
+    expect(boundsOf(via, t)('via')).toBe(0);
+    // …and one that reads r0 first still counts it
+    expect(boundsOf(via.replace('\tldr\tr0, .L3\n', '\tadd\tr1, r0, #0\n\tldr\tr0, .L3\n'), t)('via')).toBe(1);
   });
 });
 

@@ -607,7 +607,7 @@ function bodyReadsIn(
         { calleeBodyBound: () => undefined, calleeStackWords: () => undefined, entryReadCalls },
       ),
     calleeBodies,
-    frontendFor(target).entryStackWords,
+    frontendFor(target),
   );
   // a handful per table: the symbol settings a ranked run tries, never a growing list
   read.unshift({ key, reads });

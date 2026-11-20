@@ -4656,6 +4656,25 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'extern int gx;\nvoid hiw();\nvoid hirst_call(int a, int b, int c, int d);',
     proto: { hirst_call: { returnsVoid: true }, hiw: { returnsVoid: true } },
   },
+  // A CALLEE BODY'S RETURN THROUGH r0 HANDS BACK NO ARGUMENT (frontend/callee-body.ts,
+  // `Frontend.bareReturnClobbersReturnReg`). agbcc returns from a function that pushed lr with
+  // `pop {r0}; bx r0`, which the Thumb frontend lifts as a bare `ret`, and a bare return on a
+  // call-free path counted the first argument word as read: `cb`, which loads r0 before reading it,
+  // bounded its caller's guess at one word, and `bxr0_call` passed the `&gy` its store left in r0
+  // (`cb(&gy)`: the same bytes, an argument the source never passed). Read as the return address it
+  // is, the bound is 0 and the call `cb()` (kl2dct sub_08047848, sub_0802F05C and sub_0803953C are
+  // such callees). agbcc only: no other target returns through its first argument register.
+  {
+    sym: 'bxr0_call',
+    src:
+      'extern int ga[], gb[], gy;\nvoid cb()\n{\n    int i;\n    for (i = 0; i < 8; i++) {\n' +
+      '        ga[i] = gb[i] * 3 + ga[i + 1];\n    }\n}\n' +
+      'void bxr0_call(int a, int b)\n{\n    gy = b + 1;\n    cb();\n}',
+    features: [],
+    toolchains: ['agbcc'],
+    ctx: 'extern int gy;\nvoid cb();\nvoid bxr0_call(int a, int b);',
+    proto: { bxr0_call: { returnsVoid: true }, cb: { returnsVoid: true } },
+  },
   // `spillarg` is `spill10` with a genuine outgoing argument under the spills: `five(i, 1, 2, 3,
   // v0)` stages argument 5 at [sp,#0] before every call and agbcc moves the spills above it, to
   // [sp,#4]..[sp,#0x20]. Several reach `bl five` unread, so the declaration (`five` takes one stack
