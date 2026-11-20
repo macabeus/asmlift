@@ -27,8 +27,11 @@
 // argument: `void *id(void *p) { return p; }` is a lone `blr` and `bx lr`, which no instruction reads,
 // and its lift returns nothing and counts no parameter. So a return the lift left bare, on a path
 // from the entry that makes no call (a call destroys the register), counts the first argument word
-// as read, unless the callee's entry declares a void return. KNOWN GAP: a return in a register PAIR
-// (r0:r1, r3:r4) that nothing declares is counted for its first register only.
+// as read, unless the callee's entry declares a void return. Not where the frontend leaves a return
+// bare only when it branched through that register (`Frontend.bareReturnClobbersReturnReg`): agbcc's
+// `pop {r0}; bx r0` hands back the return address, and the Thumb frontend reads r0 at every other
+// return, so a first argument handed back there is already a parameter. KNOWN GAP: a return in a
+// register PAIR (r0:r1, r3:r4) that nothing declares is counted for its first register only.
 //
 // It answers nothing where:
 //   - the callee is the function being lifted (its own declaration is a different question);
@@ -82,6 +85,7 @@ import { helperPrototypes } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 import { armArgumentWords, scansArgumentsOf } from './arm-body';
 import type { Reloc } from './asmdata';
+import type { Frontend } from './frontend';
 import { entryArgRank } from './ssa';
 import { thumbEntryWordsFromHalfwords } from './thumb-entry';
 
@@ -125,9 +129,10 @@ export function asksCalleeBody(entry: FnProto | undefined): boolean {
 /** What each callee's body says, read as a call to it first asks and kept for the rest: the
  *  register bound, and the incoming stack words it loads (`CalleeStackWords` below), off ONE lift.
  *  `lift` lifts one function of a text (the input, or a body in `external`) under a table, with no
- *  bound of its own: one level of bodies is read, never the callee's callees'. `entry` is the
- *  target frontend's entry scan (`Frontend.entryStackWords`), asked only of a body that does not
- *  lift. */
+ *  bound of its own: one level of bodies is read, never the callee's callees'. `frontend` is what
+ *  the target frontend says of its own lifts: its entry scan (`Frontend.entryStackWords`), asked
+ *  only of a body that does not lift, and what a bare return of its means
+ *  (`Frontend.bareReturnClobbersReturnReg`). */
 export function calleeBodyReads(
   self: string,
   asm: string,
@@ -135,12 +140,12 @@ export function calleeBodyReads(
   prototypes: Prototypes,
   lift: CalleeLift,
   external?: CalleeBodies,
-  entry?: EntryStackWords,
+  frontend?: Pick<Frontend, 'entryStackWords' | 'bareReturnClobbersReturnReg'>,
 ): { bound: CalleeBodyBound; stackWords: CalleeStackWords } {
   const memo = new Map<string, BodyReads>();
   const read = (callee: string): BodyReads => {
     if (!memo.has(callee)) {
-      memo.set(callee, bodyReads(self, callee, asm, target, prototypes, lift, external, entry));
+      memo.set(callee, bodyReads(self, callee, asm, target, prototypes, lift, external, frontend));
     }
     return memo.get(callee)!;
   };
@@ -155,8 +160,9 @@ export function calleeBodyBounds(
   prototypes: Prototypes,
   lift: CalleeLift,
   external?: CalleeBodies,
+  frontend?: Pick<Frontend, 'bareReturnClobbersReturnReg'>,
 ): CalleeBodyBound {
-  return calleeBodyReads(self, asm, target, prototypes, lift, external).bound;
+  return calleeBodyReads(self, asm, target, prototypes, lift, external, frontend).bound;
 }
 
 /** Whether `text` defines a label named `callee`: a `name:` line, an objdump `<name>:` header or a
@@ -213,17 +219,27 @@ function bodyReads(
   prototypes: Prototypes,
   lift: CalleeLift,
   external: CalleeBodies | undefined,
-  entry: EntryStackWords | undefined,
+  frontend: Pick<Frontend, 'entryStackWords' | 'bareReturnClobbersReturnReg'> | undefined,
 ): BodyReads {
   if (callee === self || declaresAggregateReturn(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined)) {
     return {};
   }
   // a body that lifts answers both; one that does not answers its entry's loads, and no bound
   const lifted = (text: string, relocs?: readonly Reloc[]): BodyReads => {
-    const got = liftedReads(callee, text, target, prototypes, lift, relocs);
+    const got = liftedReads(
+      callee,
+      text,
+      target,
+      prototypes,
+      lift,
+      frontend?.bareReturnClobbersReturnReg === true,
+      relocs,
+    );
     // a scan of the entry's stack loads sees no register read, so where the ABI can skip an
     // argument register (`evenWordAlignedArgs`) it cannot say the registers are all arguments
-    return got ?? { stack: target.evenWordAlignedArgs === true ? undefined : entry?.(callee, text) };
+    return (
+      got ?? { stack: target.evenWordAlignedArgs === true ? undefined : frontend?.entryStackWords?.(callee, text) }
+    );
   };
   if (definesLabel(asm, callee)) {
     return weakNames(asm).has(callee) ? {} : lifted(asm);
@@ -258,6 +274,7 @@ function liftedReads(
   target: TargetDescription,
   prototypes: Prototypes,
   lift: CalleeLift,
+  bareReturnClobbers: boolean,
   relocs?: readonly Reloc[],
 ): BodyReads | undefined {
   const helpers = helperPrototypes(target);
@@ -296,7 +313,10 @@ function liftedReads(
         return undefined;
       }
       const passesFirst =
-        target.returnReg === target.argRegs[0] && !declaresVoidReturn(table[callee]) && returnsUntouched(fn);
+        target.returnReg === target.argRegs[0] &&
+        !bareReturnClobbers &&
+        !declaresVoidReturn(table[callee]) &&
+        returnsUntouched(fn);
       const top = Math.max(0, ...params.map((p) => (entryArgRank(p) ?? -1) + 1));
       const stack = Math.max(0, top - target.argRegs.length);
       return {

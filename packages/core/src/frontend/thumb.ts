@@ -7947,6 +7947,7 @@ export const thumbFrontend: Frontend = {
   inputFormat: 'gnu-as',
   lift,
   entryStackWords: thumbEntryWordsFromText,
+  bareReturnClobbersReturnReg: true,
 };
 
 /** Internal surface for this module's own tests, and for nothing else. `@asmlift/core` exports
