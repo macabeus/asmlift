@@ -846,7 +846,7 @@ export function callDeclarations(
       return undefined;
     }
     const holes = argRegisterHoles(target);
-    if (holes.leadingFloatShadow && regs.indexOf(gap[0]) === 0 && own?.proves !== true) {
+    if (regs.indexOf(gap[0]) === 0 && holes.floatShadowed.has(gap[0]) && own?.proves !== true) {
       return undefined;
     }
     const ownWords = own?.proves !== true ? undefined : ownArgumentWordsOn(name, own.proto, target);

@@ -106,33 +106,29 @@ export interface SourceRead {
  *     2026-10-18: `g(1, b, 3LL)` and `g(1, 3LL)` are one object on gcc2.7.2kmc, gcc2.7.2 and the
  *     three mwcc builds, `a1`/`r4` untouched under a set pair. agbcc fills every word in order
  *     (`g(1, 3LL)` is r0, r1:r2), so it has none.
- *   - `leadingFloatShadow`: a leading floating argument travels in the FPU's registers and leaves
- *     the general words it counts against holding nothing (`fpu.slots: 'leading'`, O32): with `gp`
- *     unprototyped, `gp(x, 5)` of a `float x` parameter and of an `int x` one compile alike on
- *     ido7.1, gcc2.7.2kmc and gcc2.7.2 (`li a1,5`, `a0` untouched). PowerPC's floats take no general
- *     word (`'separate'`), so they leave no hole there.
- *   - `floatShadowed`: every general word a leading floating argument can leave empty, not only the
- *     first. Each of the `fpu.argRegs` slots may take a double, two words, so the first two words per
- *     slot may all hold nothing under a filled one: on O32 a0..a3. IDO 7.1 `-O2 -mips2` (compiled
- *     2026-11-20), with `void g(double, float, int)` declared, `g(1.0, 2.0f, x)` sets $f12/$f14 and
- *     moves x into a3, a2 untouched; undeclared, the float is promoted to a double and x goes to
- *     16(sp). A guessed callee may be one the source declared and the lift was not told of. The
- *     shadowed words are always a prefix from the first, so `decideGap`,
- *     which asks of a gap starting at the first register, needs only `leadingFloatShadow`; a reader
- *     asking of one register by itself (call-plan.ts `maySkip`: the marker `ceiling` and `parked`,
- *     each of which drops every word above the register it stops at) needs this set.
+ *   - `floatShadowed`: every general word a leading floating argument can leave empty. Such an
+ *     argument travels in the FPU's registers and leaves the general words it counts against holding
+ *     nothing (`fpu.slots: 'leading'`, O32): with `gp` unprototyped, `gp(x, 5)` of a `float x`
+ *     parameter and of an `int x` one compile alike on ido7.1, gcc2.7.2kmc and gcc2.7.2 (`li a1,5`,
+ *     `a0` untouched). Each of the `fpu.argRegs` slots may take a double, two words, so the first two
+ *     words per slot may all hold nothing under a filled one: on O32 a0..a3. IDO 7.1 `-O2 -mips2`
+ *     (compiled 2026-11-20), with `void g(double, float, int)` declared, `g(1.0, 2.0f, x)` sets
+ *     $f12/$f14 and moves x into a3, a2 untouched; undeclared, the float is promoted to a double and
+ *     x goes to 16(sp). A guessed callee may be one the source declared and the lift was not told of.
+ *     PowerPC's floats take no general word (`'separate'`), so they leave no hole there. The set is
+ *     always a prefix from the first register: `decideGap` asks it of a gap starting there, and a
+ *     reader asking of one register by itself (call-plan.ts `maySkip`: the marker `ceiling` and
+ *     `parked`, each of which drops every word above the register it stops at) of that register.
  *  Its readers are the guessed-arity gap (frontend/call-plan.ts `decideGap`) and the dispatch stops
  *  (`maySkip`). A register missing here is one the gap refuses on but the stops cap at, so the stops
  *  are sound only as far as this is complete. */
 export function argRegisterHoles(target: Pick<TargetDescription, 'argRegs' | 'evenWordAlignedArgs' | 'fpu'>): {
   skippable: ReadonlySet<string>;
-  leadingFloatShadow: boolean;
   floatShadowed: ReadonlySet<string>;
 } {
   const leading = target.fpu?.slots === 'leading';
   return {
     skippable: new Set(target.evenWordAlignedArgs ? target.argRegs.filter((_, k) => k % 2 === 1) : []),
-    leadingFloatShadow: leading,
     floatShadowed: new Set(leading ? target.argRegs.slice(0, 2 * target.fpu!.argRegs.length) : []),
   };
 }
