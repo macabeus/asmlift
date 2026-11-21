@@ -509,6 +509,34 @@ describe('assertEffectsPreserved — a pinned device access', () => {
     );
   });
 
+  // The credit claims the condition's first evaluation is the guard's, so the contract checks it
+  // against the condition: it stands for a read only where the condition renders one, once each.
+  test('a fused guard’s credit stands only for reads its own condition renders', () => {
+    const key = 'device:r:0x4000006';
+    expect(() => checkReads(irReading([REG, REG]), [read(REG), fusedWhile([key], { k: 'var', name: 'x' })])).toThrow(
+      /dropped the read of the device register at 0x4000006/,
+    );
+    expect(() => checkReads(irReading([REG, REG, REG]), [fusedWhile([key, key])])).toThrow(
+      /dropped the read of the device register at 0x4000006/,
+    );
+  });
+
+  test('a `for` carries the credit as a `while` does', () => {
+    const counter = (value: Expr): Stmt => ({ k: 'assign', name: 'i', value });
+    const fusedFor = (credit: string[] | undefined): Stmt => ({
+      k: 'for',
+      init: counter({ k: 'const', value: 0 }),
+      cond: { k: 'bin', op: '<', l: { k: 'var', name: 'i' }, r: at({ k: 'const', value: REG }, true) },
+      inc: [counter({ k: 'bin', op: '+', l: { k: 'var', name: 'i' }, r: { k: 'const', value: 1 } })],
+      body: [],
+      ...(credit === undefined ? {} : { fusedGuardReads: credit }),
+    });
+    expect(() => checkReads(irReading([REG, REG]), [fusedFor(undefined)])).toThrow(
+      /dropped the read of the device register at 0x4000006/,
+    );
+    expect(() => checkReads(irReading([REG, REG]), [fusedFor(['device:r:0x4000006'])])).not.toThrow();
+  });
+
   test('a fused guard’s credit licenses no re-run on a path', () => {
     expect(() => checkReads(irReading([REG, REG]), [read(REG), read(REG), fusedWhile(['device:r:0x4000006'])])).toThrow(
       /emitted 3 reads of the device register at 0x4000006 on one path/,

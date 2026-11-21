@@ -186,7 +186,7 @@ function pinnedKey(defs: Map<Value, Op>, op: Op, dir: Direction): string {
 /** The key under which the effect contract counts `op` as a read the dropped rule needs rendered,
  *  or null when it counts no such read: `op` is not a pinned read, or it reads through a named
  *  global, which is exempt from the dropped rule. The structurer's guard fusion records these keys
- *  for the guard test it deletes (`fusedGuardReads` on the `while`). */
+ *  for the guard test it deletes (`fusedGuardReads` on the loop). */
 export function guardReadKey(defs: Map<Value, Op>, op: Op): string | null {
   if (placedAt(op) !== 'device' || (op.opcode !== 'load' && op.opcode !== 'aload')) {
     return null;
@@ -346,6 +346,22 @@ const either = (...ps: PathCounts[]): PathCounts => ({
 });
 const falls = (c: EffectCounts): PathCounts => ({ through: c, ret: null, brk: null, cont: null, end: null });
 
+/** The reads a top-tested loop's `fusedGuardReads` stands for, by key: each listed read, capped at
+ *  the renders the loop's own condition (`cond`, its counts) makes at that key. The credit claims
+ *  that the condition's first evaluation is the deleted guard's test, so it can stand for a read
+ *  only where the condition renders one, and for each render once. A key the condition does not
+ *  render earns nothing, and a key listed twice against one render earns one. */
+function fusedGuardCredit(reads: readonly string[], cond: EffectCounts): EffectCounts {
+  const credit: EffectCounts = new Map();
+  for (const k of reads) {
+    const n = credit.get(k) ?? 0;
+    if (n < (cond.get(k) ?? 0)) {
+      credit.set(k, n + 1);
+    }
+  }
+  return credit;
+}
+
 /** `total` = every occurrence in the tree; `paths` = the most any single syntactic path executes,
  *  by how it leaves `stmts`. A path that leaves by `return` runs nothing after it, so two sequenced
  *  `if (…) { f(); return; }` arms are one call on any path, not two. `unreached` collects every
@@ -370,10 +386,8 @@ function countEffects(
     total = sum(total, own);
     // A fused guard's reads run as the loop's first test, so the dropped rule counts them here. They
     // are in `total` only: on a path, the first test is already the condition's own render.
-    if (s.k === 'while' && s.fusedGuardReads !== undefined) {
-      for (const k of s.fusedGuardReads) {
-        total.set(k, (total.get(k) ?? 0) + 1);
-      }
+    if ((s.k === 'while' || s.k === 'for') && s.fusedGuardReads !== undefined) {
+      total = sum(total, fusedGuardCredit(s.fusedGuardReads, own));
     }
     let here: PathCounts;
     if (s.k === 'if') {
