@@ -368,6 +368,12 @@ describe('pret dialect: macros an included file defines', () => {
     );
     expect(() => lift(T1, { 'm.inc': '.include "m.inc"\n' })).toThrow(/repeats a file/);
   });
+  test('an included `.macro` whose name gas makes only on expansion stands for any name', () => {
+    expect(() => lift(T1, { 'm.inc': '.irp m, nop\n.macro \\m\n\tbx lr\n.endm\n.endr\n' })).toThrow(
+      FrontendUnsupportedError,
+    );
+    expect(() => lift(T1, { 'm.inc': '.macro outer\n.macro inner\n.endm\n.endm\n' })).toThrow(FrontendUnsupportedError);
+  });
   test('an included file that defines only other names, or the pret markers, lifts as with no map', () => {
     expect(lift(T1, { 'm.inc': '.macro other\n.endm\n' })).toContain('return 2;');
     const macros =
