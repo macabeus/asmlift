@@ -445,8 +445,6 @@ export type Stmt =
   // so the redundant spelling costs bytes. Advice about SPELLING; nothing may read it as semantics.
   | { k: 'return'; value?: Expr; unspelled?: true };
 
-/** One arm of a `switch`. `values` stacks multiple `case K:` labels onto one body (`case 1: case 2:`).
- *  `fallsThrough` true ⇒ the body flows into the NEXT arm (no `break;`); see the non-neutrality note. */
 /** The guard a top-tested loop's condition stands in for, where the structurer's guard fusion
  *  deleted it. agbcc rotates a test-at-top loop: the exit test is duplicated into a guard ahead of
  *  the loop and a latch at its foot, so the asm tests at both. The fusion turns the pair back into
@@ -471,6 +469,8 @@ export interface FusedGuard {
   readonly test: Expr;
 }
 
+/** One arm of a `switch`. `values` stacks multiple `case K:` labels onto one body (`case 1: case 2:`).
+ *  `fallsThrough` true ⇒ the body flows into the NEXT arm (no `break;`); see the non-neutrality note. */
 export interface SwitchCase {
   values: number[];
   body: Stmt[];
