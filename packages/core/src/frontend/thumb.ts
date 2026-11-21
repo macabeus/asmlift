@@ -1472,9 +1472,15 @@ const PRET_FUNCTION_MACRO =
  *  (every real definition in the benchmark's checkouts and luvdis's: kleod, pokeemerald, sa3,
  *  klonoa-empire-of-dreams). Anything else makes the marker a macro. */
 const PRET_BOOKKEEPING = /^\.(?:align|arm|global|globl|size|thumb|thumb_func|type)$/i;
-function isPretBookkeeping(statement: string, params: readonly string[]): boolean {
+function isPretBookkeeping(statement: string, params: readonly string[], marker: string): boolean {
   const m = statement.match(/^(\.[\w.]+)\s*(.*)$/);
   if (m === null || !PRET_BOOKKEEPING.test(m[1])) {
+    return false;
+  }
+  // the mode a marker sets is its own: `.arm` only in an `arm_func_*` definition, `.thumb` and
+  // `.thumb_func` only in a Thumb one
+  const arm = marker.startsWith('arm_');
+  if ((arm && /^\.thumb/i.test(m[1])) || (!arm && /^\.arm$/i.test(m[1]))) {
     return false;
   }
   const operands = m[2] === '' ? [] : m[2].split(',').map((o) => o.trim());
@@ -1537,7 +1543,10 @@ function includedMacroNames(
       const head = rest.match(/^[\w.$]+/)?.[0].toLowerCase();
       if (marker !== undefined && !(depth.n === marker.at + 1 && head === '.endm')) {
         // a statement of a marker's definition: bookkeeping only, at the definition's own level
-        if (st.text !== '' && (labels !== '' || depth.n !== marker.at + 1 || !isPretBookkeeping(rest, marker.params))) {
+        if (
+          st.text !== '' &&
+          (labels !== '' || depth.n !== marker.at + 1 || !isPretBookkeeping(rest, marker.params, marker.name))
+        ) {
           into.add(`!${marker.name}`);
         }
       }
@@ -1640,6 +1649,9 @@ function decode(
   // layout. That reach test is the one an unreadable `.align` gets. It keeps an INCLUDE_ASM
   // `.include` after a function's sealed return out of that function's lift.
   const unreadDirectives: { at: number; what: string; lines: boolean }[] = [];
+  // Each use of a pret marker an included file defines, by the same allFlat position: its bytes (an
+  // `.align` pad) are emitted where it sits, so one control can reach inside a slice declines.
+  const includedMarkers: { at: number; what: string }[] = [];
   // The labels naming the CURRENT data run's base address, and there can be several: two
   // labels with nothing between them name the same bytes, so a directive under the second is
   // equally a directive under the first. Keying by the most recent label alone hid an aliased
@@ -1701,6 +1713,10 @@ function decode(
   // unresolved `.include` defines is not visible here (the residue named on
   // {@link ZERO_BYTE_DIRECTIVES}).
   const macroUses = new Set<number>();
+  // the names included files define (`includedMacroNames`): a pret function marker among them is
+  // read as bookkeeping where every included definition of it is (`PRET_FUNCTION_MACRO`), and even
+  // then only where control cannot reach it (the marker branch below)
+  const fromIncludes = new Set<string>();
   {
     const lines = readGasLines(asm);
     const joined = lines.find((l) => l.crossesLine && l.statements.some((st) => st.unread !== undefined));
@@ -1725,9 +1741,6 @@ function decode(
     // the statement.
     let anyName = false;
     let bodyDepth = 0;
-    // the names included files define (`includedMacroNames`): a pret function marker among them is
-    // read as bookkeeping where every included definition of it is (`PRET_FUNCTION_MACRO`)
-    const fromIncludes = new Set<string>();
     for (const [k, line] of lines.entries()) {
       for (const [j, st] of line.statements.entries()) {
         const { debug, section } = mask.lines[k].statements[j];
@@ -2012,12 +2025,26 @@ function decode(
     }
     // pret function macros (asm/macros.inc): pure bookkeeping except the declared mode.
     const macro = rest.match(/^(non_word_aligned_thumb_func_start|thumb_func_start|arm_func_start)\s+\S+$/);
+    // A marker an included file defines may emit bytes where it sits (`.align 2, 0` pads with
+    // 0x0000, `movs r0, r0`, which sets the flags), so one control can reach declines: recorded as a
+    // directive this pass does not read, judged by the same reachability as an unreadable `.align`.
+    // The function's own start marker before its label and its end marker after a terminator stay
+    // bookkeeping.
+    const markerName = rest.match(/^(\w+)/)?.[1].toLowerCase();
+    const includedMarker =
+      markerName !== undefined && PRET_FUNCTION_MACRO.test(markerName) && fromIncludes.has(markerName);
     if (macro) {
+      if (includedMarker) {
+        includedMarkers.push({ at: flat.length - 1, what: macro[1] });
+      }
       pendingFn = macro[1] !== 'arm_func_start';
       pendingArm = macro[1] === 'arm_func_start';
       continue;
     }
     if (/^(thumb_func_end|arm_func_end)\b/.test(rest)) {
+      if (includedMarker) {
+        includedMarkers.push({ at: flat.length - 1, what: markerName });
+      }
       continue;
     }
     const m = rest.match(/^(\w+)\s*(.*)$/);
@@ -2205,6 +2232,32 @@ function decode(
       );
     }
     const liveUnread = unreadDirectives.find((u) => inSlice(u.at) && fillIsReachable(u.at - sliceStart + 1));
+    // An included marker's position is reached by falling through only where every instruction back to
+    // a label code names, or to the function's entry, continues past itself: an explicit pad
+    // instruction after a return (`mov pc, lr` / `lsls r0, r0, #0` / marker) is not reached, where
+    // `fillIsReachable` stops at the pad and answers yes.
+    const markerIsReachable = (upto: number) => {
+      for (let j = upto - 1; j >= 0; j--) {
+        const g = flat[j];
+        if (g.label !== undefined) {
+          if (j === 0 || (named.has(g.label) && !headsData(g.label))) {
+            return true;
+          }
+          continue;
+        }
+        if (g.instr && !controlContinuesPast(g.instr)) {
+          return false;
+        }
+      }
+      return true;
+    };
+    const liveMarker = includedMarkers.find((u) => inSlice(u.at) && markerIsReachable(u.at - sliceStart + 1));
+    if (liveMarker) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${liveMarker.what}', a marker an included file defines, sits where control ` +
+          `falls through it inside the function, and its definition may emit bytes there (an \`.align\` pad)`,
+      );
+    }
     if (liveUnread) {
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': '${liveUnread.what}' is a directive this frontend does not read, where control can reach ` +

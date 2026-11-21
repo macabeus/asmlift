@@ -1,11 +1,11 @@
 {
   "generatedBy": "pnpm regen:declines-census (scripts/regen-decline-census.ts) — do not hand-edit",
-  "distinctMessages": 339,
-  "residueTotal": 143,
+  "distinctMessages": 340,
+  "residueTotal": 144,
   "residueByFile": [
     {
       "file": "frontend/thumb.ts",
-      "count": 46,
+      "count": 47,
       "messages": [
         "cannot lift 'X': 'X X' branches to 'X', which this asm defines as a data label — not modelled",
         "cannot lift 'X': 'X X' calls through a register that holds no function's address — not modelled",
@@ -25,6 +25,7 @@
         "cannot lift 'X': 'X' is a label here but not a function (the function is 'X')",
         "cannot lift 'X': 'X' is a statement this frontend does not read the way the assembler does (X), so skipping it could silently delete an instruction",
         "cannot lift 'X': 'X' switches section inside a conditional, macro or repeated body, which this frontend does not model, so it cannot tell which section the lines after it are in",
+        "cannot lift 'X': 'X', a marker an included file defines, sits where control falls through it inside the function, and its definition may emit bytes there (an \\`.align\\` pad)",
         "cannot lift 'X': ARM-mode function (arm_func_start) — this frontend lifts Thumb only",
         "cannot lift 'X': alignment padding depends on the function's base alignment, which this input does not determine — base X and base X both decode consistently but disagree: base X has X, base X has X",
         "cannot lift 'X': block 'X' interleaves raw data (.X) with instructions",

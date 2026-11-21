@@ -425,6 +425,55 @@ describe('pret dialect: macros an included file defines', () => {
       const inc = `\t.macro THUMB_FUNC_START name\n${PRET.replace('%function', 'function')}\t.endm\n${END}`;
       expect(lift(asm, { 'f.inc': inc })).toContain('return a0 + 1;');
     });
+    // MERGE466 a1*: `.align 2, <fill>` pads where the marker sits, and a marker control falls through
+    // executes it (0x0000 is `movs r0, r0`, setting the flags; 0x40 bytes are `eors r0, r0`)
+    const alignInc = (fill: string, inEnd = false) =>
+      `\t.macro thumb_func_start name:req\n${inEnd ? PRET.replace('\t.align 2, 0\n', '') : PRET.replace('.align 2, 0', `.align 2, ${fill}`)}\t.endm\n` +
+      `\t.macro thumb_func_end name:req\n${inEnd ? `\t.align 2, ${fill}\n` : ''}\t.size \\name, .-\\name\n\t.endm\n`;
+    test('a1f: a marker control falls through inside the function declines, even the real pret definition', () => {
+      const asm =
+        '\t.include "clean.inc"\n\t.text\n\tthumb_func_start f\nf:\n\tcmp r1, #0\n\tthumb_func_start h\nh:\n\tbeq .L1\n' +
+        '\tmov r0, #7\n.L1:\n\tbx lr\n\tthumb_func_end h\n';
+      expect(() => lift(asm, { 'clean.inc': alignInc('0') })).toThrow(/sits where control falls through it/);
+    });
+    test('a1e: so does one whose fill is an instruction', () => {
+      const asm =
+        '\t.include "fill40.inc"\n\t.text\n\tthumb_func_start f\nf:\n\tadd r0, #1\n\tthumb_func_start h\nh:\n\tadd r0, #2\n\tbx lr\n\tthumb_func_end h\n';
+      expect(() => lift(asm, { 'fill40.inc': alignInc('0x40') })).toThrow(/sits where control falls through it/);
+    });
+    test('a1e2: and an end marker in the middle of the body', () => {
+      const asm =
+        '\t.include "endfill40.inc"\n\t.text\n\tthumb_func_start f\nf:\n\tadd r0, #1\n\tthumb_func_end f\n\tadd r0, #2\n\tbx lr\n';
+      expect(() => lift(asm, { 'endfill40.inc': alignInc('0x40', true) })).toThrow(
+        /sits where control falls through it/,
+      );
+    });
+    test('a1h: the same macros written in the file decline', () => {
+      const asm =
+        `${alignInc('0')}\t.text\n\tthumb_func_start f\nf:\n\tcmp r1, #0\n\tthumb_func_start h\nh:\n\tbeq .L1\n` +
+        '\tmov r0, #7\n.L1:\n\tbx lr\n\tthumb_func_end h\n';
+      expect(() => d('f', asm)).toThrow(FrontendUnsupportedError);
+    });
+    test("a marker after the previous function's return is outside control, and the function lifts", () => {
+      const asm =
+        '\t.include "clean.inc"\n\t.text\n\tthumb_func_start g\ng:\n\tbx lr\n\tthumb_func_end g\n' +
+        '\tthumb_func_start f\nf:\n\tadd r0, #1\n\tbx lr\n\tthumb_func_end f\n';
+      expect(lift(asm, { 'clean.inc': alignInc('0') })).toContain('return a0 + 1;');
+    });
+    test('a marker after a return and an explicit pad instruction is not reached (klonoa libgcc shape)', () => {
+      const asm =
+        '\t.include "clean.inc"\n\t.text\n\tthumb_func_start f\nf:\n\tadd r0, #1\n\tmov pc, lr\n\tlsls r0, r0, #0x00\n' +
+        '\tthumb_func_start g\ng:\n\tbx lr\n\tthumb_func_end g\n';
+      expect(lift(asm, { 'clean.inc': alignInc('0') })).toContain('return a0 + 1;');
+    });
+    test("`.arm` in a Thumb marker's definition makes it a macro", () => {
+      const asm = '\t.include "b3.inc"\n\t.text\n\tthumb_func_start f\nf:\n\tadd r0, #1\n\tbx lr\n\tthumb_func_end f\n';
+      expect(() =>
+        lift(asm, {
+          'b3.inc': `\t.macro thumb_func_start name:req\n\t.align 2, 0\n\t.global \\name\n\t.arm\n\t.endm\n${END}`,
+        }),
+      ).toThrow(/defines as more than the pret function bookkeeping/);
+    });
     test('a directive off the bookkeeping list (`.syntax unified`) makes the marker a macro', () => {
       const asm = '\t.include "b2.inc"\n\t.text\n\tthumb_func_start f\nf:\n\tadd r0, #1\n\tbx lr\n\tthumb_func_end f\n';
       expect(() =>
