@@ -367,9 +367,14 @@ function everyStmt(stmts: readonly Stmt[]): Stmt[] {
 type Write = Extract<Stmt, { k: 'store' } | { k: 'assign' }>;
 
 /** A write to memory the tree spells plain: a store through no qualified pointer, or an assignment
- *  to a global's bare name, which the qualifier its declaration may carry is not in the tree for. */
+ *  to a global's bare name, which the qualifier its declaration may carry is not in the tree for.
+ *  An assignment to an object every write of which the IR placed by its declaration
+ *  (`ctx.written`) is not one: the declaration the recompile reads is the one that made the
+ *  machine's store volatile, so the name is spelled qualified where the tree cannot show it. */
 const plainWrite = (s: Stmt, ctx: TreeContext): s is Write =>
-  s.k === 'store' ? !qualifiedAccessChain(s.lval) : s.k === 'assign' && !ctx.locals.has(s.name);
+  s.k === 'store'
+    ? !qualifiedAccessChain(s.lval)
+    : s.k === 'assign' && !ctx.locals.has(s.name) && !ctx.written.has(s.name);
 
 /** A plain write in `stmts` ({@link plainWrite}), or undefined. A guard-fused loop holding one is
  *  credited nothing. The credit is for loops the plain count refused, and such a loop's plain write

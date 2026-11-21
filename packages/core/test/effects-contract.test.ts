@@ -651,6 +651,24 @@ describe('assertEffectsPreserved — a pinned device access', () => {
     expect(() => checkReads(irReading([REG]), [pollWhile([element(5), other])], ['p'])).not.toThrow();
   });
 
+  // A global every write of which the IR placed by its declaration is assigned volatile by the
+  // header the recompile reads, though the tree spells it by its bare name.
+  test('a poll assigning a global its declaration makes volatile is not refused', () => {
+    const fn = irReading([REG]);
+    const ops = fn.blocks[0].ops;
+    const cell = mkValue(T.ptr(T.u(32)));
+    ops.splice(
+      ops.length - 1,
+      0,
+      mkOp('gaddr', { results: [cell], attrs: { sym: 'gWW' } }),
+      mkOp('store', { operands: [cell, mkValue(T.u(32))], attrs: { off: 0, width: 4, declaredVolatile: true } }),
+    );
+    const assign: Stmt = { k: 'assign', name: 'gWW', value: { k: 'const', value: 1 } };
+    expect(() => checkReads(fn, [pollWhile([assign])])).not.toThrow();
+    // another global, whose writes the IR did not place by a declaration, is still refused
+    expect(() => checkReads(fn, [pollWhile([{ ...assign, name: 'gFlag' }])])).toThrow(/writes memory plain/);
+  });
+
   test('a plain store a poll may keep in the loop is not refused', () => {
     // its address moves with a local the loop assigns
     const walk: Stmt[] = [
