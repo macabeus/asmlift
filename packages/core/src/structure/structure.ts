@@ -63,7 +63,6 @@
 // makes that shape out of arms with a common tail, and `copySharedFallTargets` writes the tail back
 // into all of them but one, or into all of them under the `/tail-copies` variation. Regime A keeps
 // the refusal, since its if-recovery already lifts.
-import { guardReadKey } from '../contracts';
 import { globalBaseOf } from '../ir/alias';
 import {
   type DemandedBitsIndex,
@@ -6228,31 +6227,22 @@ function structureRanked(
         if (fused) {
           // THE GUARD'S READS RUN AS THE LOOP'S FIRST TEST. Fusing deletes the guard's test, and the
           // proof above (`guardProven`) makes the `while`'s first evaluation the one that replaces
-          // it. So each pinned read that test made is still made, and the effect contract is told
-          // which (`fusedGuardReads`). The reads named are those the guard's test would render
-          // itself, as the kept form's `gcond` does: in the guard block, reached through values
-          // that render inline (no name, no `gsub` spelling, not materialized), and used by nothing
-          // else, since a second use would render the read there too.
-          const guardReads: string[] = [];
-          const seen = new Set<Value>();
-          const walk = (v: Value): void => {
-            if (seen.has(v) || gsub.has(v) || varName.has(v)) {
-              return;
+          // it, so each pinned read that test made is still made. The effect contract is handed the
+          // test as the kept form below renders it (its `gcond`, before the negation, which reads
+          // nothing new), and keys its reads as it keys every other render (l3/ast.ts `FusedGuard`).
+          // Rendering it here writes nothing the tree keeps but a gap's reason in strict mode, which
+          // is put back, since the fused form never prints the test. A test the kept form could not
+          // render (a stale zero-trip read) is no credit, which leaves the contract to refuse.
+          if (loopStmt.k === 'while') {
+            const gaps = strictGaps.length;
+            try {
+              loopStmt.fusedGuard = { site: fn.blocks.indexOf(b), test: exprWith(gsub)(term.operands[0]) };
+            } catch (err) {
+              if (!(err instanceof StructureError)) {
+                throw err;
+              }
             }
-            seen.add(v);
-            const d = defs.get(v);
-            if (d === undefined || materialize.has(d)) {
-              return;
-            }
-            const key = guardReadKey(defs, d);
-            if (key !== null && opBlock.get(d) === b && (useSitesOf.get(v) ?? []).length === 1) {
-              guardReads.push(key);
-            }
-            d.operands.forEach(walk);
-          };
-          walk(term.operands[0]);
-          if (guardReads.length > 0 && loopStmt.k === 'while') {
-            loopStmt.fusedGuardReads = guardReads;
+            strictGaps.length = gaps;
           }
           out.push(loopStmt);
         } else {

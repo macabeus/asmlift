@@ -341,18 +341,9 @@ export type Stmt =
   | { k: 'store'; lval: Expr; value: Expr }
   | { k: 'exprstmt'; value: Expr } // a side-effecting expression (e.g. a void call)
   | { k: 'if'; cond: Expr; then: Stmt[]; else: Stmt[] }
-  // `fusedGuardReads` is set only by the structurer's guard fusion (the un-rotation of a guarded
-  // self-loop), and is never printed. Fusing deletes the guard's `if`, so the guard's test is
-  // gone from the tree. The loop's first test evaluation runs in its place, so the pinned reads
-  // that test made in the asm are still executed. The field lists those reads, as the effect
-  // contract keys them (contracts.ts `guardReadKey`). The contract credits them to the dropped
-  // rule only, so the rotated loop's two read sites (the guard and the latch) are not counted as
-  // one, and it credits a key no more times than the loop's own condition renders it: the claim is
-  // that the condition's first evaluation is the guard's, so it covers nothing the condition does
-  // not read. A `for` carries the field too, as its condition is tested before the first iteration
-  // the same way; a pass that re-spells a credited loop keeps the field, and the cap re-checks it
-  // against whatever condition the new loop has.
-  | { k: 'while'; cond: Expr; body: Stmt[]; fusedGuardReads?: readonly string[] }
+  // `fusedGuard` is set only by the structurer's guard fusion (the un-rotation of a guarded
+  // self-loop), and is never printed: see {@link FusedGuard}.
+  | { k: 'while'; cond: Expr; body: Stmt[]; fusedGuard?: FusedGuard }
   // A bottom-tested loop `do { body } while (cond);` — the body runs at least once, then the test at
   // the BOTTOM decides re-entry. This is the shape a compiler emits for a loop whose trip count it can
   // prove ≥1 (guard elided) or a source `do-while`. Distinct from `while` (test-at-top, body may run
@@ -374,7 +365,7 @@ export type Stmt =
   // loop, `j = lo << 3; for (i = lo; i <= hi; i++, j = i << 2)` where a source may have written
   // `for (i = lo, j = lo << 3; …)`. The two run the same, as the init clause runs right after the
   // statements ahead of it; only the reading differs.
-  | { k: 'for'; init: Stmt; cond: Expr; inc: Stmt[]; body: Stmt[]; fusedGuardReads?: readonly string[] }
+  | { k: 'for'; init: Stmt; cond: Expr; inc: Stmt[]; body: Stmt[]; fusedGuard?: FusedGuard }
   // `break;` / `continue;` — a loop early-exit / next-iteration jump. Emitted ONLY when the target is
   // the innermost enclosing loop (bare C break/continue cannot express a multi-level exit; a deeper
   // target declines). SGI/IDO Pascal has neither, so its backend loud-fails them (like `field`/`cast`).
@@ -456,6 +447,27 @@ export type Stmt =
 
 /** One arm of a `switch`. `values` stacks multiple `case K:` labels onto one body (`case 1: case 2:`).
  *  `fallsThrough` true ⇒ the body flows into the NEXT arm (no `break;`); see the non-neutrality note. */
+/** The guard a top-tested loop's condition stands in for, where the structurer's guard fusion
+ *  deleted it. agbcc rotates a test-at-top loop: the exit test is duplicated into a guard ahead of
+ *  the loop and a latch at its foot, so the asm tests at both. The fusion turns the pair back into
+ *  one `while`, whose condition's first evaluation is the guard's test, so each pinned read that
+ *  test made is still made, though the tree renders it once. The effect contract counts the
+ *  guard's reads to its dropped rule from `test` (contracts.ts `fusedGuardCredit`), and counts no
+ *  more of them than the loop's own condition renders at each address: the claim is that the
+ *  condition's first evaluation is the guard's, so it covers nothing the condition does not read.
+ *
+ *  `test` is the guard's test as the kept form would render it (the `if` around a `do-while`), so
+ *  the contract keys its reads as it keys every other render. `site` names the guard: the index of
+ *  its block in the function. The asm makes that guard's reads once however many times the tree
+ *  holds the loop, so where a copied tail holds it twice the contract credits the guard once for
+ *  them all. A `for` carries the field too, as its condition is tested before the first iteration
+ *  the same way; a pass that re-spells a credited loop keeps the field, and the contract re-checks
+ *  it against whatever condition the new loop has. */
+export interface FusedGuard {
+  readonly site: number;
+  readonly test: Expr;
+}
+
 export interface SwitchCase {
   values: number[];
   body: Stmt[];
