@@ -343,12 +343,15 @@ export type Stmt =
   | { k: 'if'; cond: Expr; then: Stmt[]; else: Stmt[] }
   // `fusedGuardReads` is set only by the structurer's guard fusion (the un-rotation of a guarded
   // self-loop), and is never printed. Fusing deletes the guard's `if`, so the guard's test is
-  // gone from the tree. The `while`'s first test evaluation runs in its place, so the pinned reads
+  // gone from the tree. The loop's first test evaluation runs in its place, so the pinned reads
   // that test made in the asm are still executed. The field lists those reads, as the effect
   // contract keys them (contracts.ts `guardReadKey`). The contract credits them to the dropped
   // rule only, so the rotated loop's two read sites (the guard and the latch) are not counted as
-  // one. A pass that rebuilds the loop without the field loses the credit, and the contract then
-  // refuses the tree. That is the safe direction.
+  // one, and it credits a key no more times than the loop's own condition renders it: the claim is
+  // that the condition's first evaluation is the guard's, so it covers nothing the condition does
+  // not read. A `for` carries the field too, as its condition is tested before the first iteration
+  // the same way; a pass that re-spells a credited loop keeps the field, and the cap re-checks it
+  // against whatever condition the new loop has.
   | { k: 'while'; cond: Expr; body: Stmt[]; fusedGuardReads?: readonly string[] }
   // A bottom-tested loop `do { body } while (cond);` — the body runs at least once, then the test at
   // the BOTTOM decides re-entry. This is the shape a compiler emits for a loop whose trip count it can
@@ -371,7 +374,7 @@ export type Stmt =
   // loop, `j = lo << 3; for (i = lo; i <= hi; i++, j = i << 2)` where a source may have written
   // `for (i = lo, j = lo << 3; …)`. The two run the same, as the init clause runs right after the
   // statements ahead of it; only the reading differs.
-  | { k: 'for'; init: Stmt; cond: Expr; inc: Stmt[]; body: Stmt[] }
+  | { k: 'for'; init: Stmt; cond: Expr; inc: Stmt[]; body: Stmt[]; fusedGuardReads?: readonly string[] }
   // `break;` / `continue;` — a loop early-exit / next-iteration jump. Emitted ONLY when the target is
   // the innermost enclosing loop (bare C break/continue cannot express a multi-level exit; a deeper
   // target declines). SGI/IDO Pascal has neither, so its backend loud-fails them (like `field`/`cast`).

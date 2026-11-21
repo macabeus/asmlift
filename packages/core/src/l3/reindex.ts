@@ -953,6 +953,7 @@ export function reindexWalks(
                 },
               ],
               body,
+              ...(s.fusedGuardReads === undefined ? {} : { fusedGuardReads: s.fusedGuardReads }),
             });
             fired++;
             keptWalks?.add(walk.base);
@@ -990,6 +991,7 @@ export function reindexWalks(
                   value: { k: 'bin', op: '+', l: { k: 'var', name: iv }, r: { k: 'const', value: 1 } },
                 },
               ],
+              ...(s.fusedGuardReads === undefined ? {} : { fusedGuardReads: s.fusedGuardReads }),
             });
             fired++;
             keptWalks?.add(walk.base);
