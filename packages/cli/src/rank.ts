@@ -43,6 +43,8 @@ export interface RankOptions {
   ownContextProto?: FnProto;
   /** same contract as DecompileOptions.calleeBodies */
   calleeBodies?: CalleeBodies;
+  /** same contract as DecompileOptions.asmIncludes */
+  asmIncludes?: ReadonlyMap<string, string>;
   /** a project's own toolchain — overrides the compiler registry */
   compile?: CandidateCompiler;
   /** Liveness only, never a measurement: called once per candidate as it is scored, carrying the
@@ -87,6 +89,7 @@ export const enumerateRanked = (name: string, asm: string, target: TargetDescrip
     ...(opts.contextGlobals ? { contextGlobals: opts.contextGlobals } : {}),
     ...(opts.ownContextProto ? { ownContextProto: opts.ownContextProto } : {}),
     ...(opts.calleeBodies ? { calleeBodies: opts.calleeBodies } : {}),
+    ...(opts.asmIncludes ? { asmIncludes: opts.asmIncludes } : {}),
     ...(opts.onEnumerationError ? { onEnumerationError: opts.onEnumerationError } : {}),
     ...perSiteSenseProbe(),
   });

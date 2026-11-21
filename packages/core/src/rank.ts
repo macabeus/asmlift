@@ -194,6 +194,8 @@ export interface EnumerateOptions {
   ownContextProto?: FnProto;
   /** same contract as DecompileOptions.calleeBodies */
   calleeBodies?: CalleeBodies;
+  /** same contract as DecompileOptions.asmIncludes */
+  asmIncludes?: ReadonlyMap<string, string>;
   /** Called when a respell variation THROWS or fails a boundary contract, so the failure is visible
    *  instead of the candidate silently not existing. Enumeration continues either way — the default
    *  candidate is unaffected — but a variation that never fires because it always throws is a defect,
@@ -784,7 +786,7 @@ export function enumerateCandidates(
     opts.asmData,
     opts.symbols,
     opts.contextGlobals,
-    { calleeBodies: opts.calleeBodies },
+    { calleeBodies: opts.calleeBodies, asmIncludes: opts.asmIncludes },
     ownContext.ownContextProto,
   );
   // The ARRAY SHAPES the input assembly evidences (raise/globalshape.ts), for the DECLARATION
@@ -857,7 +859,7 @@ export function enumerateCandidates(
       opts.asmData,
       symbols,
       opts.contextGlobals,
-      { calleeBodies: opts.calleeBodies },
+      { calleeBodies: opts.calleeBodies, asmIncludes: opts.asmIncludes },
       ownContext.ownContextProto,
     );
     applyIdiomPatterns(p, target, opts.patterns);
@@ -2198,6 +2200,7 @@ export function enumerateCandidates(
             tailSlot = true;
           },
           calleeBodies: opts.calleeBodies,
+          asmIncludes: opts.asmIncludes,
         },
         ownContext.ownContextProto,
       );
@@ -2342,7 +2345,11 @@ export function enumerateCandidates(
                   opts.asmData,
                   symbolSetting.symbols,
                   opts.contextGlobals,
-                  { keepTailSlots: liftSetting.keepTailSlots, calleeBodies: opts.calleeBodies },
+                  {
+                    keepTailSlots: liftSetting.keepTailSlots,
+                    calleeBodies: opts.calleeBodies,
+                    asmIncludes: opts.asmIncludes,
+                  },
                   ownContext.ownContextProto,
                 );
           if (liftSetting.narrow && !narrowToSetupArgs(fn)) {

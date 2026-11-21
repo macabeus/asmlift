@@ -662,7 +662,7 @@ describe('an addressed line that calls a macro the file defines declines', () =>
     ],
   ])('%s', (_probe, asm, call) => {
     expect(() => decompile('f', asm, MIPS_IDO)).toThrow(
-      new RegExp(`calls '${call}', a name a \`\\.macro\` in this file defines`),
+      new RegExp(`calls '${call}', a name a \`\\.macro\` in this file or a file it includes defines`),
     );
   });
   test('a macro name is read without case, and inside a body that never runs', () => {
@@ -752,12 +752,12 @@ describe('an addressed line that calls a macro the file defines declines', () =>
       '    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n';
     expect(decompile('f', `.set noreorder\n${fn}`.replace(/\n/g, '\r\n'), MIPS_IDO).source).toContain('a0 + 1 + 4');
   });
-  // KNOWN GAP (traps/20261120-071902Z-MERGE462-addressed-line-can-be-a-gas-macro-call.md, probe d24): a
-  // macro an `.include` defines is not seen, so d17 with its `.macro nop` moved into `m2.inc` still lifts
-  // a0 + 1 + 4 where gas gives a0 + 1. Declining every addressed line after an `.include` would cost
-  // the whole-file Splat sources that open with `.include "macro.inc"`; whether to read included files
-  // is the user's call. This pins today's behaviour so a change to it is seen.
-  test('d24: a macro from an `.include` is not seen (known gap)', () => {
+  // KNOWN GAP (probe d24): a macro an `.include` NOBODY HANDED IN defines is not seen, so d17 with its
+  // `.macro nop` moved into `m2.inc` still lifts a0 + 1 + 4 where gas gives a0 + 1. Declining every
+  // addressed line after an `.include` would cost the whole-file Splat sources that open with
+  // `.include "macro.inc"`, which gas finds only through the build's `-I`. Handed in, the file is read
+  // (`asmIncludes` below). This pins the reading without a map so a change to it is seen.
+  test('d24: a macro from an `.include` with no map is not seen (known gap)', () => {
     expect(
       decompile(
         'f',
@@ -765,5 +765,121 @@ describe('an addressed line that calls a macro the file defines declines', () =>
         MIPS_IDO,
       ).source,
     ).toContain('a0 + 1 + 4');
+  });
+});
+
+// INCLUDED TEXTS (`LiftOptions.asmIncludes`): gas reads an `.include "x"` as the text of `x` on that
+// line. Probes in the d24 harness (mips-linux-gnu-as -march=vr4300, no -I, run from the file's
+// directory): the function is `nop; addiu v0,a0,1; jr ra; addiu v0,v0,4`.
+describe('a Splat `.include` handed in is read as the text gas reads', () => {
+  const fn =
+    'glabel f\n    /* 0FC 800000FC 00000000 */  nop\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n' +
+    '    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n';
+  const nopMacro = '.macro nop\n.set reorder\n.word 0\n.endm\n';
+  const glabelMacros = '.macro glabel label\n    .global \\label\n    \\label:\n.endm\n.macro endlabel label\n.endm\n';
+  const lift = (asm: string, includes: Record<string, string>) =>
+    decompile('f', asm, MIPS_IDO, { asmIncludes: new Map(Object.entries(includes)) }).source;
+  const refuse = (asm: string, includes: Record<string, string>) => () => lift(asm, includes);
+
+  test('d24: the included `.macro nop` is seen, and the addressed `nop` declines (gas a0 + 1)', () => {
+    expect(refuse(`.include "m2.inc"\n.set noreorder\n.text\n${fn}`, { 'm2.inc': nopMacro })).toThrow(
+      /calls 'nop', a name a `\.macro` in this file or a file it includes defines/,
+    );
+  });
+  test('n01: an include that defines only glabel-style macros lifts as it does with no map (gas a0 + 1 + 4)', () => {
+    const asm = `.include "macro.inc"\n.set noreorder\n.text\n${fn}`;
+    expect(lift(asm, { 'macro.inc': glabelMacros })).toContain('a0 + 1 + 4');
+    expect(decompile('f', asm, MIPS_IDO).source).toContain('a0 + 1 + 4');
+  });
+  test('n02: with no `.set noreorder` after it, the macro bodies leave the mode unknown, as the `.include` did', () => {
+    expect(refuse(`.include "macro.inc"\n.text\n${fn}`, { 'macro.inc': glabelMacros })).toThrow(
+      /may set the reorder mode/,
+    );
+  });
+  test('n04: a nested include is read too', () => {
+    expect(
+      refuse(`.include "nest.inc"\n.set noreorder\n.text\n${fn}`, {
+        'nest.inc': '.include "nopmac.inc"\n',
+        'nopmac.inc': nopMacro,
+      }),
+    ).toThrow(/calls 'nop'/);
+  });
+  test('n05: an include of itself declines (gas repeats it until it fails)', () => {
+    expect(refuse(`.include "cyc.inc"\n.set noreorder\n.text\n${fn}`, { 'cyc.inc': '.include "cyc.inc"\n' })).toThrow(
+      /includes itself/,
+    );
+  });
+  test('n06: an operand the map does not hold keeps the reading it has with no map', () => {
+    const asm = `.include "missing.inc"\n.set noreorder\n.text\n${fn}`;
+    expect(lift(asm, { 'other.inc': nopMacro })).toBe(decompile('f', asm, MIPS_IDO).source);
+    expect(refuse(`.set noreorder\n.include "missing.inc"\n.text\n${fn}`, { 'other.inc': nopMacro })).toThrow(
+      /may set the reorder mode/,
+    );
+  });
+  test('n09: an include that assembles an instruction inside the function declines', () => {
+    const asm =
+      '.set noreorder\n.text\nglabel f\n.include "ins.inc"\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n' +
+      '    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n';
+    expect(refuse(asm, { 'ins.inc': '    /* 0F8 800000F8 24420008 */  addiu $v0, $v0, 8\n' })).toThrow(
+      /the included file "ins.inc" assembles .* inside the function/,
+    );
+    expect(refuse(asm, { 'ins.inc': '.word 0x24420008\n' })).toThrow(/inside the function/);
+  });
+  test('n09b: a marker-less fragment is all function, so any included statement in it declines', () => {
+    expect(
+      refuse(
+        '.set noreorder\n.include "ins.inc"\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 00000000 */   nop\n',
+        {
+          'ins.inc': '.set noat\n',
+        },
+      ),
+    ).toThrow(/inside the function/);
+  });
+  test('n10: data an include emits before the function is outside it, and the function lifts', () => {
+    const asm = `.include "data.inc"\n.set noreorder\n.text\n${fn}`;
+    expect(lift(asm, { 'data.inc': '.data\n.word 0x12345678\n' })).toContain('a0 + 1 + 4');
+    // as with a `.word` the file itself holds there, data left in the current section is read as
+    // another section, and the function after it declines
+    expect(refuse(`.set noreorder\n.text\n.include "data.inc"\n${fn}`, { 'data.inc': '.word 0x12345678\n' })).toThrow(
+      /another section/,
+    );
+  });
+  test("n11: an included `.set reorder` after the file's `.set noreorder` is read (gas fills the slot)", () => {
+    expect(refuse(`.set noreorder\n.include "reord.inc"\n.text\n${fn}`, { 'reord.inc': '.set reorder\n' })).toThrow(
+      /assembled under `\.set reorder`/,
+    );
+  });
+  test('n11b: an included literal `.set noreorder` is read as one', () => {
+    expect(lift(`.include "nr.inc"\n.text\n${fn}`, { 'nr.inc': '.set noreorder\n' })).toContain('a0 + 1 + 4');
+  });
+  test('n12: an include that leaves another section current is read so', () => {
+    expect(refuse(`.set noreorder\n.text\n.include "sect.inc"\n${fn}`, { 'sect.inc': '.section .data\n' })).toThrow(
+      /another section/,
+    );
+  });
+  test('n13: an included line with a control byte declines, as one in the file does', () => {
+    expect(
+      refuse(`.include "ctl.inc"\n.set noreorder\n.text\n${fn}`, { 'ctl.inc': '.set gp=64\n\x01.set reorder\n' }),
+    ).toThrow(/control byte/);
+  });
+  test('n16: a resolved include inside a conditional body declines', () => {
+    expect(
+      refuse(`.if 0\n.include "nopmac.inc"\n.endif\n.set noreorder\n.text\n${fn}`, { 'nopmac.inc': nopMacro }),
+    ).toThrow(/inside a conditional, macro or repeated body/);
+  });
+  test('n17: a resolved include sharing its line with another statement declines', () => {
+    expect(refuse(`.include "macro.inc"; .set noreorder\n.text\n${fn}`, { 'macro.inc': glabelMacros })).toThrow(
+      /shares its line/,
+    );
+  });
+  test("n18: an include after the function's `endlabel` is not the function", () => {
+    expect(lift(`.set noreorder\n.text\n${fn}.include "nopmac.inc"\n`, { 'nopmac.inc': '.set noat\n' })).toContain(
+      'a0 + 1 + 4',
+    );
+  });
+  test('a function whose `glabel` an included file holds declines', () => {
+    const g =
+      'glabel g\n    /* 200 80000200 03E00008 */  jr         $ra\n    /* 204 80000204 00000000 */   nop\nendlabel g\n';
+    expect(refuse(`.set noreorder\n.text\n.include "f.inc"\n${g}`, { 'f.inc': fn })).toThrow(/inside the function/);
   });
 });

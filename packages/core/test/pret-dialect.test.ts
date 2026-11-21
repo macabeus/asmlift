@@ -344,3 +344,36 @@ describe('audit regressions: pool symbols, register ranges, layout, crashes', ()
     expect(() => d('mc', asm)).toThrow(FrontendUnsupportedError);
   });
 });
+
+// A macro an `.include` defines under an instruction's name (`.macro nop` / `bx lr`) is expanded by gas
+// before it reads the instruction (arm-none-eabi-as -mthumb: `movs r0, #1; nop; movs r0, #2; bx lr`
+// assembles `movs r0, #1; bx lr; …`, so f returns 1). Handed the included text
+// (`LiftOptions.asmIncludes`), the macro scan sees it and the `nop` declines; with no map, the reading
+// is main's (`return 2`, the known gap). The pret function markers an included `asm/macros.inc`
+// defines stay bookkeeping.
+describe('pret dialect: macros an included file defines', () => {
+  const T1 =
+    '\t.include "m.inc"\n\t.text\n\t.code 16\n\t.align 2\n\t.global f\n\t.thumb_func\nf:\n\tmov r0, #1\n\tnop\n\tmov r0, #2\n\tbx lr\n';
+  const lift = (asm: string, includes: Record<string, string>, fn = 'f') =>
+    decompile(fn, asm, ARMV4T_AGBCC, { asmIncludes: new Map(Object.entries(includes)) }).source;
+  test('t1: an included `.macro nop` makes the `nop` decline', () => {
+    expect(() => lift(T1, { 'm.inc': '.macro nop\n\tbx lr\n.endm\n' })).toThrow(FrontendUnsupportedError);
+  });
+  test('t1 with no map keeps the reading it has today (known gap)', () => {
+    expect(d('f', T1).source).toContain('return 2;');
+  });
+  test('a nested include is read, and a cycle declines', () => {
+    expect(() => lift(T1, { 'm.inc': '.include "n.inc"\n', 'n.inc': '.macro nop\n\tbx lr\n.endm\n' })).toThrow(
+      FrontendUnsupportedError,
+    );
+    expect(() => lift(T1, { 'm.inc': '.include "m.inc"\n' })).toThrow(/repeats a file/);
+  });
+  test('an included file that defines only other names, or the pret markers, lifts as with no map', () => {
+    expect(lift(T1, { 'm.inc': '.macro other\n.endm\n' })).toContain('return 2;');
+    const macros =
+      '\t.macro thumb_func_start name\n\t.align 2, 0\n\t.global \\name\n\t.thumb\n\t.thumb_func\n\t.type \\name, %function\n\t.endm\n\t.macro thumb_func_end name\n\t.size \\name, .-\\name\n\t.endm\n';
+    expect(lift(`\t.include "asm/macros.inc"\n${CLAMP0}`, { 'asm/macros.inc': macros }, 'clamp0')).toBe(
+      d('clamp0', CLAMP0).source,
+    );
+  });
+});

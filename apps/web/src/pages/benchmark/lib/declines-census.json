@@ -1,11 +1,11 @@
 {
   "generatedBy": "pnpm regen:declines-census (scripts/regen-decline-census.ts) — do not hand-edit",
-  "distinctMessages": 333,
-  "residueTotal": 137,
+  "distinctMessages": 338,
+  "residueTotal": 142,
   "residueByFile": [
     {
       "file": "frontend/thumb.ts",
-      "count": 42,
+      "count": 45,
       "messages": [
         "cannot lift 'X': 'X X' branches to 'X', which this asm defines as a data label — not modelled",
         "cannot lift 'X': 'X X' calls through a register that holds no function's address — not modelled",
@@ -16,6 +16,8 @@
         "cannot lift 'X': 'X' emits fill into the code stream and fillits fill bytes are not a pad encoding this frontend models — they are real instructionsmakes item sizes unknowable",
         "cannot lift 'X': 'X' follows a function-start marker and is a statement this frontend does not read (X), so where that function starts is unknown",
         "cannot lift 'X': 'X' in the code stream spells an instruction by its encoding, which this frontend does not decode (skipping it would silently delete its effect)",
+        "cannot lift 'X': 'X' in the included file X defines a macro whose name this frontend does not read",
+        "cannot lift 'X': 'X' in the included file X is X, so this frontend cannot tell which macros it defines",
         "cannot lift 'X': 'X' inside the function changes which lines are assembled, and this frontend reads every line as written",
         "cannot lift 'X': 'X' is X, so this frontend cannot tell which lines gas assembles",
         "cannot lift 'X': 'X' is a directive this frontend does not read, where control can reach its bytes — it may emit an instruction (skipping it would silently delete its effect)",
@@ -48,7 +50,36 @@
         "cannot lift 'X': raw-encoded input needs byte-accurate layout, but item X of the function is assembled into another section (X), so it is not where the layout would put it",
         "cannot lift 'X': reachable code in block 'X' falls through into data bytes",
         "cannot lift 'X': register 'X' in 'X X' is spelled in upper case — this frontend identifies registers by spelling and models the lower-case forms only",
-        "cannot lift 'X': stm with the base register in its own list, not as the lowest entry — the value stored for that register is UNPREDICTABLE and differs between ARMv4 (new base) and ARMv5 (old base)"
+        "cannot lift 'X': stm with the base register in its own list, not as the lowest entry — the value stored for that register is UNPREDICTABLE and differs between ARMv4 (new base) and ARMv5 (old base)",
+        "cannot lift 'X': the include chain X repeats a file or nests deeper than this frontend reads"
+      ]
+    },
+    {
+      "file": "frontend/splat.ts",
+      "count": 22,
+      "messages": [
+        "cannot lift 'X': 'X' calls 'X', a name a \\`.macro\\` in this file or a file it includes defines, and gas expands the macro before it reads an instruction of that name, which this reader does not do",
+        "cannot lift 'X': 'X' inside the function can emit fill between instructions, which this reader does not model",
+        "cannot lift 'X': 'X' inside the function changes which lines are assembled, and this reader reads every line as written",
+        "cannot lift 'X': 'X' is assembled into another section than the function's \\`.text\\`",
+        "cannot lift 'X': 'X' is assembled under \\`.set reorder\\`, where gas fills delay slots itself",
+        "cannot lift 'X': 'X' leaves a comment, string or character constant open at the end of its line, so this reader cannot tell which statements gas assembles",
+        "cannot lift 'X': 'X' may set the reorder mode (it is not a literal top-level \\`.set (no)reorder\\` nor a statement known to leave the mode alone), and no \\`.set noreorder\\` follows it, so this reader cannot tell whether gas fills the delay slots itself",
+        "cannot lift 'X': 'X' saves or restores assembler options this reader does not track",
+        "cannot lift 'X': 'X' switches section in a way this reader does not model",
+        "cannot lift 'X': X holds a control byte, which gas reads as a statement end where this reader does not, so this reader cannot tell which statements gas assembles",
+        "cannot lift 'X': X holds a non-ASCII character outside a comment or string, which gas reads as part of a name, so this reader cannot tell which statements gas assembles",
+        "cannot lift 'X': \\`.include \"X\"\\` X",
+        "cannot lift 'X': branch/jump target 'X' is not a local label in this function (tail call / cross-function branch not modelled)",
+        "cannot lift 'X': data directive 'X' in the code stream — skipping it would silently delete its effect",
+        "cannot lift 'X': its \\`glabel\\` sits inside a conditional, macro or repeated body, which this reader does not model",
+        "cannot lift 'X': operand 'X' has a leading-zero magnitude ('X'), which is octal to the assembler and a radix this reader does not model",
+        "cannot lift 'X': relocation operand 'X' — this reader resolves a '%hi'/'%lo' half only against a symbol ('SYM' or 'SYM ± <integer>'), and will not treat one it cannot resolve as arithmetic",
+        "cannot lift 'X': the included file X assembles 'X' inside the function, which is not the function's own text",
+        "cannot lift 'X': two relocation operands on one instruction ('X' at 0xX): 'X' and 'X'",
+        "cannot lift 'X': unparsable constant expression 'X'",
+        "cannot lift 'X': unrecognised line in the Splat disassembly: 'X'",
+        "symbol 'X' not found in the Splat disassembly (functions present: X)"
       ]
     },
     {
@@ -76,32 +107,6 @@
         "cannot structure 'X': the kept guard's condition reads a name the loop initialisation overwrites",
         "cannot structure 'X': the merge copy into 'X' was suppressed from its edge for a def-site anchor that no rendered position emitted",
         "cannot structure 'X': unsupported terminator 'X' in block #X (only ret / br / cond_br / switch_br are structured today)"
-      ]
-    },
-    {
-      "file": "frontend/splat.ts",
-      "count": 20,
-      "messages": [
-        "cannot lift 'X': 'X' calls 'X', a name a \\`.macro\\` in this file defines, and gas expands the macro before it reads an instruction of that name, which this reader does not do",
-        "cannot lift 'X': 'X' inside the function can emit fill between instructions, which this reader does not model",
-        "cannot lift 'X': 'X' inside the function changes which lines are assembled, and this reader reads every line as written",
-        "cannot lift 'X': 'X' is assembled into another section than the function's \\`.text\\`",
-        "cannot lift 'X': 'X' is assembled under \\`.set reorder\\`, where gas fills delay slots itself",
-        "cannot lift 'X': 'X' leaves a comment, string or character constant open at the end of its line, so this reader cannot tell which statements gas assembles",
-        "cannot lift 'X': 'X' may set the reorder mode (it is not a literal top-level \\`.set (no)reorder\\` nor a statement known to leave the mode alone), and no \\`.set noreorder\\` follows it, so this reader cannot tell whether gas fills the delay slots itself",
-        "cannot lift 'X': 'X' saves or restores assembler options this reader does not track",
-        "cannot lift 'X': 'X' switches section in a way this reader does not model",
-        "cannot lift 'X': X holds a control byte, which gas reads as a statement end where this reader does not, so this reader cannot tell which statements gas assembles",
-        "cannot lift 'X': X holds a non-ASCII character outside a comment or string, which gas reads as part of a name, so this reader cannot tell which statements gas assembles",
-        "cannot lift 'X': branch/jump target 'X' is not a local label in this function (tail call / cross-function branch not modelled)",
-        "cannot lift 'X': data directive 'X' in the code stream — skipping it would silently delete its effect",
-        "cannot lift 'X': its \\`glabel\\` sits inside a conditional, macro or repeated body, which this reader does not model",
-        "cannot lift 'X': operand 'X' has a leading-zero magnitude ('X'), which is octal to the assembler and a radix this reader does not model",
-        "cannot lift 'X': relocation operand 'X' — this reader resolves a '%hi'/'%lo' half only against a symbol ('SYM' or 'SYM ± <integer>'), and will not treat one it cannot resolve as arithmetic",
-        "cannot lift 'X': two relocation operands on one instruction ('X' at 0xX): 'X' and 'X'",
-        "cannot lift 'X': unparsable constant expression 'X'",
-        "cannot lift 'X': unrecognised line in the Splat disassembly: 'X'",
-        "symbol 'X' not found in the Splat disassembly (functions present: X)"
       ]
     },
     {

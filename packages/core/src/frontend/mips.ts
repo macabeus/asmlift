@@ -1461,7 +1461,7 @@ function liftOnce(
   }
   // ONE function only — an absent symbol declines loud (either dialect's slicer enforces this).
   const sliced = splat ? asm : sliceSymbol(asm, name);
-  const instrs = splat ? parseSplatMips(asm, name) : parseDisasm(sliced);
+  const instrs = splat ? parseSplatMips(asm, name, options.asmIncludes) : parseDisasm(sliced);
   if (instrs.length === 0) {
     throw new FrontendUnsupportedError(`cannot lift '${name}': no instructions found in the input text`);
   }

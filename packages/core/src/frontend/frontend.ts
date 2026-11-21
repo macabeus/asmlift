@@ -65,6 +65,12 @@ export function ownDeclarationOf(
  *  declaration context's own entry: its bound (`contextOwnWords`) and the entry itself
  *  (`contextOwnProto`). */
 export interface LiftOptions {
+  /** The text of each file the input `.include`s, keyed by the operand exactly as spelled
+   *  (`.include "macro.inc"` → `macro.inc`), nested includes keyed the same way: what gas reads in
+   *  the place of each `.include` line. A driver hands in only files it found as gas finds them
+   *  (packages/cli/src/asm-includes.ts). Read by the Splat reader (frontend/splat.ts) and the Thumb
+   *  macro scan (frontend/thumb.ts `decode`); an operand it does not hold is read as before. */
+  asmIncludes?: ReadonlyMap<string, string>;
   /** The argument words the declaration context's own entry for the function fills, where no
    *  stated entry does (pipeline.ts `liftWithinContextBound`, which raises it past a register the
    *  lift reads, and lifts without it where it refuses), so a frontend given it reads it in place

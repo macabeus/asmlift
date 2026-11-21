@@ -123,6 +123,9 @@ export interface DecompileOptions {
    *  where the input holds no label of that name (frontend/callee-body.ts). Absent ⇒ only the
    *  input's own bodies answer. */
   calleeBodies?: CalleeBodies;
+  /** OPTIONAL text of each file the input `.include`s, by operand as spelled
+   *  (`LiftOptions.asmIncludes`). Absent ⇒ every `.include` is read as one nobody resolved. */
+  asmIncludes?: ReadonlyMap<string, string>;
   /** gap policy — see `OnGap`. Default "strict". */
   onGap?: OnGap;
   /** force the return-tail copies (`StructureOptions.copyReturnTails`, rank.ts's `/ret-copy`).
@@ -242,7 +245,7 @@ function runTower(
     opts.asmData,
     opts.symbols,
     opts.contextGlobals,
-    { calleeBodies: opts.calleeBodies, bodiesAsked, stacksSized },
+    { calleeBodies: opts.calleeBodies, asmIncludes: opts.asmIncludes, bodiesAsked, stacksSized },
     own.ownContextProto,
     ownArityNotes,
   );
@@ -367,7 +370,7 @@ export function calleeBodyNotesOf(
   target: TargetDescription,
   opts: Pick<
     DecompileOptions,
-    'prototypes' | 'asmData' | 'symbols' | 'contextGlobals' | 'ownContextProto' | 'calleeBodies'
+    'prototypes' | 'asmData' | 'symbols' | 'contextGlobals' | 'ownContextProto' | 'calleeBodies' | 'asmIncludes'
   >,
 ): Pick<DecompileResult, 'calleeBodiesAsked' | 'calleeStackSized'> {
   const own = splitOwnContext(opts.prototypes, name, opts.ownContextProto);
@@ -382,7 +385,7 @@ export function calleeBodyNotesOf(
       opts.asmData,
       opts.symbols,
       opts.contextGlobals,
-      { calleeBodies: opts.calleeBodies, bodiesAsked: asked, stacksSized },
+      { calleeBodies: opts.calleeBodies, asmIncludes: opts.asmIncludes, bodiesAsked: asked, stacksSized },
       own.ownContextProto,
     );
   } catch {
@@ -403,7 +406,7 @@ export function ownArityNotesOf(
   target: TargetDescription,
   opts: Pick<
     DecompileOptions,
-    'prototypes' | 'asmData' | 'symbols' | 'contextGlobals' | 'ownContextProto' | 'calleeBodies'
+    'prototypes' | 'asmData' | 'symbols' | 'contextGlobals' | 'ownContextProto' | 'calleeBodies' | 'asmIncludes'
   >,
 ): string[] {
   const own = splitOwnContext(opts.prototypes, name, opts.ownContextProto);
@@ -420,7 +423,7 @@ export function ownArityNotesOf(
       opts.asmData,
       opts.symbols,
       opts.contextGlobals,
-      { calleeBodies: opts.calleeBodies },
+      { calleeBodies: opts.calleeBodies, asmIncludes: opts.asmIncludes },
       own.ownContextProto,
       notes,
     );
@@ -498,7 +501,19 @@ export function liftStamped(
   // no bodies, and, off the same lift, what each one loads of its incoming stack words
   const read =
     liftOptions.calleeBodyBound === undefined || liftOptions.calleeStackWords === undefined
-      ? bodyReadsIn(name, asm, target, prototypes, ownContext, table, asmData, symbols, contextGlobals, calleeBodies)
+      ? bodyReadsIn(
+          name,
+          asm,
+          target,
+          prototypes,
+          ownContext,
+          table,
+          asmData,
+          symbols,
+          contextGlobals,
+          calleeBodies,
+          liftOptions.asmIncludes,
+        )
       : undefined;
   const bound = liftOptions.calleeBodyBound ?? read!.bound;
   const calleeBodyBound: CalleeBodyBound =
@@ -582,8 +597,9 @@ function bodyReadsIn(
   symbols: SymbolMap | undefined,
   contextGlobals: ContextGlobals | undefined,
   calleeBodies: CalleeBodies | undefined,
+  asmIncludes: ReadonlyMap<string, string> | undefined,
 ): BodyReaders {
-  const key = [name, asm, target, ownContext, asmData, symbols, contextGlobals, calleeBodies];
+  const key = [name, asm, target, ownContext, asmData, symbols, contextGlobals, calleeBodies, asmIncludes];
   const read = readsRead.get(prototypes) ?? [];
   readsRead.set(prototypes, read);
   const hit = read.find((r) => r.key.every((k, i) => k === key[i]));
@@ -604,7 +620,12 @@ function bodyReadsIn(
         text === asm ? asmData : relocs === undefined ? undefined : relocsOnly(relocs, target),
         symbols,
         contextGlobals,
-        { calleeBodyBound: () => undefined, calleeStackWords: () => undefined, entryReadCalls },
+        {
+          calleeBodyBound: () => undefined,
+          calleeStackWords: () => undefined,
+          entryReadCalls,
+          ...(text === asm ? { asmIncludes } : {}),
+        },
       ),
     calleeBodies,
     frontendFor(target),
