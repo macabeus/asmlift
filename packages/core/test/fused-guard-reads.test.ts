@@ -76,6 +76,20 @@
 //       while (d[2] & 0x80000000);
 //       d[0] = (u32)gS; g();
 //   }
+//
+// p15, p17 and p18 are the DMA template (a frame address armed through 0x40000d4, then `d[2];`) followed
+// by a wait whose body touches memory, compiled the same way, with `vu16` the `volatile u16`:
+//
+//   p15: while (d[2] & 0x80000000) { d[1] = 1; ((vu16 *)d)[1] = 2; }
+//   p17: while (d[2] & 0x80000000) { ((vu16 *)d)[5] = n; }
+//   p18: while (d[2] & 0x80000000) { ((vu8 *)d)[11] = n; }
+//
+// p15's guard fuses, and the asm stores the u16 every time round. The device pin leaves that store
+// plain (device-pins.ts, the per-object policy), and plain, agbcc keeps the cell in a register for
+// the loop and stores it once after (loop.c `load_mems`): the u16 store aliases nothing the loop
+// reads, the s32 count. So the fused loop is credited nothing, and the contract refuses the plain
+// store besides. p17 is a jump-to-test loop, which fuses nothing: the same plain store is refused
+// there. p18's byte store may alias the count, which keeps it in the loop, so p18 lifts.
 import { describe, expect, test } from 'vitest';
 
 import type { Stmt } from '../src/l3/ast';
@@ -344,6 +358,129 @@ p14:
 	.word	gS
 `;
 
+const P15 = `
+p15:
+	push	{r4, lr}
+	add	sp, sp, #-0x4
+	ldr	r1, .L7
+	ldrh	r2, [r1, #0x6]
+	mov	r1, sp
+	strh	r2, [r1]
+	ldr	r2, .L7+0x4
+	str	r1, [r2]
+	ldr	r1, .L7+0x8
+	str	r1, [r2, #0x4]
+	lsr	r0, r0, #0x1
+	mov	r1, #0x80
+	lsl	r1, r1, #0x18
+	orr	r0, r0, r1
+	str	r0, [r2, #0x8]
+	ldr	r0, [r2, #0x8]
+	ldr	r0, [r2, #0x8]
+	and	r0, r0, r1
+	cmp	r0, #0
+	beq	.L4	@cond_branch
+	mov	r4, #0x1
+	mov	r3, #0x2
+.L5:
+	str	r4, [r2, #0x4]
+	strh	r3, [r2, #0x2]
+	ldr	r0, [r2, #0x8]
+	and	r0, r0, r1
+	cmp	r0, #0
+	bne	.L5	@cond_branch
+.L4:
+	bl	g
+	add	sp, sp, #0x4
+	pop	{r4}
+	pop	{r0}
+	bx	r0
+.L8:
+	.align	2, 0
+.L7:
+	.word	gBgI
+	.word	0x40000d4
+	.word	gDst
+`;
+
+const P17 = `
+p17:
+	push	{lr}
+	add	sp, sp, #-0x4
+	add	r3, r0, #0
+	ldr	r0, .L8
+	ldrh	r1, [r0, #0x6]
+	mov	r0, sp
+	strh	r1, [r0]
+	ldr	r1, .L8+0x4
+	str	r0, [r1]
+	ldr	r0, .L8+0x8
+	str	r0, [r1, #0x4]
+	lsr	r0, r3, #0x1
+	mov	r2, #0x80
+	lsl	r2, r2, #0x18
+	orr	r0, r0, r2
+	str	r0, [r1, #0x8]
+	ldr	r0, [r1, #0x8]
+	b	.L7
+.L9:
+	.align	2, 0
+.L8:
+	.word	gBgI
+	.word	0x40000d4
+	.word	gDst
+.L5:
+	strh	r3, [r1, #0xa]
+.L7:
+	ldr	r0, [r1, #0x8]
+	and	r0, r0, r2
+	cmp	r0, #0
+	bne	.L5	@cond_branch
+	bl	g
+	add	sp, sp, #0x4
+	pop	{r0}
+	bx	r0
+`;
+
+const P18 = `
+p18:
+	push	{lr}
+	add	sp, sp, #-0x4
+	add	r3, r0, #0
+	ldr	r0, .L8
+	ldrh	r1, [r0, #0x6]
+	mov	r0, sp
+	strh	r1, [r0]
+	ldr	r1, .L8+0x4
+	str	r0, [r1]
+	ldr	r0, .L8+0x8
+	str	r0, [r1, #0x4]
+	lsr	r0, r3, #0x1
+	mov	r2, #0x80
+	lsl	r2, r2, #0x18
+	orr	r0, r0, r2
+	str	r0, [r1, #0x8]
+	ldr	r0, [r1, #0x8]
+	b	.L7
+.L9:
+	.align	2, 0
+.L8:
+	.word	gBgI
+	.word	0x40000d4
+	.word	gDst
+.L5:
+	strb	r3, [r1, #0xb]
+.L7:
+	ldr	r0, [r1, #0x8]
+	and	r0, r0, r2
+	cmp	r0, #0
+	bne	.L5	@cond_branch
+	bl	g
+	add	sp, sp, #0x4
+	pop	{r0}
+	bx	r0
+`;
+
 const prototypes = { g: { params: [], returnsVoid: true } };
 
 const allStmts = (body: Stmt[]): Stmt[] => body.flatMap((s) => [s, ...allStmts(stmtChildren(s))]);
@@ -383,6 +520,23 @@ describe('a guard-fused wait on a pinned register', () => {
     const loops = recorded(r.sfn.body);
     expect(loops.map((l) => l.k)).toEqual(['while', 'while']);
     expect(loops[0].site).toBe(loops[1].site);
+  });
+
+  test('a fused wait whose body stores plain where agbcc would sink it declines', () => {
+    expect(() => decompile('p15', P15, ARMV4T_AGBCC, { prototypes })).toThrow(
+      "a loop that polls a device register writes memory plain at an address the loop never changes in 'p15'",
+    );
+  });
+
+  test('a jump-to-test wait whose body stores plain where agbcc would sink it declines', () => {
+    expect(() => decompile('p17', P17, ARMV4T_AGBCC, { prototypes })).toThrow(
+      "a loop that polls a device register writes memory plain at an address the loop never changes in 'p17'",
+    );
+  });
+
+  test('a wait whose plain byte store may alias the count lifts with the store in the loop', () => {
+    const r = decompile('p18', P18, ARMV4T_AGBCC, { prototypes });
+    expect(r.source).toMatch(/\n {4}while \([^\n]*\) \{\n {8}\(\(u8 \*\)67109076\)\[11\] = a0;\n {4}\}\n/);
   });
 
   // The control: a kept guard renders its own test, so nothing is credited for it.
