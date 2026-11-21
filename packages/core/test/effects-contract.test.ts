@@ -651,6 +651,23 @@ describe('assertEffectsPreserved — a pinned device access', () => {
     expect(() => checkReads(irReading([REG]), [pollWhile([element(5), other])], ['p'])).not.toThrow();
   });
 
+  // A rotated poll reads the register into a local in its body and tests the local.
+  test('a poll that reads the register into the local its condition tests is judged', () => {
+    const v0: Expr = { k: 'var', name: 'v0' };
+    const rotated = (body: Stmt[]): Stmt => ({ k: 'while', cond: v0, body });
+    expect(() =>
+      checkReads(irReading([REG]), [rotated([plainWord(), { k: 'assign', name: 'v0', value: readAt(REG) }])], ['v0']),
+    ).toThrow(/writes memory plain/);
+    // a body that reads the register into nothing the condition tests is no poll
+    expect(() =>
+      checkReads(
+        irReading([REG]),
+        [rotated([plainWord(), { k: 'assign', name: 'x', value: readAt(REG) }])],
+        ['v0', 'x'],
+      ),
+    ).not.toThrow();
+  });
+
   // A global every write of which the IR placed by its declaration is assigned volatile by the
   // header the recompile reads, though the tree spells it by its bare name.
   test('a poll assigning a global its declaration makes volatile is not refused', () => {

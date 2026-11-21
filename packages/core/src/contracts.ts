@@ -407,22 +407,31 @@ function plainWriteIn(stmts: readonly Stmt[], ctx: TreeContext): Write | undefin
  *  `((u16 *)0x40000d4)[5]` and `[1]` each leave the other free to sink); a write whose width the
  *  tree does not say (a member, or a global assigned by its name) is taken to be aliased by
  *  nothing. Only a loop that renders a pinned device read is judged: a poll, the family the device
- *  pin exists for, whether its condition reads the register or its own body does and hands the
- *  value to the condition through a local (a rotated `v0 = REG; while (v0 & M) { …; v0 = REG; }`);
- *  a poll nested in it is judged as its own loop, and makes the outer one no poll. A
+ *  pin exists for, whether its condition reads the register or its own body reads it into a local
+ *  the condition tests (a rotated `v0 = REG; while (v0 & M) { …; v0 = REG; }`). A loop whose body
+ *  only holds a device read, or a nested poll, is no poll: its writes are not judged here. A
  *  plain write at a fixed address in any other loop is the same hazard where its source was
  *  `volatile`, and is not judged here. */
 function sunkPollStore(s: Loop, ctx: TreeContext): Write | undefined {
   const stmts = loopStmts(s);
   const polled: EffectCounts = new Map();
   effectsInExpr(s.cond, polled, ctx);
-  // The loop's own statements, not a nested loop's: an inner poll is judged as its own loop.
+  // A rotated poll reads the register into a local in its body and tests that: the reads assigned
+  // to a name the condition reads count as the condition's. The loop's own statements, not a nested
+  // loop's, which is judged as its own loop.
+  const tested = new Set(
+    [...walkExprs([{ k: 'exprstmt', value: s.cond }])].flatMap((e) =>
+      e.k === 'var' && ctx.locals.has(e.name) ? [e.name] : [],
+    ),
+  );
   const own = (list: readonly Stmt[]): Stmt[] =>
     list.flatMap((st) =>
       st.k === 'while' || st.k === 'dowhile' || st.k === 'for' ? [] : [st, ...own(stmtChildren(st))],
     );
   for (const st of own(stmts)) {
-    stmtExprs(st).forEach((e) => effectsInExpr(e, polled, ctx, false, false, st.k === 'store' && e === st.lval));
+    if (st.k === 'assign' && tested.has(st.name)) {
+      effectsInExpr(st.value, polled, ctx);
+    }
   }
   if (deviceReads(polled).size === 0) {
     return undefined;
