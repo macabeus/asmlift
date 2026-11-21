@@ -8132,6 +8132,55 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'extern u16 gDvI[];\nextern s32 *gDvP[];\nextern volatile u32 gDvW;\nvoid g(void);\nvoid dvdeclstore(u32 n);',
     proto: { dvdeclstore: { params: ['u32'], returnsVoid: true }, g: { params: [], returnsVoid: true } },
   },
+  // A POLL A RECOMPILE WOULD EMPTY (frontend/poll-reads.ts, contracts.ts `sunkPollStore`). `pollwait`
+  // waits on a register in a loop that stores nothing and calls nothing: plain, every compiler here
+  // loads it once ahead of the loop at its canonical flags and branches to itself, so the read the
+  // machine makes each time round is printed volatile. `pollsink` makes a plain store in such a
+  // poll that agbcc keeps there or moves out by register history the lift cannot see, so it is
+  // refused; `pollsinkdma` is the same with the DMA base read through a pointer, whose plain store
+  // agbcc writes once after the loop. `pollhoist` is IDO's: a lone store of a value the loop does
+  // not change is written once ahead of it, so it is refused too.
+  {
+    sym: 'pollwait',
+    src: 'void g(void);\nvoid pollwait(void)\n{\n    while (*(volatile u32 *)0x40000dc & 3)\n        ;\n    g();\n}',
+    features: ['device-access'],
+    toolchains: ALL,
+    ctx: 'void g(void);\nvoid pollwait(void);',
+    proto: { pollwait: { params: [], returnsVoid: true }, g: { params: [], returnsVoid: true } },
+  },
+  {
+    sym: 'pollsink',
+    src:
+      'void g(void);\nvoid pollsink(s32 a0)\n{\n' +
+      '    while (((volatile s32 *)0x40000d4)[2] & 0x80000000)\n        ((s32 *)0x40000d4)[5] = a0;\n    g();\n}',
+    features: ['device-access'],
+    toolchains: ['agbcc'],
+    ctx: 'void g(void);\nvoid pollsink(s32 a0);',
+    proto: { pollsink: { params: ['s32'], returnsVoid: true }, g: { params: [], returnsVoid: true } },
+  },
+  {
+    sym: 'pollsinkdma',
+    src:
+      'typedef volatile u32 vu32;\ntypedef volatile u16 vu16;\n' +
+      'extern u16 gDvI[];\nextern s32 *gDvP[];\nvoid g(void);\n' +
+      'void pollsinkdma(u32 n)\n{\n    u16 t = gDvI[3];\n    vu32 *d = (vu32 *)0x40000d4;\n' +
+      '    d[0] = (u32)&t;\n    d[1] = (u32)gDvP[2];\n    d[2] = 0x80000000 | (n >> 1);\n    d[2];\n' +
+      '    while (d[2] & 0x80000000) {\n        ((vu16 *)d)[5] = n;\n        ((vu16 *)d)[1] = ((vu16 *)d)[1];\n    }\n    g();\n}',
+    features: ['pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'extern u16 gDvI[];\nextern s32 *gDvP[];\nvoid g(void);\nvoid pollsinkdma(u32 n);',
+    proto: { pollsinkdma: { params: ['u32'], returnsVoid: true }, g: { params: [], returnsVoid: true } },
+  },
+  {
+    sym: 'pollhoist',
+    src:
+      'void g(void);\nvoid pollhoist(s32 a0)\n{\n' +
+      '    while (((volatile u32 *)0xA4600010)[0] & 3)\n        ((volatile u32 *)0xA4600000)[5] = a0;\n    g();\n}',
+    features: ['device-access'],
+    toolchains: ['ido7.1'],
+    ctx: 'void g(void);\nvoid pollhoist(s32 a0);',
+    proto: { pollhoist: { params: ['s32'], returnsVoid: true }, g: { params: [], returnsVoid: true } },
+  },
   // What the discard register does NOT say. `dvnarrow` is the control for a load that leaves it:
   // CodeWarrior at -O0,p reads the plain `s8 x; x = p[5];` as `lwz r0` + `extsb r31,r0`, a home,
   // which stays unstamped (the volatile twin is the same code). `dvdword` is IDO's doubleword
