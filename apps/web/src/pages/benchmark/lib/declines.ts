@@ -453,6 +453,17 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     pattern: /post-loop read reaches a temp|do not reproduce on a zero-trip run|its initial value on a zero-trip run/,
   },
   {
+    // The effect contract's refusal of a call-free device poll that writes plain at an address the
+    // loop never changes (contracts.ts `sunkPollStore`): the asm makes that write each time round,
+    // and agbcc's loop pass keeps a plain cell in a register for the loop and stores it once at the
+    // exit. The thing to build is a spelling that keeps the store qualified, which the device pin's
+    // per-object policy does not give it. Its rows are `dvsunkwait`, `dvpollstore`, `dvtwostore` and
+    // `dvrotpoll` on agbcc.
+    key: 'poll-store',
+    label: 'A device poll that writes memory plain where a recompile would write it once',
+    pattern: /a loop that polls a device register writes memory plain/,
+  },
+  {
     // Keyed on the three producers rather than on the bare words `fall-through` and `jump-table`,
     // which are English before they are a switch: `fall-through` alone claimed `frontend/ppc.ts`'s
     // generic tail-branch refusal ("a target/fall-through that is not a block boundary"), which has

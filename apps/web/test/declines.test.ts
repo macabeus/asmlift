@@ -1134,6 +1134,7 @@ describe('a class may not outlive the message it classifies', () => {
       'a read nothing uses at a level that keeps plain ones',
       'packages/core/src/frontend/dead-reads.ts',
     ],
+    ['poll-store', 'a loop that polls a device register writes memory plain', 'packages/core/src/contracts.ts'],
     ['far-jump', 'would drop the lr write a', 'packages/core/src/frontend/thumb.ts'],
     ['far-jump', 'does not target a code label of this function', 'packages/core/src/frontend/thumb.ts'],
     ['indirect-call', 'an indirect call', 'packages/core/src/frontend/ppc.ts'],
@@ -1254,6 +1255,9 @@ describe('the classifier is measured against the messages core can throw, not on
     // writes it into a marker, which `pipeline.ts` then interpolates into its throw. Pinned by hand
     // in `SPELT_BY` against the file that spells it, as `opaque-ops`'s sibling phrase is.
     'runtime-helper': "l3/ast.ts's gapReasonFor builds the reason; the throw interpolates it",
+    // The effect contract refuses through a `ContractError`, which is not one of the harvest's
+    // constructors (`DECLINE_CTORS`). Pinned in `SPELT_BY` against contracts.ts.
+    'poll-store': "contracts.ts throws a ContractError, which the harvest's constructors leave out",
   };
 
   test('every class matches a message core can throw', () => {
