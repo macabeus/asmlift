@@ -239,6 +239,12 @@ interface TreeContext {
   /** Filled by the count: each guard-fused loop the tree holds, by its guard's `site`, one entry
    *  per copy of the loop ({@link fusedGuardCredit}). */
   fusedCopies: Map<number, FusedCopy[]>;
+  /** How the compiler moves a plain store out of a poll loop ({@link sunkPollStore}), or undefined
+   *  where it moves none at these flags. */
+  motion: 'sinks' | 'hoists' | undefined;
+  /** The locals the function assigns once, a constant: the address a base spelled through one
+   *  denotes ({@link sunkPollStore}'s overlap). */
+  literalLocals: ReadonlyMap<string, number>;
 }
 
 /** every call under `e`, counted by target name; every qualified memory access, by the address it
@@ -392,26 +398,30 @@ function plainWriteIn(stmts: readonly Stmt[], ctx: TreeContext): Write | undefin
  *
  *  agbcc's loop pass (loop.c `load_mems`) moves a memory cell into a register for the duration of
  *  a loop when the cell's address does not change in it, the loop makes no call, and no other
- *  access in the loop may alias the cell, and stores it back at the exit. `volatile` is what keeps
+ *  access in the loop conflicts with the cell (alias.c `true_dependence`), and stores it back at
+ *  the exit. `volatile` is what keeps
  *  such a write in the loop, so one the asm makes there, in a loop with neither a call nor an
  *  aliasing access, was qualified in the source: a pointer the device pin left plain
  *  (frontend/device-pins.ts: the per-object policy pins no store a later one does not overwrite),
  *  or a `volatile` global the lift cannot see. Spelled plain, the recompile writes it once, after
  *  the loop, or never on a run that does not go round, and its read counts are unchanged.
  *
- *  Judged over the tree as the recompile would read it. An address is fixed in the loop when it
- *  reads no memory, makes no call and names no local the loop assigns. Under agbcc's type-based
- *  aliasing, another access may alias the cell when it has the write's width, signed or not, or
- *  either is a byte, unless it is an element of the same base spelled alike at a constant
- *  subscript whose bytes miss the write's, or are the write's own cell (two stores
- *  `((u16 *)0x40000d4)[5]` and `[1]` each leave the other free to sink); a write whose width the
- *  tree does not say (a member, or a global assigned by its name) is taken to be aliased by
- *  nothing. Only a loop that renders a pinned device read is judged: a poll, the family the device
- *  pin exists for, whether its condition reads the register or its own body reads it into a local
- *  the condition tests (a rotated `v0 = REG; while (v0 & M) { …; v0 = REG; }`). A loop whose body
- *  only holds a device read, or a nested poll, is no poll: its writes are not judged here. A
- *  plain write at a fixed address in any other loop is the same hazard where its source was
- *  `volatile`, and is not judged here. */
+ *  Judged over the tree as the recompile would read it, and REFUSED UNLESS THE TREE PROVES THE
+ *  WRITE KEPT: whether an access that may alias the cell keeps it in the loop is the compiler's
+ *  decision, made on its RTL's register history, not on the spelling, so the only keeps credited
+ *  are the ones its rule makes whatever that history is — a call in the loop; control flow of the
+ *  loop's own (a branching statement, or `&&`/`||`), under which no cell that may trap moves; a
+ *  read whose bytes provably overlap the write's where one of the two is a byte; the write itself
+ *  qualified ({@link plainWrite}). Every other plain write at a fixed address is the one returned.
+ *  An address is fixed in the loop when it reads no memory, makes no call and names no local the
+ *  loop assigns; a write whose width the tree does not say (a member, or a global assigned by its
+ *  name) has no bytes to overlap, so only the other keeps can clear it. Only a loop that renders a
+ *  pinned device read is judged: a poll, the family the device pin exists for, whether its
+ *  condition reads the register or its own body reads it into a local the condition tests (a
+ *  rotated `v0 = REG; while (v0 & M) { …; v0 = REG; }`). A loop whose body only holds a device
+ *  read, or a nested poll, is no poll: its writes are not judged here. A plain write at a fixed
+ *  address in any other loop is the same hazard where its source was `volatile`, and is not judged
+ *  here. */
 function sunkPollStore(s: Loop, ctx: TreeContext): Write | undefined {
   const stmts = loopStmts(s);
   const polled: EffectCounts = new Map();
@@ -433,11 +443,26 @@ function sunkPollStore(s: Loop, ctx: TreeContext): Write | undefined {
       effectsInExpr(st.value, polled, ctx);
     }
   }
-  if (deviceReads(polled).size === 0) {
+  if (deviceReads(polled).size === 0 || ctx.motion === undefined) {
     return undefined;
   }
   const exprs = [...walkExprs([{ k: 'exprstmt', value: s.cond }, ...stmts])];
+  if (ctx.motion === 'hoists') {
+    return hoistedPollStore(stmts, exprs, ctx);
+  }
+  // KEPT: a call. The loop pass moves no cell of a loop that makes one (loop.c:2444-2449).
   if (exprs.some((e) => e.k === 'call')) {
+    return undefined;
+  }
+  // KEPT: control flow of the loop's own — a statement that branches (an `if`, a `switch`, a nested
+  // loop, a `break`, `continue`, `goto` or `return`) or a condition that does (`&&`, `||`). A loop
+  // left by a `return` or a `goto` has more than one exit target and is not optimized at all
+  // (loop.c:2512-2525); any other branch sets `maybe_never` for the whole loop (loop.c:8889-8925, a
+  // label or a conditional jump with more of the loop after it), and then no cell that may trap is
+  // moved (8978-8981), which on Thumb is every cell but the frame's: its address is a register
+  // (rtlanal.c `may_trap_p`).
+  const straight = (st: Stmt): boolean => st.k === 'assign' || st.k === 'store' || st.k === 'exprstmt';
+  if (!everyStmt(stmts).every(straight) || exprs.some((e) => e.k === 'bin' && (e.op === '&&' || e.op === '||'))) {
     return undefined;
   }
   const assigned = new Set(assignsIn(stmts).map((a) => a.name));
@@ -449,21 +474,52 @@ function sunkPollStore(s: Loop, ctx: TreeContext): Write | undefined {
     e.k !== 'postincr' &&
     !(e.k === 'var' && assigned.has(e.name)) &&
     exprChildren(e).every(fixed);
-  const widthOf = (e: Access): number | undefined => (e.k === 'index' ? e.width : undefined);
-  // Two elements of one base spelled alike at constant subscripts are one address register and
-  // two displacements to the recompile. Where their bytes do not overlap, alias analysis tells
-  // them apart (alias.c `memrefs_conflict_p`); where they are the one cell at one width, loop.c
-  // `load_mems` takes the other access for the cell itself. Neither keeps the cell in the loop.
-  const apart = (a: Access, b: Access): boolean => {
-    if (a.k !== 'index' || b.k !== 'index' || a.idx.k !== 'const' || b.idx.k !== 'const') {
-      return false;
+  // The bytes an element at a constant subscript covers: from a constant address — a literal, or a
+  // local the function sets once to one — or from a base spelled alike, which the recompile reads as
+  // one address register (`base` then the base).
+  const bytesOf = (e: Access): { base: Expr | null; lo: number; width: number } | undefined => {
+    if (e.k !== 'index' || e.idx.k !== 'const') {
+      return undefined;
     }
-    if (!exprEquals(a.base, b.base)) {
-      return false;
-    }
-    const [lo, hi] = [a.idx.value * a.width, b.idx.value * b.width];
-    return lo + a.width <= hi || hi + b.width <= lo || (lo === hi && a.width === b.width);
+    const lo = e.idx.value * e.width;
+    const inner = e.base.k === 'cast' ? e.base.e : e.base;
+    const literal =
+      inner.k === 'const' ? inner.value : inner.k === 'var' ? ctx.literalLocals.get(inner.name) : undefined;
+    return literal !== undefined
+      ? { base: null, lo: literal + lo, width: e.width }
+      : { base: e.base, lo, width: e.width };
   };
+  const stores = new Set(everyStmt(stmts).flatMap((st) => (st.k === 'store' ? [st.lval] : [])));
+  // KEPT: a read whose bytes provably overlap the write's, in an alias set the write's conflicts
+  // with — a byte, which aliases anything (c-common.c:1892-1980) — and that is not the write's own
+  // cell at its own width. Such a read conflicts with the cell whatever the addresses' register
+  // history (alias.c `true_dependence`, `memrefs_conflict_p` answers overlap on known addresses and
+  // conflict on unknown ones), so the written cell is not moved (loop.c:8958-8976). The write's own
+  // cell at its own width is no such proof: `insert_loop_mem` merges it with the write when their
+  // address registers are equal (loop.c:8766-8773, `rtx_equal_p` ignores the qualifier), and then
+  // it moves with it, as in `((u16 *)A)[10] = a0; ((volatile u16 *)A)[10];`, which sinks.
+  const overlapped = (w: Access): boolean => {
+    const at = bytesOf(w);
+    return (
+      at !== undefined &&
+      accesses.some((a) => {
+        const by = a === w || stores.has(a) ? undefined : bytesOf(a);
+        return (
+          by !== undefined &&
+          (at.width === 1 || by.width === 1) &&
+          !(by.lo === at.lo && by.width === at.width) &&
+          (at.base === null ? by.base === null : by.base !== null && exprEquals(at.base, by.base)) &&
+          by.lo < at.lo + at.width &&
+          at.lo < by.lo + by.width
+        );
+      })
+    );
+  };
+  // Every other plain write at a fixed address is refused. Whether a disjoint access keeps it is
+  // decided by which address registers carry a REG_EQUAL note after cse and jump (alias.c
+  // `canon_rtx` knows a register's value only then, :1424-1432), which the tree does not show:
+  // `while (((volatile s32 *)0x40000d4)[2] & M) ((s32 *)0x40000d4)[5] = a0;` keeps the store, and
+  // the same loop reading through `s32 *p0 = (s32 *)0x40000d4` sinks it.
   return everyStmt(stmts).find((st): st is Write => {
     if (!plainWrite(st, ctx)) {
       return false;
@@ -472,15 +528,39 @@ function sunkPollStore(s: Loop, ctx: TreeContext): Write | undefined {
       return true; // a global's own cell, its width unsaid
     }
     const lval = st.lval;
-    if ((lval.k !== 'index' && lval.k !== 'field') || !exprChildren(lval).every(fixed)) {
-      return false;
-    }
-    const w = widthOf(lval);
-    return (
-      w !== 1 &&
-      !accesses.some((a) => a !== lval && w !== undefined && (widthOf(a) === w || widthOf(a) === 1) && !apart(a, lval))
-    );
+    return (lval.k === 'index' || lval.k === 'field') && exprChildren(lval).every(fixed) && !overlapped(lval);
   });
+}
+
+/** IDO 7.1's half of {@link sunkPollStore}: the plain write a poll loop makes each time round that
+ *  the compiler writes once AHEAD of the loop, or undefined. COMPILED at `-O2`: a lone store of a
+ *  value the loop does not change, at an address it does not change, in a loop that makes no call
+ *  and branches nowhere of its own, is hoisted to the preheader — `while (*(vu32 *)A & 3) ((s32
+ *  *)B)[5] = a0;`, the same with a global `gW = a0;`, and a do-while — so the recompile writes it
+ *  once, before the first test. Each of these keeps it in the loop, measured: a value the loop
+ *  computes (`x += …; B[5] = x;`), the store under an `if`, a second store beside it, and a call. */
+function hoistedPollStore(stmts: readonly Stmt[], exprs: readonly Expr[], ctx: TreeContext): Write | undefined {
+  const all = everyStmt(stmts);
+  const straight = all.every((st) => st.k === 'assign' || st.k === 'store' || st.k === 'exprstmt');
+  if (!straight || exprs.some((e) => e.k === 'call' || (e.k === 'bin' && (e.op === '&&' || e.op === '||')))) {
+    return undefined;
+  }
+  const writes = all.filter((st) => st.k === 'store' || (st.k === 'assign' && !ctx.locals.has(st.name)));
+  const w = writes.length === 1 ? writes[0] : undefined;
+  if (w === undefined || !plainWrite(w, ctx)) {
+    return undefined;
+  }
+  const assigned = new Set(assignsIn([...stmts]).map((a) => a.name));
+  const fixed = (e: Expr): boolean =>
+    e.k !== 'call' &&
+    e.k !== 'index' &&
+    e.k !== 'field' &&
+    e.k !== 'postincr' &&
+    !(e.k === 'var' && (assigned.has(e.name) || !ctx.locals.has(e.name))) &&
+    exprChildren(e).every(fixed);
+  const at =
+    w.k === 'store' ? (w.lval.k === 'index' || w.lval.k === 'field') && exprChildren(w.lval).every(fixed) : true;
+  return at && fixed(w.value) ? w : undefined;
 }
 
 /** The reads the guard-fused loops in a tree stand for past their conditions' own renders, by key,
@@ -539,7 +619,7 @@ function countEffects(
       throw new ContractError(
         `a loop that polls a device register writes memory plain at an address the loop never changes ` +
           `in '${ctx.name}' — the machine made that write each time round, and a recompile may keep ` +
-          'the cell in a register and write it once after the loop',
+          'the cell in a register and write it once outside the loop',
       );
     }
     // A fused guard's reads run as the loop's first test, so the dropped rule counts them, once the
@@ -650,7 +730,37 @@ export function assertCaseGotosNarrow(sfn: SFn): void {
  * its declared volatile reads is emitted more times than the asm makes it on any one path. See the
  * note above for what this deliberately does not cover.
  */
-export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
+/** The compiler behaviours the effect contract reads (target.ts, the fields): how a plain store
+ *  moves out of a poll loop, and whether the level moves loop-invariant code at all. A caller that
+ *  passes none is judged as moving no store. */
+export interface EffectBehaviors {
+  pollStoreMotion?: 'sinks' | 'hoists';
+  keepsLoopInvariantReads?: boolean;
+}
+
+/** Each local `sfn` assigns exactly once, a constant (or a cast of one), by the constant; never a
+ *  parameter, whose entry value is a second definition, nor a local a `++` steps. */
+function literalLocalsOf(sfn: SFn): Map<string, number> {
+  const params = new Set([
+    ...sfn.params.map((v) => v.name),
+    ...[...walkExprs(sfn.body)].flatMap((e) => (e.k === 'postincr' ? [e.name] : [])),
+  ]);
+  const sets = new Map<string, Expr[]>();
+  for (const a of assignsIn(sfn.body)) {
+    sets.set(a.name, [...(sets.get(a.name) ?? []), a.value]);
+  }
+  const out = new Map<string, number>();
+  for (const [name, values] of sets) {
+    const v = values.length === 1 && !params.has(name) ? values[0] : undefined;
+    const e = v?.k === 'cast' ? v.e : v;
+    if (e?.k === 'const') {
+      out.set(name, e.value);
+    }
+  }
+  return out;
+}
+
+export function assertEffectsPreserved(fn: Fn, sfn: SFn, behaviors: EffectBehaviors = {}): void {
   assertCaseGotosNarrow(sfn);
   // Reachable blocks only: an unreachable block's call is legitimately never emitted.
   const seen = reachableBlocks(fn);
@@ -785,6 +895,12 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
         .map((st) => st.name),
     ]),
     fusedCopies: new Map(),
+    literalLocals: literalLocalsOf(sfn),
+    // IDO's hoist is loop-invariant motion, which a level that keeps loop-invariant code does not run.
+    motion:
+      behaviors.pollStoreMotion === 'hoists' && behaviors.keepsLoopInvariantReads === true
+        ? undefined
+        : behaviors.pollStoreMotion,
   };
   const counted = countEffects(sfn.body, ctx, unreached);
   const paths = counted.paths;

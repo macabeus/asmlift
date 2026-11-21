@@ -99,9 +99,25 @@ describe('targetFor', () => {
     ['ido7.1', ['-mips2', '-O1', '-32']],
     ['agbcc', ['-O0', '-mthumb-interwork']],
   ] as const)('%s at %j keeps unused reads, and every declared behavior', (id, flags) => {
-    const { keepsUnusedReads, ...rest } = targetFor(id, flags).target.compilerBehaviors;
+    const { keepsUnusedReads, keepsLoopInvariantReads, ...rest } = targetFor(id, flags).target.compilerBehaviors;
     expect(keepsUnusedReads).toBe(true);
+    // every level that keeps an unused read also leaves a loop-invariant read in its loop
+    expect(keepsLoopInvariantReads).toBe(true);
     expect(rest).toEqual(DESCRIPTIONS[id].compilerBehaviors);
+  });
+
+  // …and one more the LEVEL changes: a level whose loop pass does not move a loop-invariant read
+  // (target.ts `keepsLoopInvariantReadsAt`), though it deletes an unused one.
+  test.each([
+    ['mwcc_242_81', ['-O1', '-proc', 'gekko'], true],
+    ['mwcc_242_81', ['-O2', '-proc', 'gekko'], true],
+    ['mwcc_242_81', ['-O3', '-proc', 'gekko'], false],
+    ['ido7.1', ['-mips2', '-O3', '-32'], false],
+    ['agbcc', ['-O1', '-mthumb-interwork'], false],
+    ['gcc2.7.2kmc', ['-O1', '-mips3'], false],
+    ['agbcc', ['-Os', '-mthumb-interwork'], true],
+  ] as const)('%s at %j keeps a loop-invariant read: %s', (id, flags, keeps) => {
+    expect(targetFor(id, flags).target.compilerBehaviors.keepsLoopInvariantReads === true).toBe(keeps);
   });
 
   // …save one the flags change: under `-fshort-enums` an enum is the smallest integer its values fit,

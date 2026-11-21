@@ -1261,6 +1261,38 @@ export interface LoadBehaviors {
   // ABSENT ⇒ false: the compiler deletes every plain read nobody uses, so one still in the target
   // was qualified.
   keepsUnusedReads?: boolean;
+  // Does this compiler, AT THESE FLAGS, leave a plain read at a loop-invariant address in a loop
+  // that stores nothing and calls nothing, where an optimizing level moves it out ahead of the
+  // loop? A FLAG fact, like `keepsUnusedReads`: `targetFor` sets it from the optimisation level
+  // (`keepsLoopInvariantReadsAt`), never a description. Where it holds, a read the machine makes
+  // each time round says nothing about `volatile`, and the poll-read pin (frontend/poll-reads.ts)
+  // stamps none.
+  //
+  // ABSENT ⇒ false: the compiler moves such a read, so one still made each time round was
+  // `volatile` in the source, and the pin stamps it.
+  keepsLoopInvariantReads?: boolean;
+  // Does this compiler leave a plain read at a loop-invariant address in a loop that also STORES,
+  // at a level that moves it out of a loop that does not (`keepsLoopInvariantReads` absent)?
+  // COMPILED, mwcc 2.4.2, 2.3.3 and 2.4.7 at `-O4,p`: a store in the loop keeps the plain poll read
+  // in it in every probe (`while (*(s32 *)A & 3) ((s32 *)B)[5] = a0;`, a global store, a
+  // do-while). agbcc, IDO 7.1 and KMC gcc 2.7.2 move it in some of those shapes (agbcc and IDO by
+  // alias analysis the lift cannot see), so they leave it absent, and the poll-read pin
+  // (frontend/poll-reads.ts) stamps such a loop's tested reads.
+  //
+  // ABSENT ⇒ false: a store does not keep the read, and the pin stamps it.
+  keepsInvariantReadsBesideStores?: boolean;
+  // HOW THIS COMPILER MOVES a plain store at a loop-invariant address out of a poll loop (a loop
+  // whose test reads memory at a fixed address, pinned `volatile`), which the effect contract
+  // refuses to print plain (contracts.ts `sunkPollStore`). COMPILED at the canonical flags:
+  //   'sinks'  — agbcc: loop.c `load_mems` keeps the cell in a register and writes it once after
+  //              the loop, unless an access the alias pass cannot tell apart from it keeps it;
+  //   'hoists' — IDO 7.1 at `-O2`: a lone store of a value the loop does not change is written
+  //              once ahead of the loop (`while (*(vu32 *)A & 3) ((s32 *)B)[5] = a0;`, a global
+  //              store, a do-while); a value the loop computes, a store under an `if`, and two
+  //              stores stay in it. Only where the level moves loop-invariant code
+  //              (`keepsLoopInvariantReads` absent).
+  // ABSENT ⇒ the store stays in the loop: KMC gcc 2.7.2 and mwcc kept it in every probe.
+  pollStoreMotion?: 'sinks' | 'hoists';
   // WHERE DOES THIS COMPILER PUT A READ NOBODY USES, at a level that keeps a plain one
   // (`keepsUnusedReads`)? The register a `volatile` read with no consumer is loaded into, and no
   // plain local is ever homed in. COMPILED at the keeping levels, one statement per line:
@@ -1623,6 +1655,8 @@ export const ARMV4T_AGBCC: TargetDescription = {
     },
   },
   compilerBehaviors: {
+    // a plain in-loop store no access provably keeps is written once after the loop (the field)
+    pollStoreMotion: 'sinks',
     coalesceLoopInit: false,
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,
@@ -1822,6 +1856,8 @@ export const MIPS_IDO: TargetDescription = {
   // `switchAllowsNeqCase: false` — IDO's switch dispatch uses `==`/`<`, never `!=` cases;
   // leaving it permissive mis-recognises `!=`-rooted if-else chains as switches.
   compilerBehaviors: {
+    // a plain store of an invariant value in a poll loop is written once ahead of it (the field)
+    pollStoreMotion: 'hoists',
     plainCharSigned: false,
     contractsFloatProducts: false,
     coalesceLoopInit: true,
@@ -2103,6 +2139,8 @@ export const PPC_MWCC: TargetDescription = {
   compilerBehaviors: {
     plainCharSigned: true,
     contractsFloatProducts: true,
+    // a store in a loop keeps its plain poll read in it (the field; poll probes on all three builds)
+    keepsInvariantReadsBesideStores: true,
     // MEASURED on all three builds in C: an integer, a pointer and a `u16 *` passed to an `s32 *`,
     // `u32` and `s32 *` parameter each fail to compile, and each compiles once cast (see the field).
     strictPointerConversions: true,
@@ -2366,6 +2404,23 @@ export function keepsUnusedReadsAt(family: FlagFamily, level: string | undefined
   return n === '0' || (family === 'ido' && n === '1');
 }
 
+/** Does a compiler of `family`, at optimisation level `level` (the profile's `O` slot), leave a plain
+ *  read at a loop-invariant address in a loop that stores nothing and calls nothing
+ *  (`compilerBehaviors.keepsLoopInvariantReads`)? COMPILED, `while (*(s32 *)A & 3) ; g();` and
+ *  `while (gF == 0) ; g();`, the loop a branch to itself where the read moved: agbcc and KMC gcc
+ *  2.7.2 at `-O1` and `-O2` (gcc's loop pass runs from `-O1`), IDO 7.1 at `-O2` and `-O3`, mwcc
+ *  2.4.2 at `-O3` and `-O4,p` move it; IDO at `-O1` (its default) and mwcc at `-O1` and `-O2` re-read
+ *  it each time round, as every one of them does at `-O0`.
+ *
+ *  A LEVEL NO FLAG NAMES (`undefined`) KEEPS, and so does a level word the table does not read
+ *  (`-Os`). The cost runs the other way from `keepsUnusedReadsAt`'s: answering "moves" where the
+ *  compiler keeps the read pins a `volatile` the source never wrote, while answering "keeps" leaves
+ *  the read plain, as the lift printed it before the pin existed. */
+export function keepsLoopInvariantReadsAt(family: FlagFamily, level: string | undefined): boolean {
+  const n = level === undefined ? undefined : /^\d/.exec(level)?.[0];
+  return n === undefined || Number(n) < (family === 'mwcc' ? 3 : family === 'ido' ? 2 : 1);
+}
+
 /** The level `keepsUnusedReadsAt` judges a profile at: its `O` slot, or none where a word the table
  *  does not read may set it too — mwcc's `-opt off` and `-opt level=0` compile at `-O0`, and the
  *  table reads neither, so a profile that spells one has a level nothing here knows. */
@@ -2383,6 +2438,9 @@ export function targetFor(toolchain: ToolchainId, cflags: readonly string[]): Re
   let target: TargetDescription = cpp ? { ...t.description, dialect: 'c++' } : t.description;
   if (keepsUnusedReadsAt(t.family, unusedReadLevel(profile))) {
     target = { ...target, compilerBehaviors: { ...target.compilerBehaviors, keepsUnusedReads: true } };
+  }
+  if (keepsLoopInvariantReadsAt(t.family, unusedReadLevel(profile))) {
+    target = { ...target, compilerBehaviors: { ...target.compilerBehaviors, keepsLoopInvariantReads: true } };
   }
   if (profile.slots['-fshort-enums'] === 'on') {
     // every enum is the smallest integer its values fit (c-decl.c:6064-6065, :6123; compiled,

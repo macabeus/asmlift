@@ -297,7 +297,11 @@ describe('assertEffectsPreserved — a pinned device access', () => {
   });
   /** `locals` are the tree's own names: an assignment to any other is a write to a global */
   const checkReads = (fn: Fn, body: Stmt[], locals: string[] = []) =>
-    assertEffectsPreserved(fn, { ...sfnWith(body), locals: locals.map((name) => ({ name, type: T.s(32) })) });
+    assertEffectsPreserved(
+      fn,
+      { ...sfnWith(body), locals: locals.map((name) => ({ name, type: T.s(32) })) },
+      { pollStoreMotion: 'sinks' },
+    );
 
   test('one pinned read rendered twice in sequence fails', () => {
     expect(() => checkReads(irReading([REG]), [read(REG), read(REG)])).toThrow(
@@ -600,15 +604,14 @@ describe('assertEffectsPreserved — a pinned device access', () => {
     expect(() =>
       checkReads(irReading([REG, REG], [], [0x4000010]), [pollWhile([write(0x4000010)], true)]),
     ).not.toThrow();
-    // a u16 store beside the u16 poll, which agbcc keeps in the loop: the withheld credit refuses it
+    // a u16 store beside the u16 poll at another address: no access proves it kept, so the
+    // poll-store rule refuses it before the withheld credit would
     const plainHalf: Stmt = {
       k: 'store',
       lval: at({ k: 'const', value: 0x4000010 }, false),
       value: { k: 'const', value: 1 },
     };
-    expect(() => checkReads(irReading([REG, REG]), [pollWhile([plainHalf], true)])).toThrow(
-      /dropped the read of the device register at 0x4000006/,
-    );
+    expect(() => checkReads(irReading([REG, REG]), [pollWhile([plainHalf], true)])).toThrow(/writes memory plain/);
     // a local's assignment writes no memory
     const local: Stmt = { k: 'assign', name: 'x', value: readAt(REG) };
     expect(() => checkReads(irReading([REG, REG, REG]), [pollWhile([local], true)], ['x'])).not.toThrow();
@@ -646,9 +649,10 @@ describe('assertEffectsPreserved — a pinned device access', () => {
     );
     // the same element twice is one cell, which loop.c keeps in one register for both stores
     expect(() => checkReads(irReading([REG]), [pollWhile([element(1), element(1)])])).toThrow(/writes memory plain/);
-    // through two different bases, one store may alias the other: neither is refused
+    // through two different bases, whether one keeps the other is the compiler's register history,
+    // which the tree does not show: refused too
     const other = plainWord({ k: 'var', name: 'p' });
-    expect(() => checkReads(irReading([REG]), [pollWhile([element(5), other])], ['p'])).not.toThrow();
+    expect(() => checkReads(irReading([REG]), [pollWhile([element(5), other])], ['p'])).toThrow(/writes memory plain/);
   });
 
   // A rotated poll reads the register into a local in its body and tests the local.
@@ -695,13 +699,29 @@ describe('assertEffectsPreserved — a pinned device access', () => {
     expect(() => checkReads(irReading([REG]), [pollWhile(walk)], ['i'])).not.toThrow();
     // the loop makes a call
     expect(() => checkReads(irReading([REG]), [pollWhile([plainWord(), callStmt('g')])])).not.toThrow();
-    // a u16 store beside the u16 poll may alias it
+    // a byte store into the polled register's bytes: a byte aliases anything, and the bytes overlap
+    const byte: Stmt = {
+      k: 'store',
+      lval: {
+        k: 'index',
+        base: { k: 'const', value: REG + 1 },
+        idx: { k: 'const', value: 0 },
+        width: 1,
+        signed: false,
+      },
+      value: { k: 'const', value: 1 },
+    };
+    expect(() => checkReads(irReading([REG]), [pollWhile([byte])])).not.toThrow();
+    // the store under an `if` of the loop: agbcc moves no cell that may trap out of a loop that branches
+    const guarded: Stmt = { k: 'if', cond: { k: 'var', name: 'k' }, then: [plainWord()], else: [] };
+    expect(() => checkReads(irReading([REG]), [pollWhile([guarded])], ['k'])).not.toThrow();
+    // a u16 store beside the u16 poll at another address proves nothing: refused
     const half: Stmt = {
       k: 'store',
       lval: at({ k: 'const', value: 0x4000010 }, false),
       value: { k: 'const', value: 1 },
     };
-    expect(() => checkReads(irReading([REG]), [pollWhile([half])])).not.toThrow();
+    expect(() => checkReads(irReading([REG]), [pollWhile([half])])).toThrow(/writes memory plain/);
     // a loop that polls nothing pinned is not judged
     expect(() =>
       checkReads(
