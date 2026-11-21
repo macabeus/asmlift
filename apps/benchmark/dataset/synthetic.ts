@@ -7931,12 +7931,14 @@ export const SYNTHETIC: SynthSpec[] = [
   // (frame-objects.ts). agbcc -O2 rotates the `while (d[2] & 0x80000000);` wait: the exit test is
   // duplicated into a guard (`ldr; and; cmp; beq`) and a latch, so the asm reads 0x40000DC at both.
   // In `dvfusedwait` the guard and the latch test the same register, so the structurer fuses them back
-  // into one `while`, which renders the read once and recompiles to both. The effect contract used
-  // to count the condition once and refuse the function as a dropped device read. The fusion now
-  // records the deleted guard's read on the loop (`fusedGuardReads`, structure.ts). Cut from kl2dct
-  // sub_0803B958 and sub_080488C4, which declined on that refusal. `dvkeptwait` is the control: its
-  // latch tests a preheader copy of the mask (`add r1, r4, #0`), so the guard stays an `if` around a
-  // `do-while`, renders its own read, and lifted before the change too. agbcc only: the device pins
+  // into one `while`, which renders the read once and recompiles to both. The row pins that the
+  // effect contract counts the deleted guard's read as made by the loop's first test
+  // (`fusedGuardReads`, structure.ts), so the function lifts instead of declining as a dropped
+  // device read. Cut from kl2dct sub_0803B958 and sub_080488C4. `dvforwait` is the same wait as a
+  // counted spin, `while (d[2] > i) i++;`: its test reads the counter, so the fused loop is
+  // re-spelled as a `for`, which keeps the credit. `dvkeptwait` is the control: its latch tests a
+  // preheader copy of the mask (`add r1, r4, #0`), so the guard stays an `if` around a `do-while`
+  // and renders its own read, with nothing credited. agbcc only: the device pins
   // come from `readOnlyAddressSinks`, which only the agbcc target sets, so the other toolchains have
   // no pinned read for a guard to drop.
   {
@@ -7952,6 +7954,20 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'extern u16 gDvI[];\nextern s32 *gDvP[];\nextern char gDvBuf[];\nvoid g(void);\nvoid dvfusedwait(u32 n);',
     proto: { dvfusedwait: { params: ['u32'], returnsVoid: true }, g: { params: [], returnsVoid: true } },
+  },
+  {
+    sym: 'dvforwait',
+    src:
+      'typedef volatile u32 vu32;\n' +
+      'extern u16 gDvI[];\nextern s32 *gDvP[];\nextern char gDvBuf[];\nvoid g(void);\n' +
+      's32 dvforwait(u32 n)\n{\n    s32 i;\n    u16 t = gDvI[3];\n    vu32 *d = (vu32 *)0x40000d4;\n' +
+      '    d[0] = (u32)&t;\n    d[1] = (u32)gDvP[2];\n    d[2] = 0x80000000 | (n >> 1);\n    d[2];\n' +
+      '    i = 0;\n    while (d[2] > i) i++;\n    d[0] = (u32)gDvP[3];\n    d[1] = (u32)gDvBuf;\n' +
+      '    d[2] = 0x80000400;\n    g();\n    return i;\n}',
+    features: ['pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'extern u16 gDvI[];\nextern s32 *gDvP[];\nextern char gDvBuf[];\nvoid g(void);\ns32 dvforwait(u32 n);',
+    proto: { dvforwait: { params: ['u32'], returns: 's32' }, g: { params: [], returnsVoid: true } },
   },
   {
     sym: 'dvkeptwait',
