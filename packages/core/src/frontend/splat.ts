@@ -42,6 +42,7 @@
 import { CONTROL_BYTE, asciiTrim, isNonAscii } from './control-byte';
 import type { DisasmInstr, DisasmReloc } from './disasm';
 import { FrontendUnsupportedError } from './errors';
+import { gasIntLiteral } from './gas-int';
 
 // One instruction line: `/* ROM VRAM BYTES */  MNEMONIC  OPS`. Group 1 is the VRAM address word.
 const INSN_LINE =
@@ -733,6 +734,15 @@ function normalizeOperand(name: string, op: string): { op: string; reloc?: Disas
     );
   }
   const plain = (v: string) => ({ op: v });
+  // An integer literal followed by a block comment, which gas reads as whitespace: Splat marks an
+  // instruction it could not attribute to the compiler with one (`addi $t7, $a1, 0x20 /* handwritten
+  // instruction */`, 36 `addi` and 18 `addiu` lines in af's checkout). The literal is the operand;
+  // the shared reader reads a literal only, and would refuse the commented text. Only the literal
+  // case is read past its comment — every other operand keeps the reading it had.
+  const commented = op.match(/^(.*?)[ \t\r]*\/\*.*\*\/$/);
+  if (commented && gasIntLiteral(commented[1]) !== null) {
+    return plain(commented[1]);
+  }
   // Memory operand `DISP(base)` — base is a register (letter-first), DISP a constant/expression.
   const mem = op.match(/^(.*)\((\$?[A-Za-z]\w*)\)$/);
   if (mem) {

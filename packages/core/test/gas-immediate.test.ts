@@ -155,6 +155,8 @@ describe('a MIPS or PPC immediate that is not an integer literal declines', () =
     ['addiu       $v0, $zero, (2*2)', '24020004', 'return 4;'],
     ['lw          $v0, 2*4($a0)', '8C820008', 'return a0[2];'],
     ['addiu       $v0, $zero, 4', '24020004', 'return 4;'],
+    // a trailing block comment is whitespace to gas; Splat writes one on af's `addi` lines
+    ['addi        $v0, $a0, 0x20 /* handwritten instruction */', '20820020', 'return a0 + 32;'],
   ])('Splat `%s` lifts as gas encodes it', (line, word, want) => {
     expect(mips(splat(line, word))).toContain(want);
   });
