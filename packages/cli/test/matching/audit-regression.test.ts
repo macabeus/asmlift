@@ -196,20 +196,29 @@ describe('M1 — Thumb sp-as-data loud-fails (the MIPS/PPC guard, ported)', () =
   });
 
   // A spin through a phi that carries the published address — `p = c ? buf : gOther` — reaches the
-  // object where neither the declaration nor a member cast does. Qualified, agbcc's peeled first
-  // test is a second read the C spells once, so it declines loud and names the stack local; plain,
-  // it compiles to a loop that never reads the byte again.
-  test('a spin through a phi carrying a published capture declines naming the stack local', () => {
+  // object where neither the declaration nor a member cast does. agbcc reads the byte at the loop's
+  // guard and at its latch, and the structurer fuses the guard back into one `while`: its test runs
+  // once before the first iteration and once after each, so the qualified C makes both reads again.
+  // The fusion records the guard's read (`fusedGuardReads`), and the function lifts. Plain, it
+  // would compile to a loop that never reads the byte again, so every read through the phi keeps
+  // its qualifier.
+  test('a spin through a phi carrying a published capture keeps both its reads, qualified', () => {
+    const ctx =
+      'extern void h(unsigned char*, unsigned char*); extern unsigned char *gp; extern unsigned char gOther[8];\n';
     const asm = compileTargetAsm(
-      'extern void h(unsigned char*, unsigned char*); extern unsigned char *gp; extern unsigned char gOther[8]; ' +
+      ctx +
         'unsigned int p1(unsigned int c){ volatile unsigned char buf[8]; volatile unsigned char *p; buf[0] = 0; ' +
         'gp = (unsigned char *)buf; h((unsigned char *)buf, (unsigned char *)buf + 4); ' +
         'p = c ? buf : (volatile unsigned char *)gOther; *p = 0; while (*p == 0) ; gp = 0; return buf[4]; }',
       TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
     );
-    expect(() => decompile('p1', asm, ARMV4T_AGBCC, { prototypes: { h: { params: 2, returnsVoid: true } } })).toThrow(
-      "structuring dropped a read of an address-taken stack local in 'p1'",
-    );
+    const src = decompile('p1', asm, ARMV4T_AGBCC, { prototypes: { h: { params: 2, returnsVoid: true } } }).source;
+    expect(src).toMatch(/\n {4}while \(\*\(volatile u8 \*\)v\d+ == 0\) \{\n {4}\}\n/);
+    expect(src.match(/\*\(volatile u8 \*\)v\d+/g)).toHaveLength(2);
+    expect(src).not.toMatch(/\*\(u8 \*\)v\d+/);
+    // recompiled, it makes every byte read the asm makes: the guard's and the latch's among them
+    const loads = (a: string) => a.match(/\bldrb\b/g)?.length;
+    expect(loads(compileTargetAsm(ctx + src, TOOLCHAIN_TARGETS.agbcc.canonicalFlags))).toBe(loads(asm));
   });
 
   // …and two reads through it are two reads, for one published local as for the one object

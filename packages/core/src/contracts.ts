@@ -176,6 +176,24 @@ type Direction = 'r' | 'w';
 const deviceKey = (dir: Direction, addr: number | null): string =>
   `device:${dir}:${addr === null ? '?' : `0x${addr.toString(16)}`}`;
 
+/** The key a pinned access is counted under: its direction, and the constant address a plain
+ *  `load`/`store` reads off its base and offset, or `?`. */
+function pinnedKey(defs: Map<Value, Op>, op: Op, dir: Direction): string {
+  const plain = op.opcode === 'load' || op.opcode === 'store';
+  return deviceKey(dir, plain ? constAddressOf(defs, op.operands[0], op.attrs.off as number) : null);
+}
+
+/** The key under which the effect contract counts `op` as a read the dropped rule needs rendered,
+ *  or null when it counts no such read: `op` is not a pinned read, or it reads through a named
+ *  global, which is exempt from the dropped rule. The structurer's guard fusion records these keys
+ *  for the guard test it deletes (`fusedGuardReads` on the `while`). */
+export function guardReadKey(defs: Map<Value, Op>, op: Op): string | null {
+  if (placedAt(op) !== 'device' || (op.opcode !== 'load' && op.opcode !== 'aload')) {
+    return null;
+  }
+  return globalBaseOf(defs, op.operands[0]) === null ? pinnedKey(defs, op, 'r') : null;
+}
+
 /** Is this access spelled through a `volatile` pointee? A dot member qualifies through the element
  *  or member it selects from, any other access through its own base's cast chain. */
 function qualifiedAccessChain(e: Expr): boolean {
@@ -350,6 +368,13 @@ function countEffects(
     const own: EffectCounts = new Map();
     stmtExprs(s).forEach((e) => effectsInExpr(e, own, ctx, false, false, s.k === 'store' && e === s.lval));
     total = sum(total, own);
+    // A fused guard's reads run as the loop's first test, so the dropped rule counts them here. They
+    // are in `total` only: on a path, the first test is already the condition's own render.
+    if (s.k === 'while' && s.fusedGuardReads !== undefined) {
+      for (const k of s.fusedGuardReads) {
+        total.set(k, (total.get(k) ?? 0) + 1);
+      }
+    }
     let here: PathCounts;
     if (s.k === 'if') {
       const t = countEffects(s.then, ctx, unreached);
@@ -486,9 +511,8 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
           // Placed, not counted: the value it computes is pure.
           break;
         case 'device': {
-          const plain = op.opcode === 'load' || op.opcode === 'store';
           const dir = reads ? 'r' : 'w';
-          const key = deviceKey(dir, plain ? constAddressOf(defs, op.operands[0], op.attrs.off as number) : null);
+          const key = pinnedKey(defs, op, dir);
           bump(irDevices, key);
           const reach = key === deviceKey(dir, null) ? reachOf(op.operands[0]) : null;
           if (reach?.stack === true) {
