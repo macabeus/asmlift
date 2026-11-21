@@ -462,7 +462,10 @@ export type Stmt =
  *  holds the loop, so where a copied tail holds it twice the contract credits the guard once for
  *  them all. A `for` carries the field too, as its condition is tested before the first iteration
  *  the same way; a pass that re-spells a credited loop keeps the field, and the contract re-checks
- *  it against whatever condition the new loop has. */
+ *  it against whatever condition the new loop has. A pass that re-spells the addresses the
+ *  condition renders maps `test` the same way ({@link mapFusedGuardTests}), or the two are keyed
+ *  apart and the credit is lost. A loop that writes memory through a plain lvalue is credited
+ *  nothing (contracts.ts `plainWriteIn`). */
 export interface FusedGuard {
   readonly site: number;
   readonly test: Expr;
@@ -1577,6 +1580,19 @@ export function renameVariables(
     return m.k === 'for' ? { ...m, init: target(m.init), inc: m.inc.map(target) } : m;
   };
   return body.map((s) => target(mapStmtExprs(s, (e) => renameInExpr(e, renames, opts))));
+}
+
+/** `s` with the test of every fused guard under it ({@link FusedGuard}) mapped through `f`, nested
+ *  statements recursively, and nothing else changed. {@link mapStmtExprs} leaves the test alone, as
+ *  it is no expression the tree prints and some of its callers collect what they visit; a pass that
+ *  re-spells an address the loop's condition renders runs its rewrite here too, so the contract keys
+ *  the guard's reads as it keys the condition's. */
+export function mapFusedGuardTests(s: Stmt, f: (e: Expr) => Expr): Stmt {
+  const inner = mapStmtLists(s, (list) => list.map((x) => mapFusedGuardTests(x, f)));
+  if ((inner.k === 'while' || inner.k === 'for') && inner.fusedGuard !== undefined) {
+    return { ...inner, fusedGuard: { ...inner.fusedGuard, test: f(inner.fusedGuard.test) } };
+  }
+  return inner;
 }
 
 /** The SETTER half of {@link stmtLists}: `s` with each of its nested lists replaced by `f` applied

@@ -108,7 +108,15 @@
 import { assertHoistsDominate } from '../contracts';
 import { type IrType, T, scalarTypeForAccess, typeToString } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
-import { exprChildren, isLoop, mapExprChildren, mapStmtExprs, stmtChildren, stmtExprs } from './ast';
+import {
+  exprChildren,
+  isLoop,
+  mapExprChildren,
+  mapFusedGuardTests,
+  mapStmtExprs,
+  stmtChildren,
+  stmtExprs,
+} from './ast';
 import { type Gate, ablateHeuristic, firstRejection } from './gates';
 import { type BaseInit, type HoistPlacement, nameAllocator, placeBaseLocals } from './hoist';
 
@@ -837,7 +845,10 @@ export function hoistBaseLocals(
       leafLocal.set(leaf, localFor.get(k)!);
     }
   }
-  const rewritten = sfn.body.map((s) => mapStmtExprs(s, (e) => rewrite(e, localFor, leafLocal)));
+  // A fused guard's test is re-spelled with the condition it stands beside, so the effect contract
+  // keys the two alike (ast.ts `FusedGuard`).
+  const respell = (e: Expr): Expr => rewrite(e, localFor, leafLocal);
+  const rewritten = sfn.body.map((s) => mapFusedGuardTests(mapStmtExprs(s, respell), respell));
   // The new inits join the tree's LEADING run of base inits rather than being prepended above it:
   // when rank's /livebase re-runs this pass the head already carries the default run's, and
   // blindly prepending would spell the new base's pool load above locals the compiler loads first.
