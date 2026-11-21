@@ -19,9 +19,9 @@ import { dc } from './helpers';
 //
 // The predicate is `immEq`, a LITERAL-shape test rather than a `parseInt`, and the refusal tests
 // are why: `parseInt` stops at the first character it cannot consume, so `#0b1` reads as zero — and
-// at the `rsb` site that turned a loud decline into a confident negate. The `add` site cannot make
-// the same promise, because a non-match there falls through to `imm()` rather than refusing; the
-// last test pins what that costs instead of pretending it does not exist.
+// at the `rsb` site that turned a loud decline into a confident negate. At the `add` site a
+// non-match falls through to `imm()`, which refuses the same spellings, so the last test pins a
+// decline there too.
 describe('an immediate idiom is keyed on the VALUE, not the spelling', () => {
   const spellings = ['#0', '#0x0', '#0X0', '#00'];
 
@@ -49,14 +49,13 @@ describe('an immediate idiom is keyed on the VALUE, not the spelling', () => {
     expect(() => dc('f', rsb(n))).toThrow(/unmodelled instruction 'rsb'/);
   });
 
-  // CHARACTERIZATION, not an assertion of correctness. A non-match at the `add` site falls through
-  // to `constVal(imm(…))`, and `imm` does not read binary — gas assembles `#0b1` as `+ 1`. Nothing
-  // in any corpus spells it (105411 `#` operands, zero of this class), so the honest move is to pin
-  // the gap where a reader will find it rather than leave the header claiming it cannot happen.
-  test('KNOWN GAP: a binary immediate reaches the `add` lowering and is misread', () => {
+  // At the `add` site a non-match falls through to `constVal(imm(…))`, and `imm` reads only a
+  // literal whose gas value is certain (frontend/gas-int.ts), so the spelling the shape test turns
+  // away is refused there too. It used to be read: `#0b1` as `+ 0`, where gas assembles `+ 1`.
+  test('a binary immediate at the `add` site declines rather than reading its prefix', () => {
     const add = (imm: string) => `\tpush\t{r4, lr}\n\tadd\tr0, r1, ${imm}\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`;
     expect(dc('f', add('#0X1')).source).toBe('s32 f(s32 a0, s32 a1) {\n    return a1 + 1;\n}\n'); // the radix fix
-    expect(dc('f', add('#0b1')).source).toBe('s32 f(s32 a0, s32 a1) {\n    return a1 + 0;\n}\n'); // gas: + 1
+    expect(() => dc('f', add('#0b1'))).toThrow(/immediate '#0b1' is not an integer literal/);
   });
 });
 

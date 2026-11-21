@@ -33,6 +33,7 @@
 // Two front doors read the same pass: GNU-as text holding the callee's label (the input, or a
 // listing handed in) and the callee's first halfwords out of a linked image (cli elf-bodies.ts
 // `{kind: 'thumb'}`), through a decoder of the prologue subset of the Thumb formats.
+import { gasIntLiteral } from './gas-int';
 
 /** One instruction as the pass reads it. */
 type Step =
@@ -112,9 +113,11 @@ function listWords(op: string): number | undefined {
   return n;
 }
 
+/** A `#k` operand's value, or undefined for any spelling whose gas value is not certain (`#010` is
+ *  octal 8 to gas, not 10 — frontend/gas-int.ts). */
 const imm = (op: string | undefined): number | undefined => {
-  const m = op === undefined ? null : /^#\s*(-?)(0x[0-9a-f]+|\d+)$/i.exec(op.trim());
-  return m === null ? undefined : (m[1] === '-' ? -1 : 1) * Number(m[2]);
+  const t = op?.trim();
+  return t?.startsWith('#') ? (gasIntLiteral(t.slice(1)) ?? undefined) : undefined;
 };
 
 /** `[sp]` / `[sp, #k]` → k; undefined for any other address. */

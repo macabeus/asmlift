@@ -45,6 +45,7 @@ import { inheritFlags } from './flags-edge';
 import { assertInputFormat } from './format';
 import { type FrameObjectAudit, type FrameObjectRelift, type FrameRange, liftWithRelift } from './frame-objects';
 import { type Frontend, type LiftOptions, type OwnDeclaration, ownDeclarationOf } from './frontend';
+import { gasIntLiteral } from './gas-int';
 import {
   type CaseEntry,
   type IdiomLeft,
@@ -337,10 +338,21 @@ function classifyXfer(ins: Instr): XferKind | null {
   return null;
 }
 
-// A raw immediate's value. Case-insensitive on the radix because gas accepts `0X` and `parseInt`
-// with the wrong one reads `#0X1` as 0 — see `immEq` below for why this stays loose about binary,
-// octal and expressions, and which callers therefore have to refuse rather than ask this.
-const imm = (s: string) => parseInt(s.replace(/^#/, ''), /0[xX]/.test(s) ? 16 : 10);
+// A raw `#…` immediate's value, or a refusal. gas reads the operand as an EXPRESSION — a `.set`
+// symbol, a character constant, `2*2`, an octal `010` — and a prefix reader answered NaN for the
+// first two (rendered as the text `NaN`) and the digit prefix for the rest (`#010` as 10 where gas
+// encodes 8). Only a literal whose gas value is certain is read (frontend/gas-int.ts); every caller
+// reaches here with an operand it has already seen start with `#`.
+const imm = (s: string): number => {
+  const v = s.startsWith('#') ? gasIntLiteral(s.slice(1)) : null;
+  if (v === null) {
+    throw new FrontendUnsupportedError(
+      `immediate '${s}' is not an integer literal — a symbol, a character constant or an expression ` +
+        `is gas's to resolve, and this frontend will not read it as a number`,
+    );
+  }
+  return v;
+};
 
 // AN IMMEDIATE IS A NUMBER, NOT A SPELLING, and which spelling appears is the producer's choice
 // rather than the machine's. Counting the gated shapes (`add`/`rsb rD, rS, #0`) over the vendored
@@ -351,36 +363,19 @@ const imm = (s: string) => parseInt(s.replace(/^#/, ''), /0[xX]/.test(s) ? 16 : 
 // jump-table shift recogniser used to compare the operand text and so rejected the third.
 //
 // The operand must be a plain integer LITERAL, and that shape check is the whole point of this
-// helper rather than an incidental guard. `imm()` is `parseInt`, which stops at the first character
-// it cannot consume — `#0b1` and `#0.5` read as 0, `#010` as 10 where gas means 8 — and it reads
-// `#2*2` as 2, which is not malformed but an expression gas
-// accepts and assembles to `lsls r0, r1, #4`. Matching it as a shift by two would recover a switch
-// whose stride is wrong by a factor of four: the emitted C is entirely ordinary and dispatches to
-// the wrong BLOCK, with no marker. `#2+1`, `#2-1` and `#2<<1` are the same trap. An adversarial
-// probe found this after the first cut of this helper shipped with exactly that hole, and the test
-// that claimed to pin the property sampled only `#3`/`#0x3`/`#0x1`/`r2` and so passed anyway.
+// helper rather than an incidental guard: `#2*2` is not malformed but an expression gas accepts and
+// assembles to `lsls r0, r1, #4`, and matching it as a shift by two would recover a switch whose
+// stride is wrong by a factor of four — ordinary C that dispatches to the wrong BLOCK, with no
+// marker. `#2+1`, `#2-1`, `#2<<1`, `#0b1` and `#010` (octal 8) are the same trap. An adversarial
+// probe found this after the first cut of this helper shipped with exactly that hole. Both this
+// and `imm` read through `gasIntLiteral`, so they agree on every spelling: a non-literal fails this
+// test, and at the `add`/`sub` sites that then fall through to `constVal(imm(…))` it declines there.
 //
-// Anything that is not a bare decimal or hex literal therefore fails this test — which is a
-// DECLINE only where the caller declines, and the three callers differ. The jump-table recogniser
-// returns null; the `add` and `rsb` copy/negate arms fall through to their own lowering, and for
-// `add`/`sub` that lowering is `constVal(imm(…))`, which is loose. So a non-match is a refusal at
-// two of the three sites and a possibly-wrong constant at the third; `#0b1` renders `+ 0` there.
-// The hole is `imm`'s rather than this predicate's, and a characterization test pins it.
-//
-// The refused class that DOES occur is the signed literal: 722 negative immediates across the
-// corpus (`#-0x4` ×287, `#-0x004`, …), all of them inert here because neither 0 nor 2 is negative —
-// but `imm` reads them correctly and this does not, so the two disagree on a populated class and a
-// future `want` has to know that.
-//
-// One divergence is knowingly left in, and it is inert at both values this is used with.
-// A leading zero means octal to gas and decimal to `Number`, so `#010` is 8 there and 10 here —
-// but for `want === 2` both readings fail and the dispatch declines either way, and for
-// `want === 0` every octal spelling of zero (`#0`, `#00`, `#000`) is zero under both. A `want`
-// other than those two has to revisit this, because for e.g. `want === 8` the readings disagree.
-const IMM_DIGITS = '(?:0[xX][0-9a-fA-F]+|[0-9]+)';
-const IMM_LITERAL = new RegExp(`^#\\s*${IMM_DIGITS}$`);
+// The literal is UNSIGNED here, as it always was: a signed one (`#-0x4` ×287 in the corpus) is
+// never 0 or 2 save `#-0`, which no producer spells, so a sign only ever meant "not this idiom".
+const IMM_LITERAL = /^#\s*(?:0[xX][0-9a-fA-F]+|[0-9]+)$/;
 const immEq = (op: string | undefined, want: number): boolean =>
-  op !== undefined && IMM_LITERAL.test(op) && Number(op.slice(1).trim()) === want;
+  op !== undefined && IMM_LITERAL.test(op) && gasIntLiteral(op.slice(1)) === want;
 
 // Expand fused register-range tokens (`r4-r7` → r4,r5,r6,r7) in a register list. Ranges are
 // numeric-endpoint only (`rN-rM`); a range whose endpoint is an ALIAS (`r4-pc`/`-lr`/`-sp`) is
@@ -1231,7 +1226,8 @@ function sectionMask(lines: readonly GasLine[]): {
   let opaque = 0;
   const subsection = (expr: string) => {
     const e = expr.trim();
-    return e === '' ? '0' : /^(?:\d+|0x[0-9a-f]+)$/i.test(e) ? String(Number(e)) : `?${e}#${opaque++}`;
+    const n = gasIntLiteral(e);
+    return e === '' ? '0' : n !== null && !/^[-+]/.test(e) ? String(n) : `?${e}#${opaque++}`;
   };
   const named = (name: string, sub: string) => `${name.replace(/^"(.*)"$/, '$1')} ${subsection(sub)}`;
   const out = lines.map((line) => {
@@ -2532,11 +2528,7 @@ function decode(
               `cannot lift '${name}': pc-relative literal load with no literal pool in the function to resolve into`,
             );
           }
-          const imm = parseInt(
-            f.instr!.ops[1].match(/#(0x[0-9a-fA-F]+|\d+)/)![1],
-            f.instr!.ops[1].includes('0x') ? 16 : 10,
-          );
-          const wordOff = ((basePar + itemOff[i] + 4) & ~3) - basePar + imm;
+          const wordOff = ((basePar + itemOff[i] + 4) & ~3) - basePar + imm(f.instr!.ops[1].match(/#[^\]]*/)![0]);
           // locate the word: a 4-byte data item covering [wordOff, wordOff+4)
           let value: string | undefined;
           items.forEach((g, j) => {
@@ -6591,8 +6583,8 @@ function highRegisterHeld(ab: AsmBlock, from: number, hi: string, callClobbers: 
   const slots = new Map<number, boolean>(); // offset -> whether what was stored there is unknown
   let spMoved = false;
   const slotOff = (t: string | undefined): number | null => {
-    const m = /^\[sp(?:,\s*#(-?(?:0x[0-9a-f]+|\d+)))?\]$/i.exec(t ?? '');
-    return m ? (m[1] === undefined ? 0 : Number(m[1])) : null;
+    const m = /^\[sp(?:,\s*#([^\]]*))?\]$/i.exec(t ?? '');
+    return m ? (m[1] === undefined ? 0 : gasIntLiteral(m[1])) : null;
   };
   for (const ins of ab.instrs.slice(from)) {
     const [d, src, k] = ins.ops;
