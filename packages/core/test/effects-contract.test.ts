@@ -295,7 +295,9 @@ describe('assertEffectsPreserved — a pinned device access', () => {
     lval: at({ k: 'const', value: addr }, true),
     value: { k: 'const', value: 1 },
   });
-  const checkReads = (fn: Fn, body: Stmt[]) => assertEffectsPreserved(fn, sfnWith(body));
+  /** `locals` are the tree's own names: an assignment to any other is a write to a global */
+  const checkReads = (fn: Fn, body: Stmt[], locals: string[] = []) =>
+    assertEffectsPreserved(fn, { ...sfnWith(body), locals: locals.map((name) => ({ name, type: T.s(32) })) });
 
   test('one pinned read rendered twice in sequence fails', () => {
     expect(() => checkReads(irReading([REG]), [read(REG), read(REG)])).toThrow(
@@ -566,10 +568,92 @@ describe('assertEffectsPreserved — a pinned device access', () => {
       body: [],
       ...(test === undefined ? {} : { fusedGuard: { site: 0, test } }),
     });
-    expect(() => checkReads(irReading([REG, REG]), [fusedFor(undefined)])).toThrow(
+    expect(() => checkReads(irReading([REG, REG]), [fusedFor(undefined)], ['i'])).toThrow(
       /dropped the read of the device register at 0x4000006/,
     );
-    expect(() => checkReads(irReading([REG, REG]), [fusedFor(readAt(REG))])).not.toThrow();
+    expect(() => checkReads(irReading([REG, REG]), [fusedFor(readAt(REG))], ['i'])).not.toThrow();
+  });
+
+  // A word store at a fixed address, spelled plain, which no access in the loop (all of them u16)
+  // may alias: agbcc keeps such a cell in a register for the loop and stores it once at the exit.
+  const plainWord = (addr: Expr = { k: 'const', value: 0x4000010 }): Stmt => ({
+    k: 'store',
+    lval: {
+      k: 'index',
+      base: { k: 'cast', to: T.ptr(T.s(32)), e: addr },
+      idx: { k: 'const', value: 0 },
+      width: 4,
+      signed: true,
+    },
+    value: { k: 'const', value: 1 },
+  });
+  const pollWhile = (body: Stmt[], fused = false): Stmt => ({
+    k: 'while',
+    cond: readAt(REG),
+    body,
+    ...(fused ? { fusedGuard: { site: 0, test: readAt(REG) } } : {}),
+  });
+
+  // The credit is for loops the plain count refused; one that writes memory through a plain
+  // lvalue keeps that refusal, whatever the write.
+  test('a fused loop that writes memory plain is credited nothing', () => {
+    expect(() =>
+      checkReads(irReading([REG, REG], [], [0x4000010]), [pollWhile([write(0x4000010)], true)]),
+    ).not.toThrow();
+    // a u16 store beside the u16 poll, which agbcc keeps in the loop: the withheld credit refuses it
+    const plainHalf: Stmt = {
+      k: 'store',
+      lval: at({ k: 'const', value: 0x4000010 }, false),
+      value: { k: 'const', value: 1 },
+    };
+    expect(() => checkReads(irReading([REG, REG]), [pollWhile([plainHalf], true)])).toThrow(
+      /dropped the read of the device register at 0x4000006/,
+    );
+    // a local's assignment writes no memory
+    const local: Stmt = { k: 'assign', name: 'x', value: readAt(REG) };
+    expect(() => checkReads(irReading([REG, REG, REG]), [pollWhile([local], true)], ['x'])).not.toThrow();
+  });
+
+  test('a poll that stores plain at a fixed address no access in the loop may alias is refused', () => {
+    expect(() => checkReads(irReading([REG]), [pollWhile([plainWord()])])).toThrow(
+      /a loop that polls a device register writes memory plain at an address the loop never changes in 'F'/,
+    );
+    // a global assigned by its bare name is a cell too
+    expect(() =>
+      checkReads(irReading([REG]), [pollWhile([{ k: 'assign', name: 'gFlag', value: { k: 'const', value: 1 } }])]),
+    ).toThrow(/writes memory plain/);
+    // the same store, qualified, stays in the loop
+    const qualified = plainWord({ k: 'const', value: 0x4000010 });
+    if (qualified.k === 'store' && qualified.lval.k === 'index' && qualified.lval.base.k === 'cast') {
+      qualified.lval.base.volatile = true;
+    }
+    expect(() => checkReads(irReading([REG], [], [0x4000010]), [pollWhile([qualified])])).not.toThrow();
+  });
+
+  test('a plain store a poll may keep in the loop is not refused', () => {
+    // its address moves with a local the loop assigns
+    const walk: Stmt[] = [
+      plainWord({ k: 'bin', op: '+', l: { k: 'const', value: 0x4000010 }, r: { k: 'var', name: 'i' } }),
+      { k: 'assign', name: 'i', value: { k: 'bin', op: '+', l: { k: 'var', name: 'i' }, r: { k: 'const', value: 4 } } },
+    ];
+    expect(() => checkReads(irReading([REG]), [pollWhile(walk)], ['i'])).not.toThrow();
+    // the loop makes a call
+    expect(() => checkReads(irReading([REG]), [pollWhile([plainWord(), callStmt('g')])])).not.toThrow();
+    // a u16 store beside the u16 poll may alias it
+    const half: Stmt = {
+      k: 'store',
+      lval: at({ k: 'const', value: 0x4000010 }, false),
+      value: { k: 'const', value: 1 },
+    };
+    expect(() => checkReads(irReading([REG]), [pollWhile([half])])).not.toThrow();
+    // a loop that polls nothing pinned is not judged
+    expect(() =>
+      checkReads(
+        irReading([REG]),
+        [read(REG), { k: 'while', cond: { k: 'var', name: 'k' }, body: [plainWord()] }],
+        ['k'],
+      ),
+    ).not.toThrow();
   });
 
   test('a fused guard’s credit licenses no re-run on a path', () => {
