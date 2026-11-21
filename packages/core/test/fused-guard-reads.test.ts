@@ -77,10 +77,11 @@
 //       d[0] = (u32)gS; g();
 //   }
 //
-// p15, p17 and p18 are the DMA template (a frame address armed through 0x40000d4, then `d[2];`) followed
+// p15 to p18 are the DMA template (a frame address armed through 0x40000d4, then `d[2];`) followed
 // by a wait whose body touches memory, compiled the same way, with `vu16` the `volatile u16`:
 //
 //   p15: while (d[2] & 0x80000000) { d[1] = 1; ((vu16 *)d)[1] = 2; }
+//   p16: while (d[2] & 0x80000000) { *(vu16 *)0x4000004; }
 //   p17: while (d[2] & 0x80000000) { ((vu16 *)d)[5] = n; }
 //   p18: while (d[2] & 0x80000000) { ((vu8 *)d)[11] = n; }
 //
@@ -89,7 +90,9 @@
 // the loop and stores it once after (loop.c `load_mems`): the u16 store aliases nothing the loop
 // reads, the s32 count. So the fused loop is credited nothing, and the contract refuses the plain
 // store besides. p17 is a jump-to-test loop, which fuses nothing: the same plain store is refused
-// there. p18's byte store may alias the count, which keeps it in the loop, so p18 lifts.
+// there. p18's byte store may alias the count, which keeps it in the loop, so p18 lifts. p16's guard
+// fuses and its base is homed into a local after structuring (basecse.ts `hoistBaseLocals`), which
+// re-spells the guard's test with the condition, so the credit still stands and p16 lifts.
 import { describe, expect, test } from 'vitest';
 
 import type { Stmt } from '../src/l3/ast';
@@ -403,6 +406,49 @@ p15:
 	.word	gDst
 `;
 
+const P16 = `
+p16:
+	push	{lr}
+	add	sp, sp, #-0x4
+	ldr	r1, .L7
+	ldrh	r2, [r1, #0x6]
+	mov	r1, sp
+	strh	r2, [r1]
+	ldr	r2, .L7+0x4
+	str	r1, [r2]
+	ldr	r1, .L7+0x8
+	str	r1, [r2, #0x4]
+	lsr	r0, r0, #0x1
+	mov	r1, #0x80
+	lsl	r1, r1, #0x18
+	orr	r0, r0, r1
+	str	r0, [r2, #0x8]
+	ldr	r0, [r2, #0x8]
+	ldr	r0, [r2, #0x8]
+	and	r0, r0, r1
+	cmp	r0, #0
+	beq	.L4	@cond_branch
+	ldr	r3, .L7+0xc
+.L5:
+	ldrh	r0, [r3]
+	ldr	r0, [r2, #0x8]
+	and	r0, r0, r1
+	cmp	r0, #0
+	bne	.L5	@cond_branch
+.L4:
+	bl	g
+	add	sp, sp, #0x4
+	pop	{r0}
+	bx	r0
+.L8:
+	.align	2, 0
+.L7:
+	.word	gBgI
+	.word	0x40000d4
+	.word	gDst
+	.word	0x4000004
+`;
+
 const P17 = `
 p17:
 	push	{lr}
@@ -526,6 +572,14 @@ describe('a guard-fused wait on a pinned register', () => {
     expect(() => decompile('p15', P15, ARMV4T_AGBCC, { prototypes })).toThrow(
       "a loop that polls a device register writes memory plain at an address the loop never changes in 'p15'",
     );
+  });
+
+  test('a fused wait whose base is homed after structuring keeps its credit, and the function lifts', () => {
+    const r = decompile('p16', P16, ARMV4T_AGBCC, { prototypes });
+    expect(r.source).toMatch(
+      /\n {4}while \(\(\(\(volatile s32 \*\)p0\)\[2\] & 128 << 24\) != 0\) \{\n {8}\*\(volatile u16 \*\)67108868;\n {4}\}\n/,
+    );
+    expect(recorded(r.sfn.body).map((l) => l.k)).toEqual(['while']);
   });
 
   test('a jump-to-test wait whose body stores plain where agbcc would sink it declines', () => {
