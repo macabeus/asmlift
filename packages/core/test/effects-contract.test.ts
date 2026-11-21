@@ -630,6 +630,27 @@ describe('assertEffectsPreserved — a pinned device access', () => {
     expect(() => checkReads(irReading([REG], [], [0x4000010]), [pollWhile([qualified])])).not.toThrow();
   });
 
+  // Two plain elements of one base at constant subscripts whose bytes miss each other are one
+  // address register and two displacements to agbcc: neither keeps the other in the loop, and
+  // both sink out of it.
+  test('two plain stores through one base at apart subscripts are each refused', () => {
+    const element = (i: number): Stmt => {
+      const st = plainWord();
+      if (st.k === 'store' && st.lval.k === 'index') {
+        st.lval.idx = { k: 'const', value: i };
+      }
+      return st;
+    };
+    expect(() => checkReads(irReading([REG]), [pollWhile([element(5), element(1)])])).toThrow(
+      /a loop that polls a device register writes memory plain at an address the loop never changes in 'F'/,
+    );
+    // the same element twice is one cell, which loop.c keeps in one register for both stores
+    expect(() => checkReads(irReading([REG]), [pollWhile([element(1), element(1)])])).toThrow(/writes memory plain/);
+    // through two different bases, one store may alias the other: neither is refused
+    const other = plainWord({ k: 'var', name: 'p' });
+    expect(() => checkReads(irReading([REG]), [pollWhile([element(5), other])], ['p'])).not.toThrow();
+  });
+
   test('a plain store a poll may keep in the loop is not refused', () => {
     // its address moves with a local the loop assigns
     const walk: Stmt[] = [

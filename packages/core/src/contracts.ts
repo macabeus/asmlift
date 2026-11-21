@@ -9,7 +9,16 @@ import { placedAt } from './ir/discipline';
 import { MEM_BASE_OPS } from './ir/opcodes';
 import { type IrType, memberOf, typeToString } from './ir/types';
 import { cellAddress, qualifiedBase } from './l3/address';
-import { type BinOp, type Expr, type SFn, type Stmt, calleeOf, caseGotoViolation, switchArmSuccessors } from './l3/ast';
+import {
+  type BinOp,
+  type Expr,
+  type SFn,
+  type Stmt,
+  calleeOf,
+  caseGotoViolation,
+  exprEquals,
+  switchArmSuccessors,
+} from './l3/ast';
 import {
   assignsIn,
   exprChildren,
@@ -388,17 +397,31 @@ function plainWriteIn(stmts: readonly Stmt[], ctx: TreeContext): Write | undefin
  *  Judged over the tree as the recompile would read it. An address is fixed in the loop when it
  *  reads no memory, makes no call and names no local the loop assigns. Under agbcc's type-based
  *  aliasing, another access may alias the cell when it has the write's width, signed or not, or
- *  either is a byte; a write whose width the tree does not say (a member, or a global assigned by
- *  its name) is taken to be aliased by nothing. Only a loop whose condition renders a pinned device
- *  read is judged: a poll, the family the device pin exists for. A plain write at a fixed address
- *  in any other loop is the same hazard where its source was `volatile`, and is not judged here. */
+ *  either is a byte, unless it is an element of the same base spelled alike at a constant
+ *  subscript whose bytes miss the write's, or are the write's own cell (two stores
+ *  `((u16 *)0x40000d4)[5]` and `[1]` each leave the other free to sink); a write whose width the
+ *  tree does not say (a member, or a global assigned by its name) is taken to be aliased by
+ *  nothing. Only a loop that renders a pinned device read is judged: a poll, the family the device
+ *  pin exists for, whether its condition reads the register or its own body does and hands the
+ *  value to the condition through a local (a rotated `v0 = REG; while (v0 & M) { …; v0 = REG; }`);
+ *  a poll nested in it is judged as its own loop, and makes the outer one no poll. A
+ *  plain write at a fixed address in any other loop is the same hazard where its source was
+ *  `volatile`, and is not judged here. */
 function sunkPollStore(s: Loop, ctx: TreeContext): Write | undefined {
+  const stmts = loopStmts(s);
   const polled: EffectCounts = new Map();
   effectsInExpr(s.cond, polled, ctx);
+  // The loop's own statements, not a nested loop's: an inner poll is judged as its own loop.
+  const own = (list: readonly Stmt[]): Stmt[] =>
+    list.flatMap((st) =>
+      st.k === 'while' || st.k === 'dowhile' || st.k === 'for' ? [] : [st, ...own(stmtChildren(st))],
+    );
+  for (const st of own(stmts)) {
+    stmtExprs(st).forEach((e) => effectsInExpr(e, polled, ctx, false, false, st.k === 'store' && e === st.lval));
+  }
   if (deviceReads(polled).size === 0) {
     return undefined;
   }
-  const stmts = loopStmts(s);
   const exprs = [...walkExprs([{ k: 'exprstmt', value: s.cond }, ...stmts])];
   if (exprs.some((e) => e.k === 'call')) {
     return undefined;
@@ -413,6 +436,20 @@ function sunkPollStore(s: Loop, ctx: TreeContext): Write | undefined {
     !(e.k === 'var' && assigned.has(e.name)) &&
     exprChildren(e).every(fixed);
   const widthOf = (e: Access): number | undefined => (e.k === 'index' ? e.width : undefined);
+  // Two elements of one base spelled alike at constant subscripts are one address register and
+  // two displacements to the recompile. Where their bytes do not overlap, alias analysis tells
+  // them apart (alias.c `memrefs_conflict_p`); where they are the one cell at one width, loop.c
+  // `load_mems` takes the other access for the cell itself. Neither keeps the cell in the loop.
+  const apart = (a: Access, b: Access): boolean => {
+    if (a.k !== 'index' || b.k !== 'index' || a.idx.k !== 'const' || b.idx.k !== 'const') {
+      return false;
+    }
+    if (!exprEquals(a.base, b.base)) {
+      return false;
+    }
+    const [lo, hi] = [a.idx.value * a.width, b.idx.value * b.width];
+    return lo + a.width <= hi || hi + b.width <= lo || (lo === hi && a.width === b.width);
+  };
   return everyStmt(stmts).find((st): st is Write => {
     if (!plainWrite(st, ctx)) {
       return false;
@@ -425,7 +462,10 @@ function sunkPollStore(s: Loop, ctx: TreeContext): Write | undefined {
       return false;
     }
     const w = widthOf(lval);
-    return w !== 1 && !accesses.some((a) => a !== lval && w !== undefined && (widthOf(a) === w || widthOf(a) === 1));
+    return (
+      w !== 1 &&
+      !accesses.some((a) => a !== lval && w !== undefined && (widthOf(a) === w || widthOf(a) === 1) && !apart(a, lval))
+    );
   });
 }
 
