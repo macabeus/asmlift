@@ -153,7 +153,7 @@ export function checkCalleeBodiesDrift(man: RealManifest): void {
     derived =
       target === undefined
         ? { objdump: null, bodies: {}, unread: names }
-        : readCalleeBodies(man.project, res, names, target, projectObjdump(root, target));
+        : readCalleeBodies(man.project, root, res, names, target, projectObjdump(root, target));
   } catch (e) {
     complain(`${what} are UNVERIFIABLE — ${(e as Error).message}`);
     return;

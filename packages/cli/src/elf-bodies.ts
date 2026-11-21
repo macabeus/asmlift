@@ -329,14 +329,23 @@ export function withNamedCalls(
   return relocs.length === 0 ? { kind: 'listing', text } : { kind: 'listing', text, relocs };
 }
 
-/** The one name a call from `range` to `addr` enters (see the header), or undefined. */
-export function calleeAt(image: ElfImage, range: FunctionRange, addr: number): string | undefined {
+/** The one name a call from `range` to `addr` enters (see the header), or undefined. `thumb` reads
+ *  `addr` as a Thumb entry, the address a `bl` pair branches to, whose FUNC symbol carries the low
+ *  bit (cli splat-bodies.ts reads a relocated `bl` of a project file through it); otherwise the
+ *  symbol's value is `addr` itself, as a listing prints it. */
+export function calleeAt(
+  image: ElfImage,
+  range: FunctionRange,
+  addr: number,
+  { thumb = false }: { thumb?: boolean } = {},
+): string | undefined {
   const holding = image.elf.sections.flatMap((s, i) =>
     isCode(s) && s.addr <= addr && addr < s.addr + s.size ? [i] : [],
   );
   const shndx = holding.includes(range.shndx) ? range.shndx : holding.length === 1 ? holding[0] : undefined;
+  const value = thumb ? addr | 1 : addr;
   const names = new Set(
-    image.symbols.filter((s) => s.shndx === shndx && s.type === STT_FUNC && s.value === addr).map((s) => s.name),
+    image.symbols.filter((s) => s.shndx === shndx && s.type === STT_FUNC && s.value === value).map((s) => s.name),
   );
   if (shndx === undefined || names.size !== 1) {
     return undefined;

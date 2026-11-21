@@ -4,10 +4,20 @@
 // same objdump in the decomp.yaml a row's repro script runs the CLI with (decomp-config.ts).
 // Spelled per reader, a PowerPC repro could read its listings with another objdump than the
 // vendor's, or with none, and read no body where the harness hands it one.
+//
+// NOT THE PROJECT'S OWN ASSEMBLY. Where decomp.yaml names a compiler, the CLI also reads a Thumb
+// callee's body off the project's `.s` the build proves is the linked code (cli splat-bodies.ts),
+// which only a compile with that command proves. This reader does not compile, so it freezes none of
+// those: it REFUSES a project where that pass has a file to read (`projectAsmCandidates`), rather
+// than freezing less than the CLI reads (kleod has no INCLUDE_ASM and names no compiler). A project
+// that has one needs those bodies frozen here first.
 import { moduleOf } from '@asmlift/bench-schema';
-import { calleeBodiesFromElf } from '@asmlift/cli/elf-bodies';
+import { asmliftBlock } from '@asmlift/cli/config';
+import { calleeBodiesFromElf, readElfImage } from '@asmlift/cli/elf-bodies';
 import { disasmRange, objdumpBinaryFor, readsObjdumpText } from '@asmlift/cli/objfile';
+import { projectAsmCandidates } from '@asmlift/cli/splat-bodies';
 import type { TargetDescription } from '@asmlift/core/target';
+import { searchDecompYaml } from '@match-kit/decomp-yaml/files';
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -50,10 +60,12 @@ export function objdumpVersion(target: TargetDescription, bin: string | undefine
 
 /** The bodies of `callees` the ELF at `elf` gives, read as the CLI reads them (`calleeBodiesFromElf`
  *  over `disasmRange`), with the ELF's path in a listing's header written as `elfRel` (decomp.yaml's
- *  spelling, never this machine's). THROWS on a range the objdump could not disassemble, rather than
- *  reading less than the CLI reads. */
+ *  spelling, never this machine's). THROWS on a range the objdump could not disassemble, and where the
+ *  CLI run in the checkout at `root` would read a Thumb body off the project's own assembly (see the
+ *  header), rather than reading less than the CLI reads. */
 export function readCalleeBodies(
   project: string,
+  root: string,
   elf: { elf: string; elfRel: string },
   callees: readonly string[],
   target: TargetDescription,
@@ -66,6 +78,22 @@ export function readCalleeBodies(
   );
   if (read.warnings.length > 0) {
     throw new Error(`${project}: ${read.warnings.map((w) => w.trim()).join('\n  ')}`);
+  }
+  // the CLI's condition for its project-asm pass (cli main.ts): a Thumb body, and a compiler named
+  const thumb = sorted.filter((c) => read.bodies[c]?.kind === 'thumb');
+  const image =
+    thumb.length > 0 && asmliftBlock(searchDecompYaml(root))?.compiler !== undefined
+      ? readElfImage(readFileSync(elf.elf))
+      : undefined;
+  if (image !== undefined) {
+    const own = projectAsmCandidates(root, image, thumb).map((c) => c.callee);
+    if (own.length > 0) {
+      throw new Error(
+        `${project}: the CLI reads ${own.length} callee bodies (${own.slice(0, 5).join(', ')}${own.length > 5 ? ', …' : ''}) ` +
+          "off the project's own assembly where its build proves them linked (cli splat-bodies.ts), and this " +
+          "reader freezes only the ELF's — nothing written",
+      );
+    }
   }
   return {
     objdump: readsObjdumpText(target) ? objdumpVersion(target, bin) : null,

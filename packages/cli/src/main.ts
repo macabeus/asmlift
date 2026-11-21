@@ -45,7 +45,7 @@ import { type AsmliftToolConfig, type UnitCompiler, asmliftBlock, resolveTarget 
 import { declaredBlock, indentedDeclarations } from './declare';
 import { isDecline } from './decline';
 import { moduleHasUnits, objdiffAbove, readObjdiffUnits, unitDefining } from './dtk-unit';
-import { type RangeDisasm, calleeBodiesFromElf, elfBodyCallees } from './elf-bodies';
+import { type RangeDisasm, calleeBodiesFromElf, elfBodyCallees, readElfImage } from './elf-bodies';
 import { type FlagsInput, resolveFlags } from './flags';
 import { moduleElfPath } from './module-elf';
 import {
@@ -69,6 +69,7 @@ import type { RankedResult } from './rank';
 // it either, because that module loads the objdiff engine and the note above `./rank` is about
 // exactly that edge.
 import { rankedSummaryLine, scoreOf, threwLine, threwStep } from './score-format';
+import { type BodyAssemble, assembleWith, calleeBodiesFromProjectAsm } from './splat-bodies';
 
 export { scoreOf } from './score-format';
 
@@ -191,6 +192,9 @@ export interface ObjInput {
   /** a range of `tools.asmlift.elf`, for a guessed callee's body (elf-bodies.ts); absent ⇒ the
    *  target's objdump */
   disasmRange?: RangeDisasm;
+  /** asmlift's own assembly of a project file, for a Thumb callee's body read off the project's
+   *  assembly (splat-bodies.ts); absent ⇒ GNU as (`assembleWith`) */
+  assembleBody?: BodyAssemble;
 }
 
 export interface CliResult {
@@ -789,6 +793,8 @@ export async function runCli(
   // run did not use. The bodies of those the input does not define are read off the linked ELF
   // (elf-bodies.ts), and bound what each can read of its arguments as an inline body would.
   let calleeBodies: CalleeBodies | undefined;
+  // the project file each body read off the project's assembly came from, which the note names
+  let calleeBodyFiles: ReadonlyMap<string, string> | undefined;
   if (toolCfg?.elf) {
     const elfPath = resolve(configDir!, toolCfg.elf);
     const outside = elfBodyCallees(asm, name, unitTarget, prototypes, symbols, asmData?.relocs, moduleFlag);
@@ -802,6 +808,23 @@ export async function runCli(
           ((elf, t, section, start, stop) => disasmRange(elf, t, section, start, stop, toolCfg?.objdump)),
       );
       warn += read.warnings.join('');
+      // a Thumb range's halfwords bound no argument register: its body in the project's assembly does,
+      // where asmlift's own assembly of it is the linked code (splat-bodies.ts). Only for a project that
+      // states a compile command: it is how a project says its own build is what asmlift may compare
+      // against, though the proof itself runs none of it.
+      const thumb = Object.keys(read.bodies).filter((c) => read.bodies[c].kind === 'thumb');
+      const image =
+        thumb.length > 0 && toolCfg.compiler !== undefined ? readElfImage(readFileSync(elfPath)) : undefined;
+      if (image !== undefined) {
+        const project = await calleeBodiesFromProjectAsm(
+          configDir!,
+          image,
+          thumb,
+          objInput?.assembleBody ?? assembleWith(),
+        );
+        Object.assign(read.bodies, project.bodies);
+        calleeBodyFiles = new Map(Object.entries(project.files));
+      }
       calleeBodies = Object.keys(read.bodies).length === 0 ? undefined : read.bodies;
     }
   }
@@ -826,6 +849,7 @@ export async function runCli(
       asmData?.relocs,
       new Map(Object.entries(asked)),
       new Map(Object.entries(sized)),
+      calleeBodyFiles,
     );
   // a note that names its own tag (`[own-return]`) carries it; every other one is the arity bound's
   const ownArityNote = (notes: readonly string[]) =>

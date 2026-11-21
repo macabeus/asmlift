@@ -4633,6 +4633,48 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void nine();\nvoid stkbody_none(int *p, int n);',
     proto: { stkbody_none: { returnsVoid: true }, nine: { returnsVoid: true } },
   },
+  // A CALLEE BODY'S STAGED HIGH-REGISTER RESTORE READS NO ARGUMENT (frontend/thumb.ts
+  // `bodySavedRegs`, `restoreCopies`). agbcc restores r8-sl through `pop {r3, r4, r5}; mov r8, r3; …`,
+  // and some path reaches that restore without writing r3 (here `hiw`'s `a >= 8` exit). Lifted as the
+  // function's own `mov`, it reads r3's entry value and bounds the caller's guess at four words, and
+  // `hirst_call`'s r1/r2 pass-throughs under its stored r3 decline. Read as the restore's, the body
+  // reads r0 alone and the call is `hiw(a + 1)` (kl2dct sub_0802C910 and
+  // sub_08036F18 have such a callee). agbcc only: no other frontend stages a save through a low
+  // register.
+  {
+    sym: 'hirst_call',
+    src:
+      'extern int g0, g1, g2, g3, g4, g5, g6, g7, g8, g9;\nextern int gx;\n' +
+      'void hiw(a) unsigned char a;\n{\n    int i;\n    if (a < 8) {\n' +
+      '        int x0 = g0, x1 = g1, x2 = g2, x3 = g3, x4 = g4, x5 = g5, x6 = g6, x7 = g7, x8 = g8;\n' +
+      '        for (i = a; i < a + 8; i++) {\n' +
+      '            g9 += x0 * i + x1; x0 += x2; x1 ^= x3; x2 += x4 * i; x3 -= x5; x4 += x6; x5 ^= x7; x6 += x8 * i; x7++; x8 += a;\n' +
+      '        }\n    }\n}\n' +
+      'void hirst_call(int a, int b, int c, int d)\n{\n    gx = d;\n    hiw(a + 1);\n}',
+    features: [],
+    toolchains: ['agbcc'],
+    ctx: 'extern int gx;\nvoid hiw();\nvoid hirst_call(int a, int b, int c, int d);',
+    proto: { hirst_call: { returnsVoid: true }, hiw: { returnsVoid: true } },
+  },
+  // A CALLEE BODY'S RETURN THROUGH r0 HANDS BACK NO ARGUMENT (frontend/callee-body.ts
+  // `returnsUntouched`, `ret` `viaReturnReg`). agbcc returns from a function that pushed lr with
+  // `pop {r0}; bx r0`, which the Thumb frontend lifts as a bare `ret`. Counted as a bare return on a
+  // call-free path, it would read the first argument word: `cb`, which loads r0 before reading it,
+  // would bound its caller's guess at one word, and `bxr0_call` would pass the `&gy` its store left in
+  // r0 (`cb(&gy)`: the same bytes, an argument the source never passed). Read as the return address
+  // it is, the bound is 0 and the call `cb()` (kl2dct sub_08047848, sub_0802F05C and sub_0803953C are
+  // such callees). agbcc only: no other target returns through its first argument register.
+  {
+    sym: 'bxr0_call',
+    src:
+      'extern int ga[], gb[], gy;\nvoid cb()\n{\n    int i;\n    for (i = 0; i < 8; i++) {\n' +
+      '        ga[i] = gb[i] * 3 + ga[i + 1];\n    }\n}\n' +
+      'void bxr0_call(int a, int b)\n{\n    gy = b + 1;\n    cb();\n}',
+    features: [],
+    toolchains: ['agbcc'],
+    ctx: 'extern int gy;\nvoid cb();\nvoid bxr0_call(int a, int b);',
+    proto: { bxr0_call: { returnsVoid: true }, cb: { returnsVoid: true } },
+  },
   // `spillarg` is `spill10` with a genuine outgoing argument under the spills: `five(i, 1, 2, 3,
   // v0)` stages argument 5 at [sp,#0] before every call and agbcc moves the spills above it, to
   // [sp,#4]..[sp,#0x20]. Several reach `bl five` unread, so the declaration (`five` takes one stack
@@ -13231,8 +13273,10 @@ export const SYNTHETIC: SynthSpec[] = [
   //      question about its VALUE counts it; call-plan.ts `leftover` asks of each WRITE that reaches
   //      the call whether an instruction, the copy included, read it after
   //      (`SsaBuilder.readAfterEveryReachingWrite`). jt_rndjoin lifts `rnd()` on agbcc, as `--proto
-  //      '{"thunk_GetRandomValue":{"params":0}}'` lifts the real one. jt_rndjoinst has no body and
-  //      must STAY declined on agbcc, the soundness control.
+  //      '{"thunk_GetRandomValue":{"params":0}}'` lifts the real one. jt_rndjoinst has no body: the
+  //      marker the inner default edge brings in r0 is the table target on that path, so on agbcc,
+  //      which fills argument words in order, the one `bl rnd` takes no argument at or above r0
+  //      (frontend/call-plan.ts `CallSite.marker`, jt_mark below), and it lifts `rnd()` too.
   //  16. sretpuretail / sretpuretail_exit (sub_08014230). Three return arms in one loop. agbcc
   //      cross-jumps two of them after reload (toplev.c:3164; jump.c:1961-1991 `find_cross_jump`) into
   //      one PURE block, the `p.kind = seg->kind` insert reading the strength-reduced element pointer,
@@ -14189,6 +14233,58 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
     ctx: 'struct E { u16 x, y; u8 pad[11]; u8 kind; u8 pad3[12]; };\nextern struct E gE[];\nu8 rnd();\nvoid jt_rndjoinst(u8 i);',
     proto: { jt_rndjoinst: { params: ['u8'], returnsVoid: true }, rnd: { returns: 'u8' } },
+  },
+  // A DISPATCH'S MARKER IS A CEILING ON A GUESSED ARITY (frontend/call-plan.ts `CallSite.marker`;
+  // kl2dct sub_0800B804, sub_08043154). agbcc cross-jumps cases 0, 2 and 4 into one `bl cb` that case
+  // 2's dispatch edge enters directly, with r0 the case's code address and r1 the table's on that
+  // path. The call is one instruction, so no argument of it is in r0, and agbcc fills argument words
+  // in order, so none is above it: `cb()`, where a guess that read the marker would decline. The ceiling
+  // stands only in a register the ABI never leaves empty below a filled one (`argRegisterHoles`):
+  // every one on agbcc, none on O32 (a1/a3 an aligned pair's skips, a0..a3 the two leading float
+  // slots' shadow), and on PowerPC each but r4/r6/r8/r10. jt_mark's other cells reach no ceiling;
+  // jt_markpass:mwcc_242_81 is a PowerPC call the ceiling lifts. jt_mark:agbcc lifts `cb()` and
+  // misses on its structuring; jt_markfall:agbcc is the cell that matches through the ceiling.
+  {
+    sym: 'jt_mark',
+    src:
+      'extern int gx; extern u8 gB, gC; extern u16 gH;\nextern void cb();\nvoid jt_mark(s32 i)\n{\n    switch (i) {\n' +
+      '    case 0: gx = 5; cb(); break;\n    case 1: gB = 1; break;\n    case 2: cb(); break;\n' +
+      '    case 3: gC = 7; break;\n    case 4: gB = 2; cb(); break;\n    case 5: gH = 9; break;\n    case 6: cb(); break;\n    }\n}',
+    features: ['dense'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'extern int gx; extern u8 gB, gC; extern u16 gH;\nvoid cb();\nvoid jt_mark(s32 i);',
+    proto: { jt_mark: { returnsVoid: true }, cb: { returnsVoid: true } },
+  },
+  // agbcc: case 0 falls into case 1's `bl cb`, which case 1's dispatch edge enters with r0 the case's
+  // code address and r1 the table's; case 0 brings 5 and gx's address there. The ceiling stops at
+  // r0: `cb()`, the source's
+  {
+    sym: 'jt_markfall',
+    src:
+      'extern int gx; extern u8 gB; extern u16 gH;\nextern void cb();\nvoid jt_markfall(s32 i)\n{\n    switch (i) {\n' +
+      '    case 0: gx = 5;\n    case 1: cb(); break;\n    case 2: gB = 1; break;\n    case 3: gH = 7; break;\n' +
+      '    case 4: cb(); gx = 9; break;\n    }\n}',
+    features: ['dense'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'extern int gx; extern u8 gB; extern u16 gH;\nvoid cb();\nvoid jt_markfall(s32 i);',
+    proto: { jt_markfall: { returnsVoid: true }, cb: { returnsVoid: true } },
+  },
+  // mwcc_242_81 keeps p2 in r31 and builds the table base in r5 (`lis r5,@20@ha; addi r5,r5,@20@l`);
+  // case 0 falls into case 1's `g2(gx, p2)`, which the dispatch edge enters with r5 the table's. r5
+  // is no pair's skip on PowerPC, so the guess stops below it: `g2(gx, p2)`, where reading r5 would
+  // decline. Every call's arity is the source's
+  {
+    sym: 'jt_markpass',
+    src:
+      'extern int gx; extern u8 gb; extern u16 gh;\nextern void g2();\nvoid jt_markpass(s32 p0, s32 p1, s32 p2)\n{\n' +
+      '    switch (p0) {\n    case 0: gx = 2;\n    case 1: g2(gx, p2); break;\n' +
+      '    case 2: gb = 2; gh = p0 + 4; g2(8, 4); break;\n    case 3: L3: gx = p2 + 5; break;\n' +
+      '    case 4: gh = gx; gb = 2; gx = p2; break;\n    case 5: g2(p1, p2 + 3); break;\n' +
+      '    case 6: g2(8, 4); gx = p2; goto L3;\n    }\n}',
+    features: ['dense'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'extern int gx; extern u8 gb; extern u16 gh;\nvoid g2();\nvoid jt_markpass(s32 p0, s32 p1, s32 p2);',
+    proto: { jt_markpass: { params: ['s32', 's32', 's32'], returnsVoid: true }, g2: { returnsVoid: true } },
   },
   {
     sym: 'sretpuretail',

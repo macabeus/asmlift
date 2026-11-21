@@ -213,6 +213,25 @@ export interface CallSite {
    *  dropped with everything else there (`mov r2,r1` ahead of `bl g` lifts `g(…)` without it), which
    *  only hand asm meets: no compiler copies a marker. */
   readonly parked?: (v: Value, reg: string) => boolean;
+  /** whether `v`, in argument register `reg`, is a marker a jump-table dispatch left in that very
+   *  register, parked or not (frontend/jump-table.ts `markerIn`). A MIXED case target's marker
+   *  stands for what its other paths brought too, so the register is no value the case lacks; but on
+   *  the path through the dispatch it holds the table's address or the case's code address, and the
+   *  call is one instruction on every path, so a register some real path brings it to is none of the
+   *  call's arguments (a defined program whose callee read it would read a code address there). A
+   *  register this ABI never leaves empty below a filled one is then no hole either, so no register
+   *  above it is an argument, and the guessed arity stops below the lowest such register
+   *  (`fallbackArgc`'s `ceiling`). The holes are `parked`'s, asked per register (`argRegisterHoles`):
+   *  none on agbcc, which fills argument words in order; r4, r6, r8 and r10 on PowerPC; every one of
+   *  a0..a3 on O32, where a marker may stand in a register the call skipped. "Some real path" is
+   *  asked of the blocks filled so far (`SsaBuilder.holdsValueOnFilledPaths`): a block not filled yet
+   *  may write the register on its way to the call, so the marker past it is no value that path
+   *  brings — nor of an `exhaustive` switch's default edge, which no path takes. The answer therefore
+   *  depends on the order blocks are filled in: a marker only a block laid out after the call brings
+   *  caps nothing here, and the read of it declines as any marker read does. Asking it order-free
+   *  would need every Thumb instruction's register writes off the asm, and a write that list missed
+   *  would cap the guess below a real argument. */
+  readonly marker?: (v: Value, reg: string) => boolean;
   /** whether `v`, in argument register `reg`, is the scaled index a jump-table dispatch left in that
    *  very register (frontend/jump-table.ts `scaledIndexIn`): a call handed it and one not compile
    *  alike, so a guessed arity that counts it refuses */
@@ -825,7 +844,7 @@ export function callDeclarations(
       return undefined;
     }
     const holes = argRegisterHoles(target);
-    if (holes.leadingFloatShadow && regs.indexOf(gap[0]) === 0 && own?.proves !== true) {
+    if (regs.indexOf(gap[0]) === 0 && holes.floatShadowed.has(gap[0]) && own?.proves !== true) {
       return undefined;
     }
     const ownWords = own?.proves !== true ? undefined : ownArgumentWordsOn(name, own.proto, target);
@@ -1078,17 +1097,24 @@ export function callDeclarations(
     const resultOwed: Array<() => void> = [];
     // how many argument words the decided gaps put beyond doubt
     let decidedWords = 0;
+    // whether this ABI may leave argument register `r` empty below one a call fills (`argRegisterHoles`)
+    const maySkip = (r: string) => holes.skippable.has(r) || holes.floatShadowed.has(r);
+    // the lowest argument register past the stated ones that some path filled so far brings a
+    // dispatch's marker to, of those the ABI never skips (`CallSite.marker`)
+    const ceiling = target.argRegs.findIndex(
+      (r, k) => k >= floor && !maySkip(r) && ssa.holdsValueOnFilledPaths(r, bi, (v) => site.marker?.(v, r) === true),
+    );
     const argc =
       widths === null
         ? fallbackArgc(ssa, target.argRegs, bi, {
             accept: mayPass,
+            ceiling: ceiling < 0 ? undefined : ceiling,
             bound: bodyWords,
             leftover,
             gap: { name, at: guess.at, fail },
             floor,
             parked: (r) =>
-              !holes.skippable.has(r) &&
-              !(holes.leadingFloatShadow && r === target.argRegs[0]) &&
+              !maySkip(r) &&
               (ssa.holdsValue(r, bi, (v) => site.parked?.(v, r) === true) ||
                 // a call in the case destroyed it: the hole is that call's, and refuses only where a
                 // register above holds a value written since (`fallbackArgc`'s `parked`)
@@ -1137,7 +1163,7 @@ export function callDeclarations(
           k >= floor &&
           ssa.hasReachingDef(r, bi, (v) => site.parked?.(v, r) === true || site.scaledIndex?.(v, r) === true),
       );
-      parkedInArgs ||= markedAt >= 0;
+      parkedInArgs ||= markedAt >= 0 || ceiling >= 0;
       const call = typeof guess.at === 'number' ? `at 0x${guess.at.toString(16)}` : guess.at;
       const last = target.argRegs[argc - 1];
       // the blocks since the dispatch on the way to the call: a path stops at a `switch_br`'s block

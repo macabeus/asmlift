@@ -395,6 +395,19 @@ export const parkedIn =
     return s?.kind === 'marker' && s.parks && key(s.reg) === key(reg);
   };
 
+/** Whether `v`, read from `reg`, is a marker a dispatch idiom left in that very register: {@link
+ *  parkedIn}'s, and a MIXED target's too, which stands for what the other paths into it brought as
+ *  well (`StaleMarker.parks`). On the path through the dispatch the register holds the table's
+ *  address or the case's code address there, which no C argument evaluates to; a guessed arity reads
+ *  it as a ceiling in a register the ABI never skips (frontend/call-plan.ts `CallSite.marker`). A
+ *  narrow reload's copy of sp is none: a frame address is an argument a source passes. */
+export const markerIn =
+  (stale: ReadonlyMap<Value, StaleIdiomRead>, key: (reg: string) => string = (r) => r) =>
+  (v: Value, reg: string): boolean => {
+    const s = stale.get(v);
+    return s?.kind === 'marker' && s.form !== 'narrow' && key(s.reg) === key(reg);
+  };
+
 /** Whether `v`, read from `reg`, is the scrutinee scaled by four that an elided dispatch left in that
  *  very register (`enterCaseTarget`). A case reads it freely (`p[i]`), but a guessed arity may not
  *  count it: mwcc 2.4.2 keeps the dispatch's `slwi r4,r3,2` live into its `p[i]` cases, and an

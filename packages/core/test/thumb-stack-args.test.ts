@@ -321,6 +321,29 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       );
     });
 
+    // A staged restore's `mov rHi, rLow` is the restore's, not the function's: where some path
+    // reaches agbcc's `pop {r3}; mov r8, r3` without writing r3, lifted as the function's it reads r3's
+    // entry value and mints a1-a3 for a function of one argument.
+    test('…and a staged restore reads no argument from the low register it restores through', () => {
+      const lift = (body: string) =>
+        decompile(
+          'f',
+          `f:\n\t${body
+            .split('; ')
+            .join('\n\t')
+            .replace(/\t(\.L\d+:) /g, '$1\n\t')}\n`,
+          ARMV4T_AGBCC,
+        ).source;
+      const restore = (pop: string) =>
+        `push {r4, lr}; mov r4, r8; push {r4}; cmp r0, #0; beq .L1; mov r8, r0; mov r3, r8; add r0, r3, #1; ` +
+        `.L1: ${pop}; pop {r4}; pop {r1}; bx r1`;
+      expect(lift(restore('pop {r3}; mov r8, r3'))).toBe(
+        's32 f(s32 a0) {\n    if (a0 != 0) a0 = a0 + 1;\n    return a0;\n}\n',
+      );
+      // …the same body restoring through r2 never read r3, and lifts the same
+      expect(lift(restore('pop {r2}; mov r8, r2'))).toBe(lift(restore('pop {r3}; mov r8, r3')));
+    });
+
     // The same holds of a scratch register, which no return hands back saved: a pop that fills one
     // with another word is a copy the fill never makes, and read by name `push {r1}; pop {r0}`
     // would lift `return a0` for a function returning a1. Only the return idiom, a `bx` through the

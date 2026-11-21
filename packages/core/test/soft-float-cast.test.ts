@@ -164,7 +164,7 @@ describe('an equality helper keeps the relation the source spelled', () => {
     ['fneloop', 'a0 != a1'],
   ])('%s, a break guard in a tested loop', (name, cond) => {
     expect(lift(name)).toBe(
-      `void ${name}(float a0, float a1, s32 a2, s32 a3) {\n    s32 v0;\n` +
+      `void ${name}(float a0, float a1, s32 a2) {\n    s32 v0;\n` +
         `    for (v0 = 0; v0 < a2; v0 = v0 + 1) {\n        if (${cond}) break;\n        gI = gI + v0;\n    }\n}\n`,
     );
   });

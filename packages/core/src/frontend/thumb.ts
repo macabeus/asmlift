@@ -53,6 +53,7 @@ import {
   enterCaseTarget,
   enterKeptDispatch,
   idiomLeaves,
+  markerIn,
   parkedIn,
   refuseStaleIdiomReads,
   scaledIndexIn,
@@ -1573,6 +1574,13 @@ function decode(
       );
     }
     const defined = new Set<string>();
+    // A `.macro` whose name is not a literal word (`.macro \m`, a `\()` splice) or that sits inside
+    // a repeated or macro body (`.irp m, movs` / `.macro \m`; a macro that defines a macro) gets its
+    // name only when gas expands it, so it may be any name: from there on every statement is read as
+    // a possible macro call. `bodyDepth` counts the open `.macro`/`.irp`/`.irpc`/`.rept` bodies above
+    // the statement.
+    let anyName = false;
+    let bodyDepth = 0;
     for (const [k, line] of lines.entries()) {
       for (const [j, st] of line.statements.entries()) {
         const { debug, section } = mask.lines[k].statements[j];
@@ -1595,8 +1603,11 @@ function decode(
           for (const l of names.map((s) => s.trim().toLowerCase())) {
             if (l !== '') {
               defined.add(l);
+              anyName ||= !/^[a-z_.$][\w.$]*$/.test(l);
             }
           }
+          anyName ||= bodyDepth > 0;
+          bodyDepth++;
           continue;
         }
         // `.macro` after anything but plain labels (a quoted `"nop": .macro` names the macro `nop`)
@@ -1607,7 +1618,12 @@ function decode(
           );
         }
         const head = rest.match(/^[\w.$]+/)?.[0].toLowerCase();
-        if (code && head !== undefined && defined.has(head)) {
+        if (head !== undefined && /^\.(?:irpc?|rept)$/.test(head)) {
+          bodyDepth++;
+        } else if (head !== undefined && /^\.(?:endm|endr)$/.test(head)) {
+          bodyDepth = Math.max(0, bodyDepth - 1);
+        }
+        if (code && head !== undefined && (anyName || defined.has(head))) {
           macroUses.add(codeLines.length - 1);
         }
       }
@@ -5624,6 +5640,9 @@ function prologueSavedRegs(entry: AsmBlock): { saved: ReadonlySet<string>; carri
  *  leading run too, so the two readings of one idiom agree: `mov r0, r8; add r0, #1; push {r0}`
  *  saves no r8. It is restored by `pop {rLow}; mov rHi, rLow` likewise, and that `pop` restores no
  *  `rLow`: agbcc's `pop {r3, r4}; mov r8, r3; mov sl, r4; pop {r4-r7}` hands r4 sl's word first.
+ *  Where the word it loads is rHi's own, that `mov` is the restore's and is returned as
+ *  `restoreCopies` for the fill to skip: lifted, it reads rLow, which some path may never have
+ *  written, and an unwritten r3 there is the caller's fourth argument.
  *
  *  THE RESTORE ENDS THE SAVE. Past it the register holds the caller's value again, so a read there
  *  is the caller's value and a write there is one the caller sees, neither of them a local's —
@@ -5667,6 +5686,7 @@ function bodySavedRegs(
   leaked: ReadonlyMap<string, Instr>;
   copied: ReadonlyMap<string, Instr>;
   returned: ReadonlyMap<string, Instr>;
+  restoreCopies: ReadonlySet<Instr>;
 } {
   // What each instruction saves, restores and otherwise names; the staging `mov`s first.
   const savesHi = new Map<Instr, string>(); // `mov rLow, rHi` ⇒ rHi, where rLow is pushed unchanged
@@ -5742,6 +5762,7 @@ function bodySavedRegs(
   const leaked = new Map<string, Instr>();
   const copied = new Map<string, Instr>();
   const returned = new Map<string, Instr>();
+  const restoreCopies = new Set<Instr>();
   const word = (r: string) => canonReg(r) ?? r;
   const walk = (b: number, record: boolean): State => {
     const cur = new Set(stateIn[b]!.cur);
@@ -5815,6 +5836,9 @@ function bodySavedRegs(
         holds.set(word(x.ops[0]), word(savesHi.get(x)!));
       }
       const restores = own === null ? named : named.filter(own);
+      if (record && own !== null && restoresHi.has(x) && restores.length > 0) {
+        restoreCopies.add(x);
+      }
       const uses =
         x.mnemonic === 'push'
           ? []
@@ -5911,6 +5935,7 @@ function bodySavedRegs(
     leaked,
     copied,
     returned,
+    restoreCopies,
   };
 }
 
@@ -6476,6 +6501,9 @@ interface ThumbFill {
   /** …and each one a return may hand back so (`bodySavedRegs`'s `returned`): refused unless the
    *  function's own declaration returns nothing. */
   readonly poppedReturns: ReadonlyMap<string, Instr>;
+  /** Each staged restore's `mov rHi, rLow` that loads rHi's own saved word (`bodySavedRegs`'s
+   *  `restoreCopies`): the restore's, not the function's, so the fill skips it. */
+  readonly restoreCopies: ReadonlySet<Instr>;
 }
 
 /** EVERY STAGE BEFORE THE FILL, in their refusal order: the text, the CFG, the target's scratch
@@ -6625,6 +6653,7 @@ function thumbFillOf(
     caseEntries: elidedCaseEntries(cfg, text.tables),
     poppedForeign: body.leaked,
     poppedCopies: body.copied,
+    restoreCopies: body.restoreCopies,
     poppedReturns: body.returned,
   };
 }
@@ -6730,8 +6759,8 @@ function fillThumbBlock(fill: ThumbFill, ab: AsmBlock, bi: number): void {
     switch (ins.mnemonic) {
       case 'mov':
       case 'movs': {
-        if (fill.frame.saveCarriers.has(ins)) {
-          break; // the save's staging copy, not the function's (`prologueSavedRegs`)
+        if (fill.frame.saveCarriers.has(ins) || fill.restoreCopies.has(ins)) {
+          break; // the save's or the restore's staging copy, not the function's
         }
         lowerMov(fill, cur, ins);
         break;
@@ -7713,6 +7742,7 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
     bi,
     // what an elided or kept dispatch left in an argument register is no argument
     parked: parkedIn(fill.staleIdiomValues, reg),
+    marker: markerIn(fill.staleIdiomValues, reg),
     // …and the scrutinee an elided pointer-sum dispatch scaled in place (`recoverJumpTable`'s
     // `keepsIndex`) is no argument a guess may count: `h()` and `h(i << 2)` compile alike there
     scaledIndex: scaledIndexIn(fill.staleIdiomValues, reg),
@@ -7861,7 +7891,9 @@ function lowerTerminator(fill: ThumbFill, cur: BlockCursor): void {
     // load PC directly. Only the register actually branched through is disqualified.
     const viaReturnReg = last.mnemonic === 'bx' && last.ops[0] === target.returnReg;
     if (viaReturnReg) {
-      irb.ops.push(mkOp('ret'));
+      // stamped, as a bare return no path wrote r0 for would hand the caller's first argument back
+      // (frontend/callee-body.ts `returnsUntouched`), and this one hands back the return address
+      irb.ops.push(mkOp('ret', { attrs: { viaReturnReg: true } }));
     } else {
       const lo = readVar(target.returnReg, bi);
       const whole = pairs.wideReturn(lo, bi);

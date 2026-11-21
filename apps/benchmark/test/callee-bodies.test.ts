@@ -8,7 +8,7 @@ import type { RankOptions } from '@asmlift/cli/rank';
 import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { agbccAvailable } from '@asmlift/toolchains';
 import { searchDecompYaml } from '@match-kit/decomp-yaml/files';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { gzipSync } from 'node:zlib';
@@ -174,6 +174,39 @@ describe('callee-body drift', () => {
   });
 });
 
+// A THUMB BODY THE CLI WOULD READ OFF THE PROJECT'S OWN ASSEMBLY is one this reader does not freeze
+// (cli splat-bodies.ts compiles the project's `.s` with decomp.yaml's compiler), so the reader refuses
+// rather than hand the harness less than the CLI reads. The cli's fixture project includes rd1 by
+// INCLUDE_ASM; its linked range is Thumb.
+describe("the bench reader refuses a project whose callee bodies the CLI reads off the project's asm", () => {
+  const fixture = resolve(import.meta.dirname, '../../../packages/cli/test/offline/fixtures/splat-bodies');
+  const checkout = (compiler: string | undefined) => {
+    const root = mkdtempSync(join(tmpdir(), 'asmlift-bench-splat-bodies-'));
+    cpSync(fixture, root, { recursive: true });
+    writeFileSync(
+      join(root, 'decomp.yaml'),
+      'name: test\nplatform: gba\nversions: []\ntools:\n  asmlift:\n    target: agbcc\n    elf: linked.elf\n' +
+        (compiler === undefined ? '' : `    compiler: ${JSON.stringify(compiler)}\n`),
+    );
+    return root;
+  };
+  const read = (root: string) =>
+    readCalleeBodies(
+      'test',
+      root,
+      { elf: join(root, 'linked.elf'), elfRel: 'linked.elf' },
+      ['rd1'],
+      TOOLCHAIN_TARGETS.agbcc.description,
+      undefined,
+    );
+  test('with a compiler named, the CLI would read rd1 off asm/nonmatchings: refused', () => {
+    expect(() => read(checkout('cc {{inputPath}} -o {{outputPath}}'))).toThrow(/off the project's own assembly/);
+  });
+  test('with none, the CLI reads the ELF alone, and so does the reader', () => {
+    expect(read(checkout(undefined)).bodies.rd1?.kind).toBe('thumb');
+  });
+});
+
 // What `bench fidelity` holds, run wherever a project's linked ELF is built: every frozen file is
 // what the CLI's reader reads off that ELF today, for every callee it names. A relinked ELF or a
 // change to cli elf-bodies.ts that moves a body the harness hands fails here by project and callee;
@@ -200,6 +233,7 @@ describe.skipIf(allowDirtyCheckout())(
         const names = [...Object.keys(vendored.bodies), ...vendored.unread];
         const derived = readCalleeBodies(
           project,
+          root,
           { elf, elfRel: elfRel! },
           names,
           target,

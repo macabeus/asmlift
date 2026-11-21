@@ -162,8 +162,9 @@ async function vendorSymbols(man: RealManifest, root: string, outDir: string): P
  *  committed TU, as the runner builds it, so the callees are the ones its lift sees.
  *
  *  REFUSES rather than freezing less than the CLI reads: a row whose toolchain is not installed
- *  here, rows whose targets read bodies differently, and a range the objdump could not disassemble
- *  all throw, and nothing is written. */
+ *  here, rows whose targets read bodies differently, a range the objdump could not disassemble, and
+ *  a callee whose body the CLI would read off the project's own assembly (callee-bodies-elf.ts) all
+ *  throw, and nothing is written. */
 async function vendorCalleeBodies(man: RealManifest, root: string, outDir: string, objdump?: string): Promise<void> {
   const project = man.project;
   const res = resolveProjectElf(project, root);
@@ -198,7 +199,7 @@ async function vendorCalleeBodies(man: RealManifest, root: string, outDir: strin
   const vendored: VendoredCalleeBodies =
     target === undefined
       ? { objdump: null, bodies: {}, unread: callees }
-      : readCalleeBodies(project, res, callees, target, objdump ?? projectObjdump(root, target));
+      : readCalleeBodies(project, root, res, callees, target, objdump ?? projectObjdump(root, target));
   const leak = JSON.stringify(vendored);
   if (MACHINE_PATH.test(leak) || leak.includes(root)) {
     throw new Error(`${project}: a machine path leaked into the vendored callee bodies — nothing written`);
