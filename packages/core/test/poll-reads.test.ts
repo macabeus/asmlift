@@ -1,0 +1,236 @@
+// The poll-read pin (frontend/poll-reads.ts): a read a call-free loop makes each time round at an
+// address the loop never changes is `volatile`, at a level that moves loop-invariant code, and the
+// poll-store rule (contracts.ts `sunkPollStore`) judges the stores such a loop makes. Compiled:
+//
+//   agbcc -mthumb-interwork -O2 -fhex-asm
+//     void w1(void) { do { } while (((vu32 *)0x40000d4)[2] & 0x80000000); g(); }
+//     void w7(u32 a) { do { if (a & 1) a = a * 3; else a >>= 1; } while (*(vu16 *)0x4000006 != 3); h(a); }
+//     void hr(s32 a0) { while (((volatile s32 *)0x40000d4)[2] & 0x80000000) ((s32 *)0x40000d4)[5] = a0; g(); }
+//     void p04(s32 a0) { while (((volatile s32 *)0x40000d4)[2] & 0x80000000) { if (a0 & 1) ((s32 *)0x40000d4)[5] = a0; } g(); }
+//   IDO 7.1 cc -O2 -mips2 -32 -non_shared -G 0
+//     void iv(void) { while (*(vu32 *)0xA4600010 & 3) ; }
+//     void v1(s32 a0) { while (((vu32 *)0xA4600010)[0] & 3) { ((vu32 *)0xA4600000)[5] = a0; } }
+//   mwcc 2.4.2 -O4,p
+//     void qw(void) { while (*(vu32 *)0xCC006010 & 3) ; g(); }
+//
+// Recompiled with the read plain, w1, iv and qw are a branch to itself; hr's store and read both
+// leave the loop (agbcc `load_mems`), and v1's store is written once ahead of it (IDO).
+import { describe, expect, test } from 'vitest';
+
+import { decompile } from '../src/pipeline';
+import { MIPS_IDO, PPC_MWCC, targetFor } from '../src/target';
+
+const W1 = `
+w1:
+	push	{lr}
+	ldr	r2, .L8
+	ldr	r0, [r2]
+	mov	r1, #0x80
+	lsl	r1, r1, #0x18
+	cmp	r0, #0
+	bge	.L4	@cond_branch
+.L5:
+	ldr	r0, [r2]
+	and	r0, r0, r1
+	cmp	r0, #0
+	bne	.L5	@cond_branch
+.L4:
+	bl	g
+	pop	{r0}
+	bx	r0
+.L9:
+	.align	2, 0
+.L8:
+	.word	0x40000dc
+.Lfe1:
+`;
+const W7 = `
+w7:
+	push	{lr}
+	add	r1, r0, #0
+	mov	r3, #0x1
+	ldr	r2, .L10
+.L3:
+	add	r0, r1, #0
+	and	r0, r0, r3
+	cmp	r0, #0
+	beq	.L6	@cond_branch
+	lsl	r0, r1, #0x1
+	add	r1, r0, r1
+	b	.L5
+.L11:
+	.align	2, 0
+.L10:
+	.word	0x4000006
+.L6:
+	lsr	r1, r1, #0x1
+.L5:
+	ldrh	r0, [r2]
+	cmp	r0, #0x3
+	bne	.L3	@cond_branch
+	add	r0, r1, #0
+	bl	h
+	pop	{r0}
+	bx	r0
+.Lfe1:
+`;
+const HR = `
+hr:
+	push	{r4, lr}
+	add	r4, r0, #0
+	ldr	r1, .L7
+	ldr	r0, [r1]
+	mov	r2, #0x80
+	lsl	r2, r2, #0x18
+	cmp	r0, #0
+	bge	.L4	@cond_branch
+	ldr	r3, .L7+0x4
+.L5:
+	str	r4, [r3]
+	ldr	r0, [r1]
+	and	r0, r0, r2
+	cmp	r0, #0
+	bne	.L5	@cond_branch
+.L4:
+	bl	g
+	pop	{r4}
+	pop	{r0}
+	bx	r0
+.L8:
+	.align	2, 0
+.L7:
+	.word	0x40000dc
+	.word	0x40000e8
+.Lfe1:
+`;
+const P04 = `
+p04:
+	push	{r4, r5, lr}
+	add	r1, r0, #0
+	ldr	r4, .L8
+	ldr	r0, [r4]
+	mov	r3, #0x80
+	lsl	r3, r3, #0x18
+	cmp	r0, #0
+	bge	.L4	@cond_branch
+	mov	r2, #0x1
+	and	r2, r2, r1
+	ldr	r5, .L8+0x4
+.L5:
+	cmp	r2, #0
+	beq	.L3	@cond_branch
+	str	r1, [r5]
+.L3:
+	ldr	r0, [r4]
+	and	r0, r0, r3
+	cmp	r0, #0
+	bne	.L5	@cond_branch
+.L4:
+	bl	g
+	pop	{r4, r5}
+	pop	{r0}
+	bx	r0
+.L9:
+	.align	2, 0
+.L8:
+	.word	0x40000dc
+	.word	0x40000e8
+.Lfe1:
+`;
+const IV = `
+00000000 <iv>:
+   0:	lui	v0,0xa460
+   4:	ori	v0,v0,0x10
+   8:	lw	t6,0(v0)
+   c:	andi	t7,t6,0x3
+  10:	beqz	t7,28 <iv+0x28>
+  14:	nop
+  18:	lw	t8,0(v0)
+  1c:	andi	t9,t8,0x3
+  20:	bnezl	t9,1c <iv+0x1c>
+  24:	lw	t8,0(v0)
+  28:	jr	ra
+  2c:	nop
+`;
+const V1 = `
+00000030 <v1>:
+  30:	lui	v0,0xa460
+  34:	ori	v0,v0,0x10
+  38:	lw	t6,0(v0)
+  3c:	lui	v1,0xa460
+  40:	ori	v1,v1,0x14
+  44:	andi	t7,t6,0x3
+  48:	beqz	t7,64 <v1+0x34>
+  4c:	nop
+  50:	sw	a0,0(v1)
+  54:	lw	t8,0(v0)
+  58:	andi	t9,t8,0x3
+  5c:	bnezl	t9,54 <v1+0x24>
+  60:	sw	a0,0(v1)
+  64:	jr	ra
+  68:	nop
+  6c:	nop
+`;
+const QW = `
+00000000 <qw>:
+   0:	stwu    r1,-16(r1)
+   4:	mflr    r0
+   8:	lis     r3,-13312
+   c:	stw     r0,20(r1)
+  10:	lwz     r0,24592(r3)
+  14:	clrlwi. r0,r0,30
+  18:	bne+    10 <qw+0x10>
+  1c:	bl      1c <qw+0x1c>
+			1c: R_PPC_REL24	g
+  20:	lwz     r0,20(r1)
+  24:	mtlr    r0
+  28:	addi    r1,r1,16
+  2c:	blr
+`;
+
+const AGBCC = targetFor('agbcc', ['-mthumb-interwork', '-O2', '-fhex-asm']).target;
+const prototypes = { g: { params: [], returnsVoid: true }, h: { params: ['u32'], returnsVoid: true } };
+const SINKS = 'a loop that polls a device register writes memory plain at an address the loop never changes';
+
+describe('a poll read the compiler would move out of its loop is pinned volatile', () => {
+  test('agbcc: a store-free DMA wait reads its register volatile', () => {
+    expect(decompile('w1', W1, AGBCC, { prototypes }).source).toContain(
+      '} while ((*(volatile s32 *)67109084 & 128 << 24) != 0);',
+    );
+  });
+
+  test('agbcc at -O0, which moves nothing, leaves it plain', () => {
+    const o0 = targetFor('agbcc', ['-mthumb-interwork', '-O0']).target;
+    expect(decompile('w1', W1, o0, { prototypes }).source).not.toContain('volatile');
+  });
+
+  test('agbcc: a read past a branch of the loop stays plain (maybe_never keeps it)', () => {
+    expect(decompile('w7', W7, AGBCC, { prototypes }).source).toContain('} while (*(u16 *)67108870 != 3);');
+  });
+
+  test('IDO 7.1 at -O2 pins it; at -O1 it does not', () => {
+    expect(decompile('iv', IV, MIPS_IDO).source).toContain('while ((*(volatile s32 *)-1537212400 & 3) != 0) {');
+    const o1 = targetFor('ido7.1', ['-mips2', '-O1', '-32']).target;
+    expect(decompile('iv', IV, o1).source).not.toContain('volatile');
+  });
+
+  test('mwcc at -O4,p pins it; at -O2, which keeps the read, it does not', () => {
+    expect(decompile('qw', QW, PPC_MWCC).source).toContain('volatile s32 *');
+    const o2 = targetFor('mwcc_242_81', ['-O2', '-proc', 'gekko']).target;
+    expect(decompile('qw', QW, o2).source).not.toContain('volatile');
+  });
+});
+
+describe('a poll loop that stores is judged by how the compiler moves the store', () => {
+  test('agbcc: a straight-line poll whose plain store no access provably keeps declines', () => {
+    expect(() => decompile('hr', HR, AGBCC, { prototypes })).toThrow(SINKS);
+  });
+
+  test('agbcc: the store under an `if` of the loop is kept, and the function lifts', () => {
+    expect(decompile('p04', P04, AGBCC, { prototypes }).source).toContain('*(s32 *)67109096 = a0;');
+  });
+
+  test('IDO: a lone store of an invariant value in a poll is hoisted, so it declines', () => {
+    expect(() => decompile('v1', V1, MIPS_IDO)).toThrow(SINKS);
+  });
+});
