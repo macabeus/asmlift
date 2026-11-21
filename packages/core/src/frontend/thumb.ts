@@ -1371,8 +1371,9 @@ const sayFact = (f: LayoutFact): string => {
  *  A pret unit includes its macros before the first function, which is outside every slice. What
  *  that leaves unread is a macro the included file defines under an instruction's name (`.macro
  *  nop`): a macro the input itself defines declines where the slice names it (`macroUses` in
- *  decode), but an included one is invisible here. No GBA code unit in the benchmark's checkouts or
- *  in kl2dct defines one. An
+ *  decode), and so does one an `.include` the caller resolved defines (`LiftOptions.asmIncludes`,
+ *  `includedMacroNames`); one an unresolved `.include` defines is invisible here. No GBA code unit
+ *  in the benchmark's checkouts or in kl2dct defines one. An
  *  INCLUDE_ASM body (`.include "asm/nonmatchings/…"`) follows the previous function's return,
  *  where control cannot reach it. Neither one declines. Names are matched lower-case (gas
  *  directives are case-insensitive); `.cfi_*` is matched by its prefix. */
@@ -1444,6 +1445,155 @@ const ZERO_BYTE_DIRECTIVES: ReadonlySet<string> = new Set([
   'end',
 ]);
 
+/** The names a `.macro` statement defines: its operand, or the labels before it where there are
+ *  any (see the macro scan in `decode`), lower-cased. */
+function addMacroNames(labels: string, operand: string, into: Set<string>): string[] {
+  const names = labels === '' ? [operand] : [...labels.matchAll(/([^\s:]+)\s*:/g)].map((l) => l[1]);
+  const added = names.map((n) => n.trim().toLowerCase()).filter((l) => l !== '');
+  for (const l of added) {
+    into.add(l);
+  }
+  return added;
+}
+
+/** The pret function markers decode reads by name as bookkeeping (`thumb_func_start NAME` …). A pret
+ *  unit includes their definitions (`asm/macros.inc`), and reading each use of one as a macro call
+ *  would decline every function in it, so a use of one is read as bookkeeping where every definition
+ *  of it the resolved include chain holds is bookkeeping alone ({@link PRET_BOOKKEEPING}). One whose
+ *  definition holds anything else (a label, an instruction, data, another directive or macro call:
+ *  `\name:` / `add r0, #5` gives gas a0 + 6 where the body reads a0 + 1) is an ordinary macro, and
+ *  so is every marker where an included `.macro` may have any name (`*`). */
+const PRET_FUNCTION_MACRO =
+  /^(?:non_word_aligned_thumb_func_start|thumb_func_start|arm_func_start|thumb_func_end|arm_func_end)$/;
+
+/** The statements a pret marker's included definition may hold and still be bookkeeping: these
+ *  directives, each operand the macro's own parameter (`\name`), a number, `function` (bare or after `%`, `@`
+ *  or `#`), or `.-\name`
+ *  (every real definition in the benchmark's checkouts and luvdis's: kleod, pokeemerald, sa3,
+ *  klonoa-empire-of-dreams). Anything else makes the marker a macro. */
+const PRET_BOOKKEEPING = /^\.(?:align|arm|global|globl|size|thumb|thumb_func|type)$/i;
+function isPretBookkeeping(statement: string, params: readonly string[], marker: string): boolean {
+  const m = statement.match(/^(\.[\w.]+)\s*(.*)$/);
+  if (m === null || !PRET_BOOKKEEPING.test(m[1])) {
+    return false;
+  }
+  // the mode a marker sets is its own: `.arm` only in an `arm_func_*` definition, `.thumb` and
+  // `.thumb_func` only in a Thumb one
+  const arm = marker.startsWith('arm_');
+  if ((arm && /^\.thumb/i.test(m[1])) || (!arm && /^\.arm$/i.test(m[1]))) {
+    return false;
+  }
+  const operands = m[2] === '' ? [] : m[2].split(',').map((o) => o.trim());
+  const param = (o: string) =>
+    o.startsWith('\\') &&
+    params.includes(
+      o
+        .slice(1)
+        .replace(/\\\(\)$/, '')
+        .toLowerCase(),
+    );
+  return operands.every(
+    (o) =>
+      /^(?:0x[0-9a-f]+|\d+)$/i.test(o) ||
+      /^[%@#]?function$/.test(o) ||
+      param(o) ||
+      (o.startsWith('.-') && param(o.slice(2))) ||
+      (o.startsWith('. - ') && param(o.slice(4))),
+  );
+}
+
+/** `.include "x"` with a plain quoted operand, the one spelling read through `LiftOptions.asmIncludes`. */
+const THUMB_INCLUDE = /^\.include\s+"([^"\\]*)"$/i;
+
+/** Every macro name the included file `op` defines, and the files it includes in turn that the map
+ *  holds, read by the macro scan's rules, into `into`. A statement of it this reader does not read,
+ *  a `.macro` whose name it cannot read, or an operand already on the chain declines. */
+function includedMacroNames(
+  name: string,
+  op: string,
+  includes: ReadonlyMap<string, string>,
+  chain: readonly string[],
+  into: Set<string>,
+): void {
+  const path = [...chain, op].map((c) => JSON.stringify(c)).join(' -> ');
+  if (chain.includes(op) || chain.length >= 32) {
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': the include chain ${path} repeats a file or nests deeper than this frontend reads`,
+    );
+  }
+  const depth = { n: 0 };
+  // the pret marker whose definition is being read, with its parameters, and the depth it opened at
+  let marker: { name: string; params: string[]; at: number } | undefined;
+  for (const line of readGasLines(includes.get(op)!)) {
+    for (const st of line.statements) {
+      if (st.unread !== undefined) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': '${st.text}' in the included file ${path} is ${st.unread}, so this frontend ` +
+            `cannot tell which macros it defines`,
+        );
+      }
+      const labels = st.text.match(LEADING_LABELS)?.[0] ?? '';
+      const rest = st.text.slice(labels.length);
+      const nested = rest.match(THUMB_INCLUDE)?.[1];
+      if (nested !== undefined && includes.has(nested)) {
+        includedMacroNames(name, nested, includes, [...chain, op], into);
+        continue;
+      }
+      const md = rest.match(/^\.macro\b\s*([^\s,]*)/i);
+      const head = rest.match(/^[\w.$]+/)?.[0].toLowerCase();
+      if (marker !== undefined && !(depth.n === marker.at + 1 && head === '.endm')) {
+        // a statement of a marker's definition: bookkeeping only, at the definition's own level
+        if (
+          st.text !== '' &&
+          (labels !== '' || depth.n !== marker.at + 1 || !isPretBookkeeping(rest, marker.params, marker.name))
+        ) {
+          into.add(`!${marker.name}`);
+        }
+      }
+      if (md) {
+        const mname = md[1].toLowerCase();
+        if (labels === '' && marker === undefined && PRET_FUNCTION_MACRO.test(mname)) {
+          const params = rest
+            .slice(md[0].length)
+            .split(/[\s,]+/)
+            .map((p) => p.replace(/[:=].*$/, '').toLowerCase())
+            .filter((p) => p !== '');
+          marker = { name: mname, params, at: depth.n };
+        } else if (labels !== '') {
+          // a label before `.macro` names the macro (see the scan in `decode`): a marker defined so is
+          // read as an ordinary macro
+          for (const l of [...labels.matchAll(/([^\s:]+)\s*:/g)].map((x) => x[1].toLowerCase())) {
+            into.add(`!${l}`);
+          }
+        }
+        // as in the file's own scan: a name that is no literal word, or a `.macro` inside a body,
+        // gets its name only when gas expands it, so it stands for any name (`*`)
+        for (const l of addMacroNames(labels, md[1], into)) {
+          if (!/^[a-z_.$][\w.$]*$/.test(l)) {
+            into.add('*');
+          }
+        }
+        if (depth.n > 0) {
+          into.add('*');
+        }
+        depth.n++;
+      } else if (head !== undefined && /^\.(?:irpc?|rept)$/.test(head)) {
+        depth.n++;
+      } else if (head !== undefined && /^\.(?:endm|endr)$/.test(head)) {
+        depth.n = Math.max(0, depth.n - 1);
+        if (marker !== undefined && depth.n === marker.at) {
+          marker = undefined;
+        }
+      } else if (/(?:^|[^\w.$])\.macro\b/i.test(rest)) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': '${st.text}' in the included file ${path} defines a macro whose name this ` +
+            `frontend does not read`,
+        );
+      }
+    }
+  }
+}
+
 /** The directives that decide which source lines gas assembles: conditional assembly, repetition
  *  and macro definition. One of them inside a function declines whether or not control reaches
  *  it, because what it changes is the text decode reads, not bytes at its own position. */
@@ -1453,6 +1603,7 @@ function decode(
   name: string,
   asm: string,
   farJumpMark?: RegExp,
+  includes?: ReadonlyMap<string, string>,
 ): {
   blocks: AsmBlock[];
   dataWords: Map<string, string[]>;
@@ -1498,6 +1649,9 @@ function decode(
   // layout. That reach test is the one an unreadable `.align` gets. It keeps an INCLUDE_ASM
   // `.include` after a function's sealed return out of that function's lift.
   const unreadDirectives: { at: number; what: string; lines: boolean }[] = [];
+  // Each use of a pret marker an included file defines, by the same allFlat position: its bytes (an
+  // `.align` pad) are emitted where it sits, so one control can reach inside a slice declines.
+  const includedMarkers: { at: number; what: string }[] = [];
   // The labels naming the CURRENT data run's base address, and there can be several: two
   // labels with nothing between them name the same bytes, so a directive under the second is
   // equally a directive under the first. Keying by the most recent label alone hid an aliased
@@ -1554,9 +1708,15 @@ function decode(
   // name (measured: `nop: .macro` defines `nop`, and `m: .macro nop` defines `m`, leaving `nop` the
   // instruction; `a: b: .macro` counts both labels, which only adds declines). `.purgem` is not
   // honoured (a purge inside a skipped `.if` would un-define a macro gas still expands), so a name
-  // stays a macro once defined. A macro the input only `.include`s is not visible here (the residue
-  // named on {@link ZERO_BYTE_DIRECTIVES}).
+  // stays a macro once defined. A macro an `.include` the caller handed in defines
+  // (`LiftOptions.asmIncludes`) is defined from that statement on (`includedMacroNames`); one an
+  // unresolved `.include` defines is not visible here (the residue named on
+  // {@link ZERO_BYTE_DIRECTIVES}).
   const macroUses = new Set<number>();
+  // the names included files define (`includedMacroNames`): a pret function marker among them is
+  // read as bookkeeping where every included definition of it is (`PRET_FUNCTION_MACRO`), and even
+  // then only where control cannot reach it (the marker branch below)
+  const fromIncludes = new Set<string>();
   {
     const lines = readGasLines(asm);
     const joined = lines.find((l) => l.crossesLine && l.statements.some((st) => st.unread !== undefined));
@@ -1597,14 +1757,15 @@ function decode(
         }
         const labels = st.text.match(LEADING_LABELS)?.[0] ?? '';
         const rest = st.text.slice(labels.length);
+        const included = includes === undefined ? undefined : rest.match(THUMB_INCLUDE)?.[1];
+        if (included !== undefined && includes!.has(included)) {
+          includedMacroNames(name, included, includes!, [], fromIncludes);
+          continue;
+        }
         const md = rest.match(/^\.macro\b\s*([^\s,]*)/i);
         if (md) {
-          const names = labels === '' ? [md[1]] : [...labels.matchAll(/([^\s:]+)\s*:/g)].map((l) => l[1]);
-          for (const l of names.map((s) => s.trim().toLowerCase())) {
-            if (l !== '') {
-              defined.add(l);
-              anyName ||= !/^[a-z_.$][\w.$]*$/.test(l);
-            }
+          for (const l of addMacroNames(labels, md[1], defined)) {
+            anyName ||= !/^[a-z_.$][\w.$]*$/.test(l);
           }
           anyName ||= bodyDepth > 0;
           bodyDepth++;
@@ -1623,7 +1784,21 @@ function decode(
         } else if (head !== undefined && /^\.(?:endm|endr)$/.test(head)) {
           bodyDepth = Math.max(0, bodyDepth - 1);
         }
-        if (code && head !== undefined && (anyName || defined.has(head))) {
+        // a name an included file defines, or any name where one of its `.macro`s gets its name only
+        // when expanded (`*`), except the pret markers, which are read as bookkeeping
+        const fromAnIncluded =
+          head !== undefined &&
+          (fromIncludes.has(head) || fromIncludes.has('*')) &&
+          !(PRET_FUNCTION_MACRO.test(head) && !fromIncludes.has('*') && !fromIncludes.has(`!${head}`));
+        // a pret marker read as a macro: its expansion may define the function's own label and code
+        // in front of it (`\name:` / `add r0, #5`), which no slice bound sees, so the input declines
+        if (code && fromAnIncluded && PRET_FUNCTION_MACRO.test(head!)) {
+          throw new FrontendUnsupportedError(
+            `cannot lift '${name}': '${st.text}' calls '${head}', which an included file defines as more than the ` +
+              `pret function bookkeeping this frontend reads it as`,
+          );
+        }
+        if (code && head !== undefined && (anyName || defined.has(head) || fromAnIncluded)) {
           macroUses.add(codeLines.length - 1);
         }
       }
@@ -1850,12 +2025,26 @@ function decode(
     }
     // pret function macros (asm/macros.inc): pure bookkeeping except the declared mode.
     const macro = rest.match(/^(non_word_aligned_thumb_func_start|thumb_func_start|arm_func_start)\s+\S+$/);
+    // A marker an included file defines may emit bytes where it sits (`.align 2, 0` pads with
+    // 0x0000, `movs r0, r0`, which sets the flags), so one control can reach declines: recorded as a
+    // directive this pass does not read, judged by the same reachability as an unreadable `.align`.
+    // The function's own start marker before its label and its end marker after a terminator stay
+    // bookkeeping.
+    const markerName = rest.match(/^(\w+)/)?.[1].toLowerCase();
+    const includedMarker =
+      markerName !== undefined && PRET_FUNCTION_MACRO.test(markerName) && fromIncludes.has(markerName);
     if (macro) {
+      if (includedMarker) {
+        includedMarkers.push({ at: flat.length - 1, what: macro[1] });
+      }
       pendingFn = macro[1] !== 'arm_func_start';
       pendingArm = macro[1] === 'arm_func_start';
       continue;
     }
     if (/^(thumb_func_end|arm_func_end)\b/.test(rest)) {
+      if (includedMarker) {
+        includedMarkers.push({ at: flat.length - 1, what: markerName });
+      }
       continue;
     }
     const m = rest.match(/^(\w+)\s*(.*)$/);
@@ -2043,6 +2232,32 @@ function decode(
       );
     }
     const liveUnread = unreadDirectives.find((u) => inSlice(u.at) && fillIsReachable(u.at - sliceStart + 1));
+    // An included marker's position is reached by falling through only where every instruction back to
+    // a label code names, or to the function's entry, continues past itself: an explicit pad
+    // instruction after a return (`mov pc, lr` / `lsls r0, r0, #0` / marker) is not reached, where
+    // `fillIsReachable` stops at the pad and answers yes.
+    const markerIsReachable = (upto: number) => {
+      for (let j = upto - 1; j >= 0; j--) {
+        const g = flat[j];
+        if (g.label !== undefined) {
+          if (j === 0 || (named.has(g.label) && !headsData(g.label))) {
+            return true;
+          }
+          continue;
+        }
+        if (g.instr && !controlContinuesPast(g.instr)) {
+          return false;
+        }
+      }
+      return true;
+    };
+    const liveMarker = includedMarkers.find((u) => inSlice(u.at) && markerIsReachable(u.at - sliceStart + 1));
+    if (liveMarker) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${liveMarker.what}', a marker an included file defines, sits where control ` +
+          `falls through it inside the function, and its definition may emit bytes there (an \`.align\` pad)`,
+      );
+    }
     if (liveUnread) {
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': '${liveUnread.what}' is a directive this frontend does not read, where control can reach ` +
@@ -3263,6 +3478,7 @@ function liftOnce(
     | 'calleeStackWords'
     | 'stackSized'
     | 'entryReadCalls'
+    | 'asmIncludes'
   >,
 ): Fn | FrameObjectRelift {
   const fill = thumbFillOf(name, asm, target, prototypes, symbols, oneObject, options, homesReleased);
@@ -3684,9 +3900,14 @@ function lowerFarJumpRelays(name: string, blocks: readonly AsmBlock[], funcLabel
 
 /** `farJumpMark` is the target's `compilerBehaviors.farJumpRelay` comment; absent, no comment marks
  *  a `bl`, and a relay is read by its shape alone (`withRelayCandidates`). */
-function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbText {
+function readThumbText(
+  name: string,
+  asm: string,
+  farJumpMark?: RegExp,
+  includes?: ReadonlyMap<string, string>,
+): ThumbText {
   assertInputFormat('thumb', 'gnu-as', asm);
-  const { blocks: rawBlocks, dataWords, nonWordData, funcLabels, aliasOf } = decode(name, asm, farJumpMark);
+  const { blocks: rawBlocks, dataWords, nonWordData, funcLabels, aliasOf } = decode(name, asm, farJumpMark, includes);
   // Everything below keys a register by its spelling, so a function that writes one two ways
   // (`sl` and `r10`) is read in one of them.
   unifyRegisterSpellings(
@@ -6525,6 +6746,7 @@ function thumbFillOf(
     calleeStackWords,
     stackSized,
     entryReadCalls,
+    asmIncludes,
   }: Pick<
     LiftOptions,
     | 'contextOwnWords'
@@ -6534,10 +6756,11 @@ function thumbFillOf(
     | 'calleeStackWords'
     | 'stackSized'
     | 'entryReadCalls'
+    | 'asmIncludes'
   > = {},
   homesReleased = false,
 ): ThumbFill {
-  const text = readThumbText(name, asm, target.compilerBehaviors.farJumpRelay?.comment);
+  const text = readThumbText(name, asm, target.compilerBehaviors.farJumpRelay?.comment, asmIncludes);
   const cfg = thumbCfg(name, text.blocks, text.tables);
   assertScratchRegsPartitioned(target); // first, for the refusal order; `registerLiveIns` asks again
   const calls = callDeclarations(
