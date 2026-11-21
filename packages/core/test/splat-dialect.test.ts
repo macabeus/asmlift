@@ -399,3 +399,371 @@ describe('fill or reordering gas adds between Splat instructions declines', () =
     expect(decompile('f', `.set reorder\n.set noreorder\n${fn('')}`, MIPS_IDO).source).toContain('a0 + 1 + 4');
   });
 });
+
+// gas's reorder mode is read as an allowlist (`reorderEffect`): it is known only from a literal
+// top-level `.set (no)reorder`, and a statement off the list of those that provably leave it alone
+// (a macro call, an `.include`, a labelled or unknown directive, a `.set` spelt through `\x` or
+// `\()`, anything inside a body) makes it unknown until the next literal one; an instruction under
+// an unknown mode declines. Every row is one of 37 probes assembled with mips-linux-gnu-as 2.42
+// -march=vr4300 behind glabel/endlabel macros and a leading `.text`, `-I` holding r.inc
+// (`.set reorder`), m.inc (`.macro m` / `.set reorder` / `.endm`) and n.inc (`.set noreorder`).
+// The function is `addiu v0,a0,1; jr ra; addiu v0,v0,4`: a0 + 1 + 4 as written, a0 + 1 wherever
+// gas fills the slot itself. The rows that lift are the ones gas assembles as written (a19 an empty
+// macro, a24 an empty `.if`, b09 `.set noreorder` after the `.include`, b04g a function before the
+// `.include`). Every other row declines: in a15-a17, a22, a23, b05, b06 and b08 main lifted
+// a0 + 1 + 4 where gas gives a0 + 1, and a08, a11 and b10 (which gas assembles as written) decline
+// because the reader cannot tell. A file that never sets the mode is read as noreorder text, as
+// Splat's per-function files are assembled inside INCLUDE_ASM's own `.set noreorder`.
+describe('the reorder mode is known only from a literal top-level `.set`', () => {
+  test.each([
+    [
+      'a01',
+      '.if 0\n.set noreorder\n.endif\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'a02',
+      '.if 1\n.if 0\n.set noreorder\n.endif\n.endif\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'a03',
+      '.ifdef FOO\n.set noreorder\n.endif\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'a04',
+      '.ifc a,b\n.set noreorder\n.endif\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'a05',
+      '.ifeqs "a","b"\n.set noreorder\n.endif\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'a06',
+      '.if 1\n.else\n.set noreorder\n.endif\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'a07',
+      '.macro m\n.set noreorder\n.ENDM\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'a08',
+      '.macro m\n.set noreorder\n.endm\nm\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'a09',
+      '.set noreorder\n.macro m\n.set reorder\n.endm\n.text\nm\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'a10',
+      '.rept 0\n.set noreorder\n.endr\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'a11',
+      '.irpc x,\n.set noreorder\n.endr\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'a12',
+      'x: .if 0\n.set noreorder\n.endif\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'a13',
+      '.if 0; .set noreorder; .endif\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'a14',
+      '.IF 0\n.SET noreorder\n.ENDIF\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'a15',
+      '.set noreorder\n.irp x,reorder\n.set \\x\n.endr\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'a16',
+      '.set noreorder\n.macro m x\n.set \\x\n.endm\n.text\nm reorder\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'a17',
+      '.set noreorder\nx: .set reorder\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'a18',
+      '.set noreorder\n.if 1\n.set reorder\n.endif\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'a19',
+      '.set noreorder\n.macro m\n.endm\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      'a0 + 1 + 4',
+    ],
+    [
+      'a20',
+      '.if 0\n.set noreorder\n.endif; .text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'a21',
+      '.set noreorder\n.irp x,a\n.set reorder\n.endr\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'a22',
+      '.if 0\nx: .set noreorder\n.endif\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'a23',
+      '.set noreorder\n.macro m\n.set re\\()order\n.endm\n.text\nm\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'a24',
+      '.set noreorder\n.equ R, 1\n.if R\n.endif\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      'a0 + 1 + 4',
+    ],
+    [
+      'b01',
+      '.set noreorder\n.include "r.inc"\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'b02',
+      '.set noreorder\n.text\n.include "r.inc"\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'b03',
+      '.set noreorder\n.include r.inc\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'b04',
+      '.set noreorder\nglabel g\n    /* 0F0 800000F0 03E00008 */  jr         $ra\n    /* 0F4 800000F4 24820002 */   addiu $v0, $a0, 2\nendlabel g\n.include "r.inc"\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'b04g',
+      '.set noreorder\nglabel g\n    /* 0F0 800000F0 03E00008 */  jr         $ra\n    /* 0F4 800000F4 24820002 */   addiu $v0, $a0, 2\nendlabel g\n.include "r.inc"\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      'a0 + 2',
+    ],
+    [
+      'b05',
+      '.include "m.inc"\n.set noreorder\n.text\nm\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'b06',
+      '.set noreorder\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n.include "r.inc"\n.text\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'b07',
+      '.set noreorder\n.INCLUDE "r.inc"\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'b08',
+      '.set noreorder\nx: .include "r.inc"\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'b09',
+      '.include "r.inc"\n.set noreorder\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      'a0 + 1 + 4',
+    ],
+    [
+      'b10',
+      '.set noreorder\n.include "n.inc"\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'c01',
+      '.set noreorder\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\nx: .set reorder\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+    [
+      'c02',
+      '.set noreorder\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n.include "r.inc"\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      null,
+    ],
+  ] as [string, string, string | null][])('%s', (probe, src, lifts) => {
+    const sym = probe === 'b04g' ? 'g' : 'f';
+    if (lifts === null) {
+      expect(() => decompile(sym, src, MIPS_IDO)).toThrow(FrontendUnsupportedError);
+    } else {
+      expect(decompile(sym, src, MIPS_IDO).source).toContain(`return ${lifts};`);
+    }
+  });
+  const fn =
+    'glabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n' +
+    '    /* 104 80000104 03E00008 */  jr         $ra\n' +
+    '    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n';
+  test('a mode made unknown names the statement that made it so', () => {
+    expect(() => decompile('f', `.set noreorder\nx: .set reorder\n.text\n${fn}`, MIPS_IDO)).toThrow(
+      /'x: \.set reorder' may set the reorder mode/,
+    );
+  });
+  test('a file that never sets the mode, and the whole-file Splat header, read as written', () => {
+    expect(decompile('f', fn, MIPS_IDO).source).toContain('a0 + 1 + 4');
+    const header =
+      '.include "macro.inc"\n\n/* assembler directives */\n.set noat      /* allow manual use of $at */\n' +
+      '.set noreorder /* don\'t insert nops after branches */\n.set gp=64\n\n.section .text, "ax"\n\n';
+    expect(decompile('f', `${header}${fn}`, MIPS_IDO).source).toContain('a0 + 1 + 4');
+  });
+  test('a label on a data directive leaves the mode alone; on another directive it does not', () => {
+    const tbl = '.section .rodata\njpt_1: .word .L1\n.text\n';
+    expect(decompile('f', `.set noreorder\n${tbl}${fn}`, MIPS_IDO).source).toContain('a0 + 1 + 4');
+    expect(() => decompile('f', `.set noreorder\nx: .include "r.inc"\n.text\n${fn}`, MIPS_IDO)).toThrow(
+      /may set the reorder mode/,
+    );
+  });
+  test('`.set REORDER` is not the literal option gas reads, so the mode is unknown', () => {
+    expect(() => decompile('f', `.set REORDER\n${fn}`, MIPS_IDO)).toThrow(/may set the reorder mode/);
+  });
+});
+
+// gas expands a macro BEFORE it reads a machine instruction of that name, and a macro may shadow a
+// real mnemonic with no warning (mips-linux-gnu-as 2.42 -march=vr4300, harness as above). d01: an
+// addressed `m` whose macro says `.set reorder`, after the `.set noreorder` (gas a0 + 1). d17: a
+// `.macro nop` saying `.set reorder` and `.word 0`, called by f's addressed `nop` (gas a0 + 1).
+// d26: a `.macro addiu a,b,c` emitting `addiu v0,a0,2` (gas a0 + 2). Main lifted a0 + 1 + 4, a0 + 1 + 4
+// and a0 + 1. An addressed line naming a macro the file defines now declines, wherever it sits.
+describe('an addressed line that calls a macro the file defines declines', () => {
+  test.each([
+    [
+      'd01',
+      '.macro m\n.set reorder\n.endm\n.set noreorder\n.text\n    /* 0F0 800000F0 00000000 */  m\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      'm',
+    ],
+    [
+      'd17',
+      '.macro nop\n.set reorder\n.word 0\n.endm\n.set noreorder\n.text\nglabel f\n    /* 0FC 800000FC 00000000 */  nop\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+      'nop',
+    ],
+    [
+      'd26',
+      '.macro addiu a,b,c\n.word 0x24820002\n.endm\n.set noreorder\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 00000000 */   nop\nendlabel f\n',
+      'addiu',
+    ],
+  ])('%s', (_probe, asm, call) => {
+    expect(() => decompile('f', asm, MIPS_IDO)).toThrow(
+      new RegExp(`calls '${call}', a name a \`\\.macro\` in this file defines`),
+    );
+  });
+  test('a macro name is read without case, and inside a body that never runs', () => {
+    const fn =
+      'glabel f\n    /* 100 80000100 03E00008 */  jr         $ra\n    /* 104 80000104 00000000 */   NOP\nendlabel f\n';
+    expect(() => decompile('f', `.set noreorder\n.if 0\n.macro Nop\n.endm\n.endif\n.text\n${fn}`, MIPS_IDO)).toThrow(
+      /calls 'nop'/,
+    );
+  });
+  // e16: a line before the function that leaves a `/*` open was skipped, so the next line,
+  // `*/ .macro nop`, read as one statement starting with `*/` and the macro went unseen (gas: the
+  // call runs it, a0 + 1; main lifted a0 + 1 + 4). Such a line now declines before the function as it
+  // does inside it. e17 (`*/ .set reorder`) is the control, which declined already.
+  test.each([
+    [
+      'e16',
+      '/* a\n*/ .macro nop\n.set reorder\n.word 0\n/* b\n*/ .endm\n.set noreorder\n.text\nglabel f\n    /* 0FC 800000FC 00000000 */  nop\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+    ],
+    [
+      'e17',
+      '/* a\n*/ .set reorder\n.set noreorder\n/* b\n*/ .set reorder\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+    ],
+  ])('%s: a line before the function that leaves a comment open declines', (_probe, asm) => {
+    expect(() => decompile('f', asm, MIPS_IDO)).toThrow(/'\/\* a' leaves a comment, string or character constant open/);
+  });
+  // A NUL ends a statement for gas (mips-linux-gnu-as 2.42), where this reader kept it inside one.
+  // g05 (`.globl f<NUL>.set reorder` before f) and g19 (`addiu …<NUL>.set reorder` inside f): gas
+  // runs the `.set reorder` (a0 + 1); main lifted a0 + 1 + 4. g16 and g20 declined already; g21
+  // (`# x<NUL>.set reorder`, which gas reads as one comment) now declines too, as every line holding
+  // a control byte other than TAB does, wherever it sits.
+  test.each([
+    [
+      'g05',
+      '.set noreorder\n.globl f\u0000.set reorder\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+    ],
+    [
+      'g16',
+      '.set noreorder\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\u0000.set reorder\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+    ],
+    [
+      'g19',
+      '.set noreorder\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\u0000.set reorder\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+    ],
+    [
+      'g20',
+      '.set noreorder\n.text\u0000.set reorder\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+    ],
+    [
+      'g21',
+      '.set noreorder\n# x\u0000.set reorder\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+    ],
+  ])('%s: a line holding a control byte declines', (_probe, asm) => {
+    expect(() => decompile('f', asm, MIPS_IDO)).toThrow(/holds a control byte/);
+  });
+  // JS `trim()` and `\s` read U+00A0, U+2028, U+3000 as blank space; gas reads them (and U+0085) as
+  // name characters, so `.set noreorder<U+00A0>` is an unrecognised option, a warning, and the
+  // mode stays reorder (mips-linux-gnu-as 2.42: a0 + 1; main lifted a0 + 1 + 4). A line holding a
+  // non-ASCII character outside a comment or string declines.
+  test.each([
+    [
+      'h01',
+      '.set reorder\n.set noreorder\u00a0\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+    ],
+    [
+      'h02',
+      '.set reorder\n.set \u00a0noreorder\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+    ],
+    [
+      'h09',
+      '.set reorder\n.set noreorder\u2028\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+    ],
+    [
+      'h11',
+      '.set reorder\n.set noreorder\u0085\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+    ],
+    [
+      'h13',
+      '.set reorder\n.set noreorder\u3000\n.text\nglabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+    ],
+  ])('%s: a non-ASCII character in code declines', (_probe, asm) => {
+    expect(() => decompile('f', asm, MIPS_IDO)).toThrow(/holds a non-ASCII character outside a comment or string/);
+  });
+  test('a CRLF line and a non-ASCII comment still read', () => {
+    const fn =
+      'glabel f\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1 /* café */\n' +
+      '    /* 104 80000104 03E00008 */  jr         $ra\n' +
+      '    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n';
+    expect(decompile('f', `.set noreorder\n${fn}`.replace(/\n/g, '\r\n'), MIPS_IDO).source).toContain('a0 + 1 + 4');
+  });
+  // KNOWN GAP (traps/20261120-071902Z-MERGE462-addressed-line-can-be-a-gas-macro-call.md, probe d24): a
+  // macro an `.include` defines is not seen, so d17 with its `.macro nop` moved into `m2.inc` still lifts
+  // a0 + 1 + 4 where gas gives a0 + 1. Declining every addressed line after an `.include` would cost
+  // the whole-file Splat sources that open with `.include "macro.inc"`; whether to read included files
+  // is the user's call. This pins today's behaviour so a change to it is seen.
+  test('d24: a macro from an `.include` is not seen (known gap)', () => {
+    expect(
+      decompile(
+        'f',
+        '.include "m2.inc"\n.set noreorder\n.text\nglabel f\n    /* 0FC 800000FC 00000000 */  nop\n    /* 100 80000100 24820001 */  addiu      $v0, $a0, 1\n    /* 104 80000104 03E00008 */  jr         $ra\n    /* 108 80000108 24420004 */   addiu $v0, $v0, 4\nendlabel f\n',
+        MIPS_IDO,
+      ).source,
+    ).toContain('a0 + 1 + 4');
+  });
+});

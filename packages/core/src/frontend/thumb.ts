@@ -36,6 +36,7 @@ import { ARM_REGISTER_ALIASES, type TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
 import { type CallDeclarations, type CallLowering, callDeclarations } from './call-plan';
 import { type CalleeStackWords, asksCalleeBody } from './callee-body';
+import { CONTROL_BYTE, asciiTrim, isNonAscii } from './control-byte';
 import { unreadPairHalf } from './dead-reads';
 import { pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
@@ -666,7 +667,7 @@ interface GasLine {
 }
 
 /** Labels opening a statement: named ones and gas's numeric local labels (`1:`). */
-const LEADING_LABELS = /^(?:(?:[A-Za-z_.$][\w.$]*|\d+):\s*)+/;
+const LEADING_LABELS = /^(?:(?:[A-Za-z_.$][\w.$]*|\d+):[ \t\r]*)+/;
 
 /** Read a GNU-as listing into statements the way gas for ARM does, in ONE left-to-right pass that
  *  every consumer in this file shares (decode, the debug-section filter, the macro scan), so no
@@ -696,8 +697,9 @@ function readGasLines(asm: string): GasLine[] {
     let crossesLine = inComment;
     let cur = '';
     let unread: string | undefined;
+    let nonAsciiCode = false;
     const end = () => {
-      const text = cur.trim();
+      const text = asciiTrim(cur);
       if (text !== '' || unread !== undefined) {
         statements.push(unread === undefined ? { text } : { text, unread });
       }
@@ -744,17 +746,38 @@ function readGasLines(asm: string): GasLine[] {
       } else if (c === '@') {
         comment = line.slice(i);
         break;
-      } else if (c === '#' && cur.trimStart().replace(LEADING_LABELS, '').trim() === '') {
+      } else if (c === '#' && asciiTrim(asciiTrim(cur).replace(LEADING_LABELS, '')) === '') {
         // a `#` opening the statement: `cur` holds only blank space and labels
         break;
       } else if (c === ';') {
         end();
       } else {
+        nonAsciiCode ||= isNonAscii(c);
         cur += c;
       }
     }
     end();
     crossesLine ||= inComment;
+    // A control byte (other than TAB, and a CR closing a CRLF line) is read by gas as a statement
+    // end or worse (arm-none-eabi-as: `mov r0, #1<NUL>add r0, #2` assembles both instructions),
+    // where this reader keeps it inside one statement. Every statement of such a line is unread,
+    // and the line counts as one whose reading reaches past it, so the whole input declines
+    // wherever the line sits (a hidden `.macro` or section switch above the function counts too).
+    // A non-ASCII code point in code (not in a comment, string or character constant) is a name
+    // character to gas, where JS `trim()` and `\s` read several as blank space; such a line is read
+    // the same way.
+    if (CONTROL_BYTE.test(line) || nonAsciiCode) {
+      crossesLine = true;
+      const why = nonAsciiCode
+        ? 'on a line holding a non-ASCII character outside a comment or string, which gas reads as part of a name'
+        : 'on a line holding a control byte, which gas reads as a statement end where this reader does not';
+      if (statements.length === 0) {
+        statements.push({ text: '', unread: why });
+      }
+      for (const st of statements) {
+        st.unread ??= why;
+      }
+    }
     out.push({ statements, comment, crossesLine });
   }
   return out;
