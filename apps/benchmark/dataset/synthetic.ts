@@ -8041,6 +8041,56 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'extern u32 gDvDst[];\nvoid dvkeptwait(u16 v, u32 n);',
     proto: { dvkeptwait: { params: ['u16', 'u32'], returnsVoid: true } },
   },
+  // A POLL WHOSE BODY TOUCHES MEMORY, the same DMA wait. `dvhomedwait` reads DISPSTAT each time
+  // round; its guard fuses, and after structuring the DMA base is homed into a local (basecse.ts
+  // `hoistBaseLocals`), which re-spells the guard's test with the condition, so the credit stands
+  // and the function lifts. `dvsunkwait` and `dvpollstore` pin a refusal. Each stores a `vu16`
+  // through the DMA base every time round, which the device pin leaves plain (device-pins.ts, the
+  // per-object policy). Plain, agbcc keeps that cell in a register for the loop and stores it once
+  // after it (loop.c `load_mems`), as nothing the loop reads, the s32 count, may alias a u16, so the
+  // lift is refused rather than spelled to write once. `dvsunkwait`'s guard fuses, and a fused loop
+  // that writes memory plain is credited nothing; `dvpollstore` is a jump-to-test loop with no guard
+  // to fuse, refused by the poll-store rule alone (contracts.ts `sunkPollStore`). agbcc only, as
+  // above.
+  {
+    sym: 'dvhomedwait',
+    src:
+      'typedef volatile u32 vu32;\ntypedef volatile u16 vu16;\n' +
+      'extern u16 gDvI[];\nextern s32 *gDvP[];\nvoid g(void);\n' +
+      'void dvhomedwait(u32 n)\n{\n    u16 t = gDvI[3];\n    vu32 *d = (vu32 *)0x40000d4;\n' +
+      '    d[0] = (u32)&t;\n    d[1] = (u32)gDvP[2];\n    d[2] = 0x80000000 | (n >> 1);\n    d[2];\n' +
+      '    while (d[2] & 0x80000000)\n        *(volatile u16 *)0x4000004;\n    g();\n}',
+    features: ['pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'extern u16 gDvI[];\nextern s32 *gDvP[];\nvoid g(void);\nvoid dvhomedwait(u32 n);',
+    proto: { dvhomedwait: { params: ['u32'], returnsVoid: true }, g: { params: [], returnsVoid: true } },
+  },
+  {
+    sym: 'dvsunkwait',
+    src:
+      'typedef volatile u32 vu32;\ntypedef volatile u16 vu16;\n' +
+      'extern u16 gDvI[];\nextern s32 *gDvP[];\nvoid g(void);\n' +
+      'void dvsunkwait(u32 n)\n{\n    u16 t = gDvI[3];\n    vu32 *d = (vu32 *)0x40000d4;\n' +
+      '    d[0] = (u32)&t;\n    d[1] = (u32)gDvP[2];\n    d[2] = 0x80000000 | (n >> 1);\n    d[2];\n' +
+      '    while (d[2] & 0x80000000) {\n        d[1] = 1;\n        ((vu16 *)d)[1] = 2;\n    }\n    g();\n}',
+    features: ['pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'extern u16 gDvI[];\nextern s32 *gDvP[];\nvoid g(void);\nvoid dvsunkwait(u32 n);',
+    proto: { dvsunkwait: { params: ['u32'], returnsVoid: true }, g: { params: [], returnsVoid: true } },
+  },
+  {
+    sym: 'dvpollstore',
+    src:
+      'typedef volatile u32 vu32;\ntypedef volatile u16 vu16;\n' +
+      'extern u16 gDvI[];\nextern s32 *gDvP[];\nvoid g(void);\n' +
+      'void dvpollstore(u32 n)\n{\n    u16 t = gDvI[3];\n    vu32 *d = (vu32 *)0x40000d4;\n' +
+      '    d[0] = (u32)&t;\n    d[1] = (u32)gDvP[2];\n    d[2] = 0x80000000 | (n >> 1);\n    d[2];\n' +
+      '    while (d[2] & 0x80000000)\n        ((vu16 *)d)[5] = n;\n    g();\n}',
+    features: ['pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'extern u16 gDvI[];\nextern s32 *gDvP[];\nvoid g(void);\nvoid dvpollstore(u32 n);',
+    proto: { dvpollstore: { params: ['u32'], returnsVoid: true }, g: { params: [], returnsVoid: true } },
+  },
   // What the discard register does NOT say. `dvnarrow` is the control for a load that leaves it:
   // CodeWarrior at -O0,p reads the plain `s8 x; x = p[5];` as `lwz r0` + `extsb r31,r0`, a home,
   // which stays unstamped (the volatile twin is the same code). `dvdword` is IDO's doubleword
