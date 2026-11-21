@@ -1,6 +1,7 @@
 // asmlift — shared objdump-text scaffolding for the MIPS and PPC frontends. The Thumb frontend
 // parses GNU-as text, not objdump, so it does not route through here.
 import { FrontendUnsupportedError } from './errors';
+import { gasIntLiteral } from './gas-int';
 
 /** The objdump function-header line, exported through the two readers below so that nothing can
  *  disagree about where a function starts. GREEDY to the LAST `>`: a C++ template symbol contains
@@ -219,14 +220,30 @@ export function parseDisasm(disasm: string, opts: DisasmOptions = {}): DisasmIns
   return out;
 }
 
-/** An objdump immediate: decimal or hex (objdump prints hex as 0x…, negatives as -N). */
-export const parseImm = (s: string): number => parseInt(s, /^-?0x/i.test(s) ? 16 : 10);
+/** An immediate: decimal or hex (objdump prints hex as 0x…, negatives as -N), or NaN for any
+ *  other spelling. NEVER a prefix: `parseInt` read `2*2` as 2, `0b11` as 0 and `010` as 10, which
+ *  gas assembles as 4, 3 and 8 — a Splat operand or a hand-typed objdump line reaches here as text
+ *  (frontend/gas-int.ts). A caller that turns it into a value refuses NaN. */
+export const parseImm = (s: string): number => gasIntLiteral(s) ?? NaN;
 
 /** A memory operand `off(base)` (e.g. `8(a0)`, `-4(r1)`) → constant byte offset + base register.
  *  `baseRe` narrows what counts as a base (PPC: `r\d+` — a non-register base is an SDA/global
- *  placeholder the caller must decline). A non-matching operand falls back to offset 0 with the
- *  parens stripped. */
+ *  placeholder the caller must decline). An operand with no base this matches falls back to offset
+ *  0 with the parens stripped; so does an empty displacement (`(a0)`, offset 0 to gas). A base it
+ *  matches under a displacement that is not an integer literal (`2*4(a0)`, `K(a0)`) is refused: the
+ *  fallback read that as offset 0, where gas encodes 8. */
 export function parseMem(operand: string, baseRe: RegExp = /\w+/): { off: number; base: string } {
-  const m = operand.match(new RegExp(`^(-?(?:0x)?[0-9a-f]+)\\((${baseRe.source})\\)$`, 'i'));
-  return m ? { off: parseImm(m[1]), base: m[2] } : { off: 0, base: operand.replace(/[()]/g, '') };
+  const m = operand.match(new RegExp(`^(.*)\\((${baseRe.source})\\)$`, 'i'));
+  const disp = m?.[1].trim();
+  if (m === null || disp === '') {
+    return { off: 0, base: operand.replace(/[()]/g, '') };
+  }
+  const off = gasIntLiteral(disp!);
+  if (off === null) {
+    throw new FrontendUnsupportedError(
+      `memory operand '${operand}' has the displacement '${disp}', which is not an integer literal — ` +
+        `this frontend will not read it as one`,
+    );
+  }
+  return { off, base: m[2] };
 }

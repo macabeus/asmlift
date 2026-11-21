@@ -74,8 +74,8 @@ import type { CalleeBodyBound } from './callee-body';
 import { type Declarations, computedOnlyToReturn, leftInDiscardRegister, unreadPairHalf } from './dead-reads';
 import {
   type DisasmInstr,
-  parseImm,
   parseDisasm as parseSharedDisasm,
+  parseImm as parseSharedImm,
   parseMem as parseSharedMem,
   sliceSymbol,
 } from './disasm';
@@ -226,6 +226,19 @@ const isFpKey = (k: string) => PPC_FP_REG.test(k);
 // Shared objdump scaffolding (frontend/disasm.ts). parseMem narrowed to `r\d+` bases — a
 // non-register base is an SDA/global placeholder assertOrdinaryMem declines.
 const parseMem = (operand: string): { off: number; base: string } => parseSharedMem(operand, /r\d+/);
+// EVERY immediate this frontend reads goes through here, as MIPS's do through its `imm`. objdump
+// prints a number, so anything else (a symbol, a character, `2*2`) is not one this reads: the
+// shared reader answers NaN for it, and an unguarded NaN rendered as the text `NaN` (`li r3,K`
+// lifted `return NaN;`).
+const parseImm = (text: string): number => {
+  const v = parseSharedImm(text);
+  if (!Number.isFinite(v)) {
+    throw new PpcUnsupportedError(
+      `immediate '${text}' is not an integer literal — this frontend will not read it as one`,
+    );
+  }
+  return v;
+};
 
 // 32-bit mask with bits [mb..me] set (PowerPC bit numbering: 0 = MSB). Wraps when mb > me.
 const rlwinmMask = (mb: number, me: number): number => {

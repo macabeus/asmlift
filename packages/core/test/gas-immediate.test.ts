@@ -7,7 +7,7 @@ import { describe, expect, test } from 'vitest';
 import { gasIntLiteral } from '../src/frontend/gas-int';
 import { thumbEntryWordsFromText } from '../src/frontend/thumb-entry';
 import { decompile } from '../src/pipeline';
-import { ARMV4T_AGBCC } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_GCC, PPC_MWCC } from '../src/target';
 
 describe('the integer literals whose gas value is certain', () => {
   test.each([
@@ -121,5 +121,72 @@ describe('a Thumb immediate gas would resolve declines, and a literal lifts as g
     expect(entry('#16')).toBe(5);
     expect(entry('#020')).toBeUndefined();
     expect(entry('#4*4')).toBeUndefined();
+  });
+});
+
+// MIPS AND PPC. The shared objdump reader (frontend/disasm.ts) was the same prefix reader, reached by
+// MIPS and PPC objdump text and by a Splat operand Splat hands on unread: `2*2` read as 2, `0b11`
+// as 0, `addi r3,r3,2+1` as `+ 2`. MIPS already refused a NaN; PPC rendered it (`li r3,K` lifted
+// `return NaN;`). A memory operand's displacement that is not a literal (`2*4(a0)`) fell back to
+// offset 0. Splat folds a parenthesised expression itself (`(2*2)`, `(8)($a0)`) and still does.
+describe('a MIPS or PPC immediate that is not an integer literal declines', () => {
+  const obj = (lines: string[]) =>
+    `00000000 <f>:\n${lines.map((l, i) => `   ${(i * 4).toString(16)}:\t${l}`).join('\n')}\n`;
+  const splat = (line: string, word: string) =>
+    `.set noat\n.set noreorder\n\n.text\nglabel f\n    /* 0 80000000 ${word} */  ${line}\n` +
+    `    /* 4 80000004 03E00008 */  jr          $ra\n    /* 8 80000008 00000000 */   nop\n`;
+  const ppc = (text: string) => decompile('f', text, PPC_MWCC).source;
+  const mips = (text: string) => decompile('f', text, MIPS_GCC).source;
+  const REFUSED = /is not an integer literal|non-numeric immediate/;
+
+  // the word in each Splat comment is mips-linux-gnu-as's encoding of the line
+  test.each([
+    ['addiu       $v0, $zero, 2*2', '24020004'], // gas 4; was `return 2;`
+    ['addiu       $v0, $zero, 0b11', '24020003'], // gas 3; was `return 0;`
+    ['addiu       $v0, $zero, -1+2', '24020001'], // gas 1; was `return -1;`
+    ['sll         $v0, $a0, 2+1', '000410C0'], // gas 3; was `<< 2`
+    ['slti        $v0, $a0, 2+1', '28820003'], // gas 3; was `< 2`
+    ['ori         $v0, $zero, 0x10|1', '34020011'], // gas 0x11; was 16
+  ])('Splat `%s` declines', (line, word) => {
+    expect(() => mips(splat(line, word))).toThrow(REFUSED);
+  });
+
+  test.each([
+    ['addiu       $v0, $zero, (2*2)', '24020004', 'return 4;'],
+    ['lw          $v0, 2*4($a0)', '8C820008', 'return a0[2];'],
+    ['addiu       $v0, $zero, 4', '24020004', 'return 4;'],
+  ])('Splat `%s` lifts as gas encodes it', (line, word, want) => {
+    expect(mips(splat(line, word))).toContain(want);
+  });
+
+  test.each([['li\tv0,2*2'], ['addiu\tv0,a0,2+1'], ['lw\tv0,2*4(a0)'], ['li\tv0,0b11'], ['sll\tv0,a0,2+1']])(
+    'MIPS objdump `%s` declines',
+    (line) => {
+      expect(() => mips(obj([line, 'jr\tra', 'nop']))).toThrow(REFUSED);
+    },
+  );
+
+  test.each([
+    ['li      r3,K'], // was `return NaN;`
+    ['li      r3,2*2'],
+    ['li      r3,010'],
+    ['lwz     r3,K(r4)'],
+    ['addi    r3,r3,2+1'],
+    ['li      r3,0b11'],
+    ["li      r3,'a'"], // was `return NaN;`
+    ['lwz     r3,2*4(r3)'],
+    ['slwi    r3,r3,2+1'],
+    ['cmpwi   r3,K'],
+  ])('PPC `%s` declines', (line) => {
+    expect(() => ppc(obj([line, 'blr']))).toThrow(REFUSED);
+  });
+
+  test.each([
+    ['li      r3,16', 'return 16;'],
+    ['li      r3,0x10', 'return 16;'],
+    ['lwz     r3,8(r3)', 'return a0[2];'],
+    ['addi    r3,r3,3', 'return a0 + 3;'],
+  ])('PPC `%s` lifts', (line, want) => {
+    expect(ppc(obj([line, 'blr']))).toContain(want);
   });
 });
