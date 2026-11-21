@@ -328,11 +328,26 @@ describe('assertEffectsPreserved — a pinned device access', () => {
 
   test('one render the contract cannot place stands for one read, not for every one', () => {
     expect(() => checkReads(irReading([REG, REG + 2, REG + 4]), [readThrough('p')])).toThrow(
-      /dropped reads of the device registers at 0x4000006, 0x4000008, 0x400000a in 'F'/,
+      /dropped 2 of the reads of the device registers at 0x4000006, 0x4000008, 0x400000a in 'F'/,
     );
     expect(() =>
       checkReads(irReading([REG, REG + 2, REG + 4]), [readThrough('p'), readThrough('q'), readThrough('r')]),
     ).not.toThrow();
+  });
+
+  // Which addresses lost the read is unknown where a render at no constant address may stand for
+  // any of them, so the message says how many were lost, not that each one was.
+  test('a refusal with renders at no constant address counts the reads lost among the short addresses', () => {
+    expect(() =>
+      checkReads(irReading([REG, REG, REG + 2, REG + 2, REG + 4]), [
+        read(REG),
+        readThrough('p'),
+        read(REG + 2),
+        read(REG + 4),
+      ]),
+    ).toThrow(
+      /dropped 1 of the reads of the device registers at 0x4000006, 0x4000008 in 'F' — .* the source's 1 at no constant address may stand for the others/,
+    );
   });
 
   test('a read at no constant address needs a render no placed access already needs', () => {

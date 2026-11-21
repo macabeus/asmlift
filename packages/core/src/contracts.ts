@@ -780,11 +780,18 @@ function devicesPreserved(
     const short = [...made.at.keys()].filter((a) => owed(a) > (renders.at.get(a) ?? 0));
     const deficit = short.reduce((n, a) => n + owed(a) - (renders.at.get(a) ?? 0), 0);
     if (deficit > renders.unplaced) {
+      // A render at no constant address may stand for an access at any of the short addresses, so
+      // with some of them only the count past them is known to be lost, and not where.
+      const lost = deficit - renders.unplaced;
       throw new ContractError(
         short.length === 1
           ? `structuring dropped the ${NOUNS[dir].one} the device register at ${short[0]} in '${name}' — ` +
               'the machine made it and the source does not'
-          : `structuring dropped ${NOUNS[dir].many} the device registers at ${short.join(', ')} in '${name}' — ` +
+          : renders.unplaced > 0
+            ? `structuring dropped ${lost} of the ${NOUNS[dir].many} the device registers at ${short.join(', ')} ` +
+              `in '${name}' — the machine made them and the source does not, and the source's ` +
+              `${renders.unplaced} at no constant address may stand for the others`
+            : `structuring dropped ${NOUNS[dir].many} the device registers at ${short.join(', ')} in '${name}' — ` +
               'the machine made them and the source does not',
       );
     }
