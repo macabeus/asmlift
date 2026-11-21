@@ -220,21 +220,40 @@ export function parseDisasm(disasm: string, opts: DisasmOptions = {}): DisasmIns
   return out;
 }
 
-/** An immediate: decimal or hex (objdump prints hex as 0x…, negatives as -N), or NaN for any
- *  other spelling. NEVER a prefix: `parseInt` read `2*2` as 2, `0b11` as 0 and `010` as 10, which
- *  gas assembles as 4, 3 and 8 — a Splat operand or a hand-typed objdump line reaches here as text
- *  (frontend/gas-int.ts). A caller that turns it into a value refuses NaN. */
-export const parseImm = (s: string): number => gasIntLiteral(s) ?? NaN;
+/** An immediate's value: decimal or hex (objdump prints hex as 0x…, negatives as -N), and a
+ *  refusal for any other spelling. NEVER a prefix and never NaN: `parseInt` read `2*2` as 2, `0b11`
+ *  as 0 and `010` as 10, which gas assembles as 4, 3 and 8 — a Splat operand or a hand-typed objdump
+ *  line reaches here as text (frontend/gas-int.ts). It THROWS rather than answering a sentinel, so
+ *  no frontend can forget to refuse one (a NaN that reached `constVal` rendered as `return NaN;`).
+ *  A caller asking a QUESTION of an operand ("is this the literal 0?", "is this a negative sp
+ *  adjust?") reads `gasIntLiteral` instead, whose `null` the type checker makes it handle. */
+export const parseImm = (s: string): number => {
+  const v = gasIntLiteral(s);
+  if (v === null) {
+    throw new FrontendUnsupportedError(
+      `immediate '${s}' is not an integer literal — this frontend will not read it as one`,
+    );
+  }
+  return v;
+};
 
 /** A memory operand `off(base)` (e.g. `8(a0)`, `-4(r1)`) → constant byte offset + base register.
  *  `baseRe` narrows what counts as a base (PPC: `r\d+` — a non-register base is an SDA/global
- *  placeholder the caller must decline). An operand with no base this matches falls back to offset
- *  0 with the parens stripped; so does an empty displacement (`(a0)`, offset 0 to gas). A base it
- *  matches under a displacement that is not an integer literal (`2*4(a0)`, `K(a0)`) is refused: the
- *  fallback read that as offset 0, where gas encodes 8. */
+ *  placeholder the caller must decline). An operand `X(word)` whose word is no base this matches
+ *  falls back to offset 0 with the parens stripped; so does an empty displacement (`(a0)`, offset 0
+ *  to gas). Any other parenthesised text is refused: `8(a0) /* c *\/` fell back to offset 0 with
+ *  the base `8a0 /* c *\/`, where gas encodes `8(a0)`. A base it matches under a displacement that
+ *  is not an integer literal (`2*4(a0)`, `K(a0)`) is refused too: the fallback read that as offset
+ *  0, where gas encodes 8. */
 export function parseMem(operand: string, baseRe: RegExp = /\w+/): { off: number; base: string } {
   const m = operand.match(new RegExp(`^(.*)\\((${baseRe.source})\\)$`, 'i'));
   const disp = m?.[1].trim();
+  if (m === null && /[()]/.test(operand) && !/^[^()]*\(\w+\)$/.test(operand)) {
+    throw new FrontendUnsupportedError(
+      `memory operand '${operand}' is not a displacement and a base register — this frontend will ` +
+        `not read it as offset 0`,
+    );
+  }
   if (m === null || disp === '') {
     return { off: 0, base: operand.replace(/[()]/g, '') };
   }

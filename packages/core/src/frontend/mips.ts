@@ -65,6 +65,7 @@ import {
   liftWithRelift,
 } from './frame-objects';
 import { type Frontend, type LiftOptions, ownDeclarationOf } from './frontend';
+import { gasIntLiteral } from './gas-int';
 import { makeHighHalves } from './high-half';
 import {
   type HoistedDispatch,
@@ -449,8 +450,8 @@ function mipsBounds(
   const bound = (c: Instr, entry: number | null) => {
     // `sltiu tmp, scrut, N` bounds `scrut < N`: the immediate IS the case count (PPC's `cmplwi`
     // states the max index).
-    const n = parseImm(c.ops[2]);
-    return n < 2 ? null : { at: k, addr: beqz.addr, n, def: beqz.target!, entry };
+    const n = gasIntLiteral(c.ops[2] ?? '');
+    return n === null || n < 2 ? null : { at: k, addr: beqz.addr, n, def: beqz.target!, entry };
   };
   const isTarget = (addr: number) => instrs.some((x) => x.target === addr);
   // The beqz's block: back to a branch target, or to the word after a transfer's delay slot.
@@ -1019,7 +1020,10 @@ function v1MayHoldLowWord(blocks: readonly MipsBlock[], preds: readonly (readonl
     const carries = (r: Instr) =>
       r.ops[1] === 'v1' &&
       ((ins.mnemonic === 'addu' && r.mnemonic === 'sltu' && r.ops[2] !== 'v1' && [x, y].includes(r.ops[2])) ||
-        (ins.mnemonic === 'addiu' && r.mnemonic === 'sltiu' && parseImm(r.ops[2] ?? '') === parseImm(y ?? '')));
+        (ins.mnemonic === 'addiu' &&
+          r.mnemonic === 'sltiu' &&
+          gasIntLiteral(r.ops[2] ?? '') !== null &&
+          gasIntLiteral(r.ops[2] ?? '') === gasIntLiteral(y ?? '')));
     // A copy is judged only where its every read follows it in its own block: a read past a join
     // is where a compiler coalesces each arm's value into one register (`addu v1,a1,zero` on one
     // arm, `ori v1,a1,0xe000` on the other), which is scratch.
@@ -1060,8 +1064,8 @@ function frameDepths(blocks: readonly MipsBlock[], entryReentered: boolean): Rea
     if (!isStackPtr(writtenReg(ins) ?? '')) {
       return undefined; // leaves sp alone
     }
-    const by = parseImm(ins.ops[2] ?? '');
-    return (ins.mnemonic === 'addiu' || ins.mnemonic === 'addi') && isStackPtr(ins.ops[1] ?? '') && Number.isFinite(by)
+    const by = gasIntLiteral(ins.ops[2] ?? '');
+    return (ins.mnemonic === 'addiu' || ins.mnemonic === 'addi') && isStackPtr(ins.ops[1] ?? '') && by !== null
       ? by
       : null;
   };
@@ -1228,8 +1232,8 @@ function refuseReturnsNotThroughCallersRa(
           depth !== null &&
           /^addiu?$/.test(mn) &&
           isStackPtr(ins.ops[1] ?? '') &&
-          /^-?(0x)?[0-9a-f]+$/i.test(ins.ops[2] ?? '')
-            ? depth + parseImm(ins.ops[2])
+          gasIntLiteral(ins.ops[2] ?? '') !== null
+            ? depth + gasIntLiteral(ins.ops[2] ?? '')!
             : null;
       }
       if (holds) {
@@ -1771,7 +1775,7 @@ function liftOnce(
       (ins.mnemonic === 'addiu' || ins.mnemonic === 'addi') &&
       isStackPtr(ins.ops[0]) &&
       isStackPtr(ins.ops[1] ?? '') &&
-      parseImm(ins.ops[2] ?? '') < 0,
+      (gasIntLiteral(ins.ops[2] ?? '') ?? 0) < 0,
   );
   const frameSize = pushes.length === 1 ? -parseImm(pushes[0].ops[2]) : undefined;
   const depthAt = frameDepths(blocks, entryReentered);
@@ -2234,12 +2238,11 @@ function liftOnce(
     let firstWords: { reg: string | undefined; sym: string | undefined; off: number }[] = [];
     // EVERY immediate this frontend turns into a value goes through here. objdump prints them as
     // numbers, so a non-numeric one means the operand is not an immediate at all — a relocation
-    // spelling the reader failed to resolve, a label — and bare `parseImm` answers NaN, which
-    // `constVal` renders as the literal 0. That is the relocation fold's own failure one level
-    // down, so it refuses instead.
+    // spelling the reader failed to resolve, a label — and this refuses it naming the instruction,
+    // rather than as the bare operand the shared `parseImm` would name.
     const imm = (ins: Instr, text: string | undefined): number => {
-      const v = parseImm(text ?? '');
-      if (!Number.isFinite(v)) {
+      const v = gasIntLiteral(text ?? '');
+      if (v === null) {
         throw new FrontendUnsupportedError(
           `${site(ins)} has the non-numeric ` +
             `immediate '${text ?? ''}' where a number belongs — this frontend will not read it as one`,

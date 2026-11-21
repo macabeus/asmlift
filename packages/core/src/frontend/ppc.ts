@@ -72,13 +72,7 @@ import { type AsmData, readJumpTable } from './asmdata';
 import { type CallDeclarations, type ParamClass, callDeclarations } from './call-plan';
 import type { CalleeBodyBound } from './callee-body';
 import { type Declarations, computedOnlyToReturn, leftInDiscardRegister, unreadPairHalf } from './dead-reads';
-import {
-  type DisasmInstr,
-  parseDisasm as parseSharedDisasm,
-  parseImm as parseSharedImm,
-  parseMem as parseSharedMem,
-  sliceSymbol,
-} from './disasm';
+import { type DisasmInstr, parseDisasm as parseSharedDisasm, parseMem as parseSharedMem, sliceSymbol } from './disasm';
 import { mkEmitKit, pushSwitchBr } from './emit';
 import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 import { finishLift } from './finish';
@@ -105,6 +99,7 @@ import {
   liftWithRelift,
 } from './frame-objects';
 import { type Frontend, type LiftOptions, type OwnDeclaration, ownDeclarationOf } from './frontend';
+import { gasIntLiteral } from './gas-int';
 import { makeHighHalves } from './high-half';
 import {
   type HoistedDispatch,
@@ -227,12 +222,12 @@ const isFpKey = (k: string) => PPC_FP_REG.test(k);
 // non-register base is an SDA/global placeholder assertOrdinaryMem declines.
 const parseMem = (operand: string): { off: number; base: string } => parseSharedMem(operand, /r\d+/);
 // EVERY immediate this frontend reads goes through here, as MIPS's do through its `imm`. objdump
-// prints a number, so anything else (a symbol, a character, `2*2`) is not one this reads: the
-// shared reader answers NaN for it, and an unguarded NaN rendered as the text `NaN` (`li r3,K`
-// lifted `return NaN;`).
+// prints a number, so anything else (a symbol, a character, `2*2`) is not one this reads (an
+// unguarded NaN rendered as the text `NaN`: `li r3,K` lifted `return NaN;`). The shared `parseImm`
+// refuses the same spellings; this one refuses them as this frontend's error.
 const parseImm = (text: string): number => {
-  const v = parseSharedImm(text);
-  if (!Number.isFinite(v)) {
+  const v = gasIntLiteral(text);
+  if (v === null) {
     throw new PpcUnsupportedError(
       `immediate '${text}' is not an integer literal — this frontend will not read it as one`,
     );

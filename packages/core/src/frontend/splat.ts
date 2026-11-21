@@ -550,7 +550,15 @@ export function parseSplatMips(asm: string, name: string, includes?: ReadonlyMap
         `cannot lift '${name}': data directive '${mnemonic}' in the code stream — skipping it would silently delete its effect`,
       );
     }
-    const normalized = asciiTrim(m[3]) ? splitOperands(asciiTrim(m[3])).map((o) => normalizeOperand(name, o)) : [];
+    // A block comment is whitespace to gas wherever it sits in the operands, so it is read as a
+    // space here, before any operand is cut out or read: Splat writes one after an instruction it
+    // did not attribute to the compiler (`lw $v0, 0x8($a0) /* handwritten instruction */`, 140 lines
+    // in marioparty3's OS asm, `addi $t7, $a1, 0x20 /* … */` in af's). Read as part of the operand it
+    // hid the memory shape (offset 0 and a mangled base) or, cut at the first one, the rest of an
+    // expression (`0x8 /* x */ + 1 /* y */` as 8, against gas's 9). The statement reader has already
+    // closed every comment, so the first `*\/` after a `/*` is that comment's end.
+    const operands = asciiTrim(m[3].replace(/\/\*.*?\*\//g, ' '));
+    const normalized = operands ? splitOperands(operands).map((o) => normalizeOperand(name, o)) : [];
     const ops = normalized.map((n) => n.op);
     // At most one relocation per instruction — the same invariant disasm.ts enforces on objdump
     // output, and for the same reason: two would leave one symbol standing for the other's operand.
@@ -565,8 +573,11 @@ export function parseSplatMips(asm: string, name: string, includes?: ReadonlyMap
     // constant as an unsigned mask (`(0x8000ABCD & 0xFFFF)` = 0xABCD), so re-sign it here to match
     // the hardware — and the objdump path, which prints the already-signed value. Zero-extending ops
     // (ori/andi/xori) and lui keep the unsigned value, so they are deliberately excluded.
-    if ((mnemonic === 'addiu' || mnemonic === 'addi') && ops.length === 3 && /^-?(0x[0-9a-fA-F]+|\d+)$/.test(ops[2])) {
-      ops[2] = String(signExtend16(ops[2]));
+    // Every literal spelling is re-signed, `0XFFFF` too (gas reads it as 0xFFFF, and a lowercase-only
+    // test left it 65535, so `addiu $v0, $a0, 0XFFFF` lifted `a0 + 65535` against the hardware's -1).
+    const field = (mnemonic === 'addiu' || mnemonic === 'addi') && ops.length === 3 ? gasIntLiteral(ops[2]) : null;
+    if (field !== null) {
+      ops[2] = String(signExtend16(field));
     }
     for (const l of pending) {
       labelAddr.set(l, addr);
@@ -602,8 +613,8 @@ const isBranchMnemonic = (mn: string): boolean => mn === 'j' || (mn[0] === 'b' &
 
 // Re-sign a raw 16-bit immediate: a value with bit 15 set becomes negative (two's complement),
 // matching how addi/addiu sign-extend the field. A value already ≤ 0x7FFF is unchanged.
-function signExtend16(s: string): number {
-  const v = parseInt(s, /^-?0x/i.test(s) ? 16 : 10) & 0xffff;
+function signExtend16(n: number): number {
+  const v = n & 0xffff;
   return v & 0x8000 ? v - 0x10000 : v;
 }
 
@@ -734,17 +745,8 @@ function normalizeOperand(name: string, op: string): { op: string; reloc?: Disas
     );
   }
   const plain = (v: string) => ({ op: v });
-  // An integer literal followed by a block comment, which gas reads as whitespace: Splat marks an
-  // instruction it could not attribute to the compiler with one (`addi $t7, $a1, 0x20 /* handwritten
-  // instruction */`, 36 `addi` and 18 `addiu` lines in af's checkout). The literal is the operand;
-  // the shared reader reads a literal only, and would refuse the commented text. Only the literal
-  // case is read past its comment — every other operand keeps the reading it had.
-  const commented = op.match(/^(.*?)[ \t\r]*\/\*.*\*\/$/);
-  if (commented && gasIntLiteral(commented[1]) !== null) {
-    return plain(commented[1]);
-  }
   // Memory operand `DISP(base)` — base is a register (letter-first), DISP a constant/expression.
-  const mem = op.match(/^(.*)\((\$?[A-Za-z]\w*)\)$/);
+  const mem = op.match(/^(.*)\([ \t\r]*(\$?[A-Za-z]\w*)[ \t\r]*\)$/);
   if (mem) {
     const disp = asciiTrim(mem[1]);
     const off = disp === '' ? '0' : String(evalConst(name, disp));
@@ -758,7 +760,7 @@ function normalizeOperand(name: string, op: string): { op: string; reloc?: Disas
   // re-sign above is one, the MIPS frontend's `parseImm` another, and neither is told the radix, so
   // a leading-zero immediate stops here — `addiu $v0, $a0, 020` lifted as `a0 + 20` against the
   // assembler's 16.
-  if (OCTAL_MAGNITUDE.test(op)) {
+  if (OCTAL_MAGNITUDE.test(op) && gasIntLiteral(op) === null) {
     refuseOctal(name, op, op);
   }
   return plain(MIPS_FP_REG.test(op) ? op : op.replace(/^\$/, ''));
@@ -772,7 +774,9 @@ function normalizeOperand(name: string, op: string): { op: string; reloc?: Disas
  *  as `((s32 *)&gTab)[5]` where the assembler's addend gives `[4]`, and `%lo(gTab + 010)` as the
  *  fractional index `2.5`. A wrong address compiles and scores, so this is not something to guess.
  *
- *  This reader models hex and decimal, so the third radix REFUSES rather than being resolved:
+ *  This reader models hex and decimal, so the third radix REFUSES rather than being resolved, save
+ *  the spellings whose value no radix changes (`00`, `07`: zeros and one octal digit, which
+ *  `gasIntLiteral` admits and this pattern therefore lets through):
  *  nothing produces the shape — 0 operand occurrences carrying a leading-zero integer over the
  *  4,200,524 operands of the 20,260 `.s` files that carry a `glabel` or a `.set noreorder` in the
  *  nine benchmark checkouts (counted with python; a recursive `grep` here skips `build/`) — so a
@@ -780,8 +784,9 @@ function normalizeOperand(name: string, op: string): { op: string; reloc?: Disas
  *
  *  THE PLACEMENT IS THE POINT. The rule belongs to the readers that turn a digit string into a
  *  value, not to the patterns that feed them: a guard on one caller's regex leaves the next caller
- *  reading base 10, and the three readers that do — `evalConst`'s literal, {@link signExtend16} and
- *  the shared `parseImm` — are not all in this file. */
+ *  reading base 10. The three readers that do — `evalConst`'s literal, the `addi`/`addiu` re-sign
+ *  and the shared `parseImm` — all read through `gasIntLiteral` (frontend/gas-int.ts), so they
+ *  agree on every spelling; this pattern only names the refusal. */
 const OCTAL_MAGNITUDE = /^[-+]?0\d/;
 const refuseOctal = (name: string, tok: string, operand: string): never => {
   throw new FrontendUnsupportedError(
@@ -795,8 +800,11 @@ const refuseOctal = (name: string, tok: string, operand: string): never => {
 // LOGICAL — Splat's operands are unsigned 32-bit constants. Anything unparsable declines LOUD
 // rather than silently yielding NaN.
 function evalConst(name: string, expr: string): number {
-  const toks = expr.match(/0x[0-9a-fA-F]+|\d+|<<|>>|[-+*&|^()~]/g);
-  if (!toks) {
+  // Every character is a token or whitespace: a match that skipped the rest read `(0x10 + K1)` as
+  // 0x10 + 1 (the `K` dropped, gas 18 against 17) and `K1($a0)` as offset 1.
+  const TOKEN = /0[xX][0-9a-fA-F]+|\d+|<<|>>|[-+*&|^()~]/g;
+  const toks = expr.match(TOKEN);
+  if (!toks || asciiTrim(expr.replace(TOKEN, ' ')) !== '') {
     throw new FrontendUnsupportedError(`cannot lift '${name}': unparsable constant expression '${expr}'`);
   }
   const prec: Record<string, number> = { '|': 1, '^': 2, '&': 3, '<<': 4, '>>': 4, '+': 5, '-': 5, '*': 6 };
@@ -822,11 +830,12 @@ function evalConst(name: string, expr: string): number {
     if (t === '~') {
       return ~unary();
     }
-    if (/^(0x[0-9a-fA-F]+|\d+)$/.test(t)) {
-      if (OCTAL_MAGNITUDE.test(t)) {
-        refuseOctal(name, t, expr);
+    if (/^\d/.test(t)) {
+      const v = gasIntLiteral(t);
+      if (v === null) {
+        return OCTAL_MAGNITUDE.test(t) ? refuseOctal(name, t, expr) : fail();
       }
-      return t.toLowerCase().startsWith('0x') ? parseInt(t, 16) : parseInt(t, 10);
+      return v;
     }
     return fail();
   };
