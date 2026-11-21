@@ -341,7 +341,9 @@ export type Stmt =
   | { k: 'store'; lval: Expr; value: Expr }
   | { k: 'exprstmt'; value: Expr } // a side-effecting expression (e.g. a void call)
   | { k: 'if'; cond: Expr; then: Stmt[]; else: Stmt[] }
-  | { k: 'while'; cond: Expr; body: Stmt[] }
+  // `fusedGuard` is set only by the structurer's guard fusion (the un-rotation of a guarded
+  // self-loop), and is never printed: see {@link FusedGuard}.
+  | { k: 'while'; cond: Expr; body: Stmt[]; fusedGuard?: FusedGuard }
   // A bottom-tested loop `do { body } while (cond);` — the body runs at least once, then the test at
   // the BOTTOM decides re-entry. This is the shape a compiler emits for a loop whose trip count it can
   // prove ≥1 (guard elided) or a source `do-while`. Distinct from `while` (test-at-top, body may run
@@ -363,7 +365,7 @@ export type Stmt =
   // loop, `j = lo << 3; for (i = lo; i <= hi; i++, j = i << 2)` where a source may have written
   // `for (i = lo, j = lo << 3; …)`. The two run the same, as the init clause runs right after the
   // statements ahead of it; only the reading differs.
-  | { k: 'for'; init: Stmt; cond: Expr; inc: Stmt[]; body: Stmt[] }
+  | { k: 'for'; init: Stmt; cond: Expr; inc: Stmt[]; body: Stmt[]; fusedGuard?: FusedGuard }
   // `break;` / `continue;` — a loop early-exit / next-iteration jump. Emitted ONLY when the target is
   // the innermost enclosing loop (bare C break/continue cannot express a multi-level exit; a deeper
   // target declines). SGI/IDO Pascal has neither, so its backend loud-fails them (like `field`/`cast`).
@@ -442,6 +444,27 @@ export type Stmt =
   // it — which is not cosmetic: unoptimised code gives every source `return;` a branch of its own,
   // so the redundant spelling costs bytes. Advice about SPELLING; nothing may read it as semantics.
   | { k: 'return'; value?: Expr; unspelled?: true };
+
+/** The guard a top-tested loop's condition stands in for, where the structurer's guard fusion
+ *  deleted it. agbcc rotates a test-at-top loop: the exit test is duplicated into a guard ahead of
+ *  the loop and a latch at its foot, so the asm tests at both. The fusion turns the pair back into
+ *  one `while`, whose condition's first evaluation is the guard's test, so each pinned read that
+ *  test made is still made, though the tree renders it once. The effect contract credits the
+ *  guard's reads to its dropped rule from `test` (contracts.ts `fusedGuardCredit`).
+ *
+ *  `test` is the guard's test as the kept form would render it (the `if` around a `do-while`), so
+ *  the contract keys its reads as it keys every other render. `site` names the guard: the index of
+ *  its block in the function. The asm makes that guard's reads once however many times the tree
+ *  holds the loop, so where a copied tail holds it twice the contract credits the guard once for
+ *  them all. A `for` carries the field too, as its condition is tested before the first iteration
+ *  the same way; a pass that re-spells a credited loop keeps the field, and the contract re-checks
+ *  it against whatever condition the new loop has. A pass that re-spells the addresses the
+ *  condition renders maps `test` the same way ({@link mapFusedGuardTests}), or the two are keyed
+ *  apart and the credit is lost. */
+export interface FusedGuard {
+  readonly site: number;
+  readonly test: Expr;
+}
 
 /** One arm of a `switch`. `values` stacks multiple `case K:` labels onto one body (`case 1: case 2:`).
  *  `fallsThrough` true ⇒ the body flows into the NEXT arm (no `break;`); see the non-neutrality note. */
@@ -1554,6 +1577,19 @@ export function renameVariables(
     return m.k === 'for' ? { ...m, init: target(m.init), inc: m.inc.map(target) } : m;
   };
   return body.map((s) => target(mapStmtExprs(s, (e) => renameInExpr(e, renames, opts))));
+}
+
+/** `s` with the test of every fused guard under it ({@link FusedGuard}) mapped through `f`, nested
+ *  statements recursively, and nothing else changed. {@link mapStmtExprs} leaves the test alone, as
+ *  it is no expression the tree prints and some of its callers collect what they visit; a pass that
+ *  re-spells an address the loop's condition renders runs its rewrite here too, so the contract keys
+ *  the guard's reads as it keys the condition's. */
+export function mapFusedGuardTests(s: Stmt, f: (e: Expr) => Expr): Stmt {
+  const inner = mapStmtLists(s, (list) => list.map((x) => mapFusedGuardTests(x, f)));
+  if ((inner.k === 'while' || inner.k === 'for') && inner.fusedGuard !== undefined) {
+    return { ...inner, fusedGuard: { ...inner.fusedGuard, test: f(inner.fusedGuard.test) } };
+  }
+  return inner;
 }
 
 /** The SETTER half of {@link stmtLists}: `s` with each of its nested lists replaced by `f` applied

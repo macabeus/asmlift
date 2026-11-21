@@ -9,7 +9,16 @@ import { placedAt } from './ir/discipline';
 import { MEM_BASE_OPS } from './ir/opcodes';
 import { type IrType, memberOf, typeToString } from './ir/types';
 import { cellAddress, qualifiedBase } from './l3/address';
-import { type BinOp, type Expr, type SFn, type Stmt, calleeOf, caseGotoViolation, switchArmSuccessors } from './l3/ast';
+import {
+  type BinOp,
+  type Expr,
+  type SFn,
+  type Stmt,
+  calleeOf,
+  caseGotoViolation,
+  exprEquals,
+  switchArmSuccessors,
+} from './l3/ast';
 import {
   assignsIn,
   exprChildren,
@@ -217,12 +226,19 @@ function accessedObject(base: Expr, addresses: ReadonlySet<string>, dotted = fal
  *  declared, those whose every write is, and the rendered C type of an expression, which decides
  *  where the printer casts. */
 interface TreeContext {
+  /** the function's name, for a refusal's message */
+  name: string;
+  /** its parameters and locals: an assignment to any other name writes a global */
+  locals: ReadonlySet<string>;
   declared: ReadonlySet<string>;
   written: ReadonlySet<string>;
   typeOf: (e: Expr) => IrType | undefined;
   /** The names whose bare spelling is the object's address: the array-declared globals the
    *  structurer subscripts by name (SFn.globals), and the array or struct statics it defines. */
   addresses: ReadonlySet<string>;
+  /** Filled by the count: each guard-fused loop the tree holds, by its guard's `site`, one entry
+   *  per copy of the loop ({@link fusedGuardCredit}). */
+  fusedCopies: Map<number, FusedCopy[]>;
 }
 
 /** every call under `e`, counted by target name; every qualified memory access, by the address it
@@ -328,6 +344,175 @@ const either = (...ps: PathCounts[]): PathCounts => ({
 });
 const falls = (c: EffectCounts): PathCounts => ({ through: c, ret: null, brk: null, cont: null, end: null });
 
+/** One copy of a guard-fused loop: the reads its deleted guard's test renders that its own
+ *  condition renders too (`credit`, each key capped at the condition's count), and the condition's
+ *  own reads (`cond`). Only the device reads, the one kind the dropped rule counts by render. */
+interface FusedCopy {
+  credit: EffectCounts;
+  cond: EffectCounts;
+}
+
+const deviceReads = (m: EffectCounts): EffectCounts => new Map([...m].filter(([k]) => k.startsWith('device:r:')));
+
+type Loop = Extract<Stmt, { k: 'while' } | { k: 'dowhile' } | { k: 'for' }>;
+
+/** The statements a loop runs each time round: its body, and a `for`'s update. */
+const loopStmts = (s: Loop): Stmt[] => (s.k === 'for' ? [...s.body, ...s.inc] : s.body);
+
+/** Every statement in `stmts`, nested ones included. */
+function everyStmt(stmts: readonly Stmt[]): Stmt[] {
+  return stmts.flatMap((s) => [s, ...everyStmt(stmtChildren(s))]);
+}
+
+type Write = Extract<Stmt, { k: 'store' } | { k: 'assign' }>;
+
+/** A write to memory the tree spells plain: a store through no qualified pointer, or an assignment
+ *  to a global's bare name, which the qualifier its declaration may carry is not in the tree for.
+ *  An assignment to an object every write of which the IR placed by its declaration
+ *  (`ctx.written`) is not one: the declaration the recompile reads is the one that made the
+ *  machine's store volatile, so the name is spelled qualified where the tree cannot show it. */
+const plainWrite = (s: Stmt, ctx: TreeContext): s is Write =>
+  s.k === 'store'
+    ? !qualifiedAccessChain(s.lval)
+    : s.k === 'assign' && !ctx.locals.has(s.name) && !ctx.written.has(s.name);
+
+/** A plain write in `stmts` ({@link plainWrite}), or undefined. A guard-fused loop holding one is
+ *  credited nothing. The credit is for loops the plain count refused, and such a loop's plain write
+ *  is one agbcc may move out of it on recompile ({@link sunkPollStore}), where the machine made it
+ *  every time round: a lift the credit let through would then write less often than the machine.
+ *  Withholding the credit leaves the loop refused as the count refused it, whatever it writes, the
+ *  safe side of the judgement `sunkPollStore` makes more narrowly. */
+function plainWriteIn(stmts: readonly Stmt[], ctx: TreeContext): Write | undefined {
+  return everyStmt(stmts).find((s): s is Write => plainWrite(s, ctx));
+}
+
+/** The plain write ({@link plainWrite}) in a loop that polls a pinned read which a compiler may
+ *  keep in a register for the whole loop and write once after it, where the machine wrote it each
+ *  time round; undefined when the loop holds none.
+ *
+ *  agbcc's loop pass (loop.c `load_mems`) moves a memory cell into a register for the duration of
+ *  a loop when the cell's address does not change in it, the loop makes no call, and no other
+ *  access in the loop may alias the cell, and stores it back at the exit. `volatile` is what keeps
+ *  such a write in the loop, so one the asm makes there, in a loop with neither a call nor an
+ *  aliasing access, was qualified in the source: a pointer the device pin left plain
+ *  (frontend/device-pins.ts: the per-object policy pins no store a later one does not overwrite),
+ *  or a `volatile` global the lift cannot see. Spelled plain, the recompile writes it once, after
+ *  the loop, or never on a run that does not go round, and its read counts are unchanged.
+ *
+ *  Judged over the tree as the recompile would read it. An address is fixed in the loop when it
+ *  reads no memory, makes no call and names no local the loop assigns. Under agbcc's type-based
+ *  aliasing, another access may alias the cell when it has the write's width, signed or not, or
+ *  either is a byte, unless it is an element of the same base spelled alike at a constant
+ *  subscript whose bytes miss the write's, or are the write's own cell (two stores
+ *  `((u16 *)0x40000d4)[5]` and `[1]` each leave the other free to sink); a write whose width the
+ *  tree does not say (a member, or a global assigned by its name) is taken to be aliased by
+ *  nothing. Only a loop that renders a pinned device read is judged: a poll, the family the device
+ *  pin exists for, whether its condition reads the register or its own body reads it into a local
+ *  the condition tests (a rotated `v0 = REG; while (v0 & M) { …; v0 = REG; }`). A loop whose body
+ *  only holds a device read, or a nested poll, is no poll: its writes are not judged here. A
+ *  plain write at a fixed address in any other loop is the same hazard where its source was
+ *  `volatile`, and is not judged here. */
+function sunkPollStore(s: Loop, ctx: TreeContext): Write | undefined {
+  const stmts = loopStmts(s);
+  const polled: EffectCounts = new Map();
+  effectsInExpr(s.cond, polled, ctx);
+  // A rotated poll reads the register into a local in its body and tests that: the reads assigned
+  // to a name the condition reads count as the condition's. The loop's own statements, not a nested
+  // loop's, which is judged as its own loop.
+  const tested = new Set(
+    [...walkExprs([{ k: 'exprstmt', value: s.cond }])].flatMap((e) =>
+      e.k === 'var' && ctx.locals.has(e.name) ? [e.name] : [],
+    ),
+  );
+  const own = (list: readonly Stmt[]): Stmt[] =>
+    list.flatMap((st) =>
+      st.k === 'while' || st.k === 'dowhile' || st.k === 'for' ? [] : [st, ...own(stmtChildren(st))],
+    );
+  for (const st of own(stmts)) {
+    if (st.k === 'assign' && tested.has(st.name)) {
+      effectsInExpr(st.value, polled, ctx);
+    }
+  }
+  if (deviceReads(polled).size === 0) {
+    return undefined;
+  }
+  const exprs = [...walkExprs([{ k: 'exprstmt', value: s.cond }, ...stmts])];
+  if (exprs.some((e) => e.k === 'call')) {
+    return undefined;
+  }
+  const assigned = new Set(assignsIn(stmts).map((a) => a.name));
+  const accesses = exprs.filter((e): e is Access => e.k === 'index' || e.k === 'field');
+  const fixed = (e: Expr): boolean =>
+    e.k !== 'call' &&
+    e.k !== 'index' &&
+    e.k !== 'field' &&
+    e.k !== 'postincr' &&
+    !(e.k === 'var' && assigned.has(e.name)) &&
+    exprChildren(e).every(fixed);
+  const widthOf = (e: Access): number | undefined => (e.k === 'index' ? e.width : undefined);
+  // Two elements of one base spelled alike at constant subscripts are one address register and
+  // two displacements to the recompile. Where their bytes do not overlap, alias analysis tells
+  // them apart (alias.c `memrefs_conflict_p`); where they are the one cell at one width, loop.c
+  // `load_mems` takes the other access for the cell itself. Neither keeps the cell in the loop.
+  const apart = (a: Access, b: Access): boolean => {
+    if (a.k !== 'index' || b.k !== 'index' || a.idx.k !== 'const' || b.idx.k !== 'const') {
+      return false;
+    }
+    if (!exprEquals(a.base, b.base)) {
+      return false;
+    }
+    const [lo, hi] = [a.idx.value * a.width, b.idx.value * b.width];
+    return lo + a.width <= hi || hi + b.width <= lo || (lo === hi && a.width === b.width);
+  };
+  return everyStmt(stmts).find((st): st is Write => {
+    if (!plainWrite(st, ctx)) {
+      return false;
+    }
+    if (st.k === 'assign') {
+      return true; // a global's own cell, its width unsaid
+    }
+    const lval = st.lval;
+    if ((lval.k !== 'index' && lval.k !== 'field') || !exprChildren(lval).every(fixed)) {
+      return false;
+    }
+    const w = widthOf(lval);
+    return (
+      w !== 1 &&
+      !accesses.some((a) => a !== lval && w !== undefined && (widthOf(a) === w || widthOf(a) === 1) && !apart(a, lval))
+    );
+  });
+}
+
+/** The reads the guard-fused loops in a tree stand for past their conditions' own renders, by key,
+ *  which the dropped rule counts as rendered. Fusing deletes a guard whose test the loop's first
+ *  evaluation makes (l3/ast.ts `FusedGuard`): in the asm that test is one read at the guard and one
+ *  at the latch, and a lone loop renders it once, so its guard's reads are credited. The credit
+ *  stands only for reads the loop's own condition renders, once for each, since the claim is that
+ *  the condition's first evaluation is the guard's.
+ *
+ *  A guard is credited once however many copies of its loop the tree holds: the asm makes its reads
+ *  once. Where a copied tail holds the loop twice, the two conditions already render as many reads
+ *  as the guard and the latch make between them, so a copy's credit counts only past the renders
+ *  the other copies add: at each key, the most any one copy is credited plus the most any one
+ *  condition renders, less every copy's condition, and never below none. A lone loop is credited
+ *  in full; two copies of one loop are credited nothing, as the tree would be counted were the
+ *  guard kept. */
+function fusedGuardCredit(fused: ReadonlyMap<number, readonly FusedCopy[]>): EffectCounts {
+  const out: EffectCounts = new Map();
+  for (const copies of fused.values()) {
+    const credit = most(...copies.map((c) => c.credit)) ?? new Map<string, number>();
+    const cond = most(...copies.map((c) => c.cond)) ?? new Map<string, number>();
+    const rendered = copies.reduce<EffectCounts>((acc, c) => sum(acc, c.cond), new Map());
+    for (const [k, n] of credit) {
+      const past = n + (cond.get(k) ?? 0) - (rendered.get(k) ?? 0);
+      if (past > 0) {
+        out.set(k, (out.get(k) ?? 0) + past);
+      }
+    }
+  }
+  return out;
+}
+
 /** `total` = every occurrence in the tree; `paths` = the most any single syntactic path executes,
  *  by how it leaves `stmts`. A path that leaves by `return` runs nothing after it, so two sequenced
  *  `if (…) { f(); return; }` arms are one call on any path, not two. `unreached` collects every
@@ -350,6 +535,27 @@ function countEffects(
     const own: EffectCounts = new Map();
     stmtExprs(s).forEach((e) => effectsInExpr(e, own, ctx, false, false, s.k === 'store' && e === s.lval));
     total = sum(total, own);
+    if ((s.k === 'while' || s.k === 'dowhile' || s.k === 'for') && sunkPollStore(s, ctx) !== undefined) {
+      throw new ContractError(
+        `a loop that polls a device register writes memory plain at an address the loop never changes ` +
+          `in '${ctx.name}' — the machine made that write each time round, and a recompile may keep ` +
+          'the cell in a register and write it once after the loop',
+      );
+    }
+    // A fused guard's reads run as the loop's first test, so the dropped rule counts them, once the
+    // whole tree is counted (`fusedGuardCredit`). They are in no path count: on a path, the first
+    // test is already the condition's own render.
+    if ((s.k === 'while' || s.k === 'for') && s.fusedGuard !== undefined) {
+      const test: EffectCounts = new Map();
+      effectsInExpr(s.fusedGuard.test, test, ctx);
+      const cond = deviceReads(own);
+      // A loop that writes memory plain is credited nothing ({@link plainWriteIn}).
+      const credit = plainWriteIn(loopStmts(s), ctx)
+        ? new Map<string, number>()
+        : new Map([...deviceReads(test)].map(([k, n]) => [k, Math.min(n, cond.get(k) ?? 0)] as const));
+      const copies = ctx.fusedCopies.get(s.fusedGuard.site) ?? [];
+      ctx.fusedCopies.set(s.fusedGuard.site, [...copies, { credit, cond }]);
+    }
     let here: PathCounts;
     if (s.k === 'if') {
       const t = countEffects(s.then, ctx, unreached);
@@ -567,6 +773,8 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
   const unreached: Stmt[] = [];
   const vt = declaredTypes(sfn);
   const ctx: TreeContext = {
+    name: sfn.name,
+    locals: new Set([...sfn.params, ...sfn.locals].map((v) => v.name)),
     declared: new Set([...irDeclared.keys()].map((k) => k.slice(DECLARED.length))),
     written: declaredWritten,
     typeOf: (e) => exprCType(e, vt),
@@ -576,8 +784,11 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
         .filter((st) => st.type.kind === 'array' || st.type.kind === 'struct')
         .map((st) => st.name),
     ]),
+    fusedCopies: new Map(),
   };
-  const { total, paths } = countEffects(sfn.body, ctx, unreached);
+  const counted = countEffects(sfn.body, ctx, unreached);
+  const paths = counted.paths;
+  const total = sum(counted.total, fusedGuardCredit(ctx.fusedCopies));
   if (unreached.length) {
     throw new ContractError(
       `structuring emitted ${unreached.length} statement(s) no path reaches in '${sfn.name}', after one every path leaves`,
@@ -756,11 +967,18 @@ function devicesPreserved(
     const short = [...made.at.keys()].filter((a) => owed(a) > (renders.at.get(a) ?? 0));
     const deficit = short.reduce((n, a) => n + owed(a) - (renders.at.get(a) ?? 0), 0);
     if (deficit > renders.unplaced) {
+      // A render at no constant address may stand for an access at any of the short addresses, so
+      // with some of them only the count past them is known to be lost, and not where.
+      const lost = deficit - renders.unplaced;
       throw new ContractError(
         short.length === 1
           ? `structuring dropped the ${NOUNS[dir].one} the device register at ${short[0]} in '${name}' — ` +
               'the machine made it and the source does not'
-          : `structuring dropped ${NOUNS[dir].many} the device registers at ${short.join(', ')} in '${name}' — ` +
+          : renders.unplaced > 0
+            ? `structuring dropped ${lost} of the ${NOUNS[dir].many} the device registers at ${short.join(', ')} ` +
+              `in '${name}' — the machine made them and the source does not, and the source's ` +
+              `${renders.unplaced} at no constant address may stand for the others`
+            : `structuring dropped ${NOUNS[dir].many} the device registers at ${short.join(', ')} in '${name}' — ` +
               'the machine made them and the source does not',
       );
     }

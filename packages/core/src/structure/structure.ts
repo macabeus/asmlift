@@ -6225,6 +6225,25 @@ function structureRanked(
         out.push(...seed); // zero-trip value for the sunk copies
         out.push(...inits); // loop-variable initialisation
         if (fused) {
+          // THE GUARD'S READS RUN AS THE LOOP'S FIRST TEST. Fusing deletes the guard's test, and the
+          // proof above (`guardProven`) makes the `while`'s first evaluation the one that replaces
+          // it, so each pinned read that test made is still made. The effect contract is handed the
+          // test as the kept form below renders it (its `gcond`, before the negation, which reads
+          // nothing new), and keys its reads as it keys every other render (l3/ast.ts `FusedGuard`).
+          // Rendering it here writes nothing the tree keeps but a gap's reason in strict mode, which
+          // is put back, since the fused form never prints the test. A test the kept form could not
+          // render (a stale zero-trip read) is no credit, which leaves the contract to refuse.
+          if (loopStmt.k === 'while') {
+            const gaps = strictGaps.length;
+            try {
+              loopStmt.fusedGuard = { site: fn.blocks.indexOf(b), test: exprWith(gsub)(term.operands[0]) };
+            } catch (err) {
+              if (!(err instanceof StructureError)) {
+                throw err;
+              }
+            }
+            strictGaps.length = gaps;
+          }
           out.push(loopStmt);
         } else {
           let gcond = exprWith(gsub)(term.operands[0]);
