@@ -176,24 +176,6 @@ type Direction = 'r' | 'w';
 const deviceKey = (dir: Direction, addr: number | null): string =>
   `device:${dir}:${addr === null ? '?' : `0x${addr.toString(16)}`}`;
 
-/** The key a pinned access is counted under: its direction, and the constant address a plain
- *  `load`/`store` reads off its base and offset, or `?`. */
-function pinnedKey(defs: Map<Value, Op>, op: Op, dir: Direction): string {
-  const plain = op.opcode === 'load' || op.opcode === 'store';
-  return deviceKey(dir, plain ? constAddressOf(defs, op.operands[0], op.attrs.off as number) : null);
-}
-
-/** The key under which the effect contract counts `op` as a read the dropped rule needs rendered,
- *  or null when it counts no such read: `op` is not a pinned read, or it reads through a named
- *  global, which is exempt from the dropped rule. The structurer's guard fusion records these keys
- *  for the guard test it deletes (`fusedGuardReads` on the loop). */
-export function guardReadKey(defs: Map<Value, Op>, op: Op): string | null {
-  if (placedAt(op) !== 'device' || (op.opcode !== 'load' && op.opcode !== 'aload')) {
-    return null;
-  }
-  return globalBaseOf(defs, op.operands[0]) === null ? pinnedKey(defs, op, 'r') : null;
-}
-
 /** Is this access spelled through a `volatile` pointee? A dot member qualifies through the element
  *  or member it selects from, any other access through its own base's cast chain. */
 function qualifiedAccessChain(e: Expr): boolean {
@@ -241,6 +223,9 @@ interface TreeContext {
   /** The names whose bare spelling is the object's address: the array-declared globals the
    *  structurer subscripts by name (SFn.globals), and the array or struct statics it defines. */
   addresses: ReadonlySet<string>;
+  /** Filled by the count: each guard-fused loop the tree holds, by its guard's `site`, one entry
+   *  per copy of the loop ({@link fusedGuardCredit}). */
+  fusedCopies: Map<number, FusedCopy[]>;
 }
 
 /** every call under `e`, counted by target name; every qualified memory access, by the address it
@@ -346,20 +331,44 @@ const either = (...ps: PathCounts[]): PathCounts => ({
 });
 const falls = (c: EffectCounts): PathCounts => ({ through: c, ret: null, brk: null, cont: null, end: null });
 
-/** The reads a top-tested loop's `fusedGuardReads` stands for, by key: each listed read, capped at
- *  the renders the loop's own condition (`cond`, its counts) makes at that key. The credit claims
- *  that the condition's first evaluation is the deleted guard's test, so it can stand for a read
- *  only where the condition renders one, and for each render once. A key the condition does not
- *  render earns nothing, and a key listed twice against one render earns one. */
-function fusedGuardCredit(reads: readonly string[], cond: EffectCounts): EffectCounts {
-  const credit: EffectCounts = new Map();
-  for (const k of reads) {
-    const n = credit.get(k) ?? 0;
-    if (n < (cond.get(k) ?? 0)) {
-      credit.set(k, n + 1);
+/** One copy of a guard-fused loop: the reads its deleted guard's test renders that its own
+ *  condition renders too (`credit`, each key capped at the condition's count), and the condition's
+ *  own reads (`cond`). Only the device reads, the one kind the dropped rule counts by render. */
+interface FusedCopy {
+  credit: EffectCounts;
+  cond: EffectCounts;
+}
+
+const deviceReads = (m: EffectCounts): EffectCounts => new Map([...m].filter(([k]) => k.startsWith('device:r:')));
+
+/** The reads the guard-fused loops in a tree stand for past their conditions' own renders, by key,
+ *  which the dropped rule counts as rendered. Fusing deletes a guard whose test the loop's first
+ *  evaluation makes (l3/ast.ts `FusedGuard`): in the asm that test is one read at the guard and one
+ *  at the latch, and a lone loop renders it once, so its guard's reads are credited. The credit
+ *  stands only for reads the loop's own condition renders, once for each, since the claim is that
+ *  the condition's first evaluation is the guard's.
+ *
+ *  A guard is credited once however many copies of its loop the tree holds: the asm makes its reads
+ *  once. Where a copied tail holds the loop twice, the two conditions already render as many reads
+ *  as the guard and the latch make between them, so a copy's credit counts only past the renders
+ *  the other copies add: at each key, the most any one copy is credited plus the most any one
+ *  condition renders, less every copy's condition, and never below none. A lone loop is credited
+ *  in full; two copies of one loop are credited nothing, as the tree would be counted were the
+ *  guard kept. */
+function fusedGuardCredit(fused: ReadonlyMap<number, readonly FusedCopy[]>): EffectCounts {
+  const out: EffectCounts = new Map();
+  for (const copies of fused.values()) {
+    const credit = most(...copies.map((c) => c.credit)) ?? new Map<string, number>();
+    const cond = most(...copies.map((c) => c.cond)) ?? new Map<string, number>();
+    const rendered = copies.reduce<EffectCounts>((acc, c) => sum(acc, c.cond), new Map());
+    for (const [k, n] of credit) {
+      const past = n + (cond.get(k) ?? 0) - (rendered.get(k) ?? 0);
+      if (past > 0) {
+        out.set(k, (out.get(k) ?? 0) + past);
+      }
     }
   }
-  return credit;
+  return out;
 }
 
 /** `total` = every occurrence in the tree; `paths` = the most any single syntactic path executes,
@@ -384,10 +393,16 @@ function countEffects(
     const own: EffectCounts = new Map();
     stmtExprs(s).forEach((e) => effectsInExpr(e, own, ctx, false, false, s.k === 'store' && e === s.lval));
     total = sum(total, own);
-    // A fused guard's reads run as the loop's first test, so the dropped rule counts them here. They
-    // are in `total` only: on a path, the first test is already the condition's own render.
-    if ((s.k === 'while' || s.k === 'for') && s.fusedGuardReads !== undefined) {
-      total = sum(total, fusedGuardCredit(s.fusedGuardReads, own));
+    // A fused guard's reads run as the loop's first test, so the dropped rule counts them, once the
+    // whole tree is counted (`fusedGuardCredit`). They are in no path count: on a path, the first
+    // test is already the condition's own render.
+    if ((s.k === 'while' || s.k === 'for') && s.fusedGuard !== undefined) {
+      const test: EffectCounts = new Map();
+      effectsInExpr(s.fusedGuard.test, test, ctx);
+      const cond = deviceReads(own);
+      const credit = new Map([...deviceReads(test)].map(([k, n]) => [k, Math.min(n, cond.get(k) ?? 0)] as const));
+      const copies = ctx.fusedCopies.get(s.fusedGuard.site) ?? [];
+      ctx.fusedCopies.set(s.fusedGuard.site, [...copies, { credit, cond }]);
     }
     let here: PathCounts;
     if (s.k === 'if') {
@@ -525,8 +540,9 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
           // Placed, not counted: the value it computes is pure.
           break;
         case 'device': {
+          const plain = op.opcode === 'load' || op.opcode === 'store';
           const dir = reads ? 'r' : 'w';
-          const key = pinnedKey(defs, op, dir);
+          const key = deviceKey(dir, plain ? constAddressOf(defs, op.operands[0], op.attrs.off as number) : null);
           bump(irDevices, key);
           const reach = key === deviceKey(dir, null) ? reachOf(op.operands[0]) : null;
           if (reach?.stack === true) {
@@ -614,8 +630,11 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
         .filter((st) => st.type.kind === 'array' || st.type.kind === 'struct')
         .map((st) => st.name),
     ]),
+    fusedCopies: new Map(),
   };
-  const { total, paths } = countEffects(sfn.body, ctx, unreached);
+  const counted = countEffects(sfn.body, ctx, unreached);
+  const paths = counted.paths;
+  const total = sum(counted.total, fusedGuardCredit(ctx.fusedCopies));
   if (unreached.length) {
     throw new ContractError(
       `structuring emitted ${unreached.length} statement(s) no path reaches in '${sfn.name}', after one every path leaves`,
