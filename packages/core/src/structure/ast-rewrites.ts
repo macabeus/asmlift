@@ -114,7 +114,9 @@ export function recognizeForLoops(stmts: Stmt[]): Stmt[] {
     const header = s.k === 'while' ? forHeaderOf(out[out.length - 1], s.cond, s.body) : null;
     if (s.k === 'while' && header !== null) {
       out.pop(); // the init assign moves into the for-header
-      out.push({ k: 'for', init: header.init, cond: s.cond, inc: [header.inc], body: header.body });
+      // A fused guard's credit stays with the loop: the `for` tests the same condition first.
+      const credit = s.fusedGuard === undefined ? {} : { fusedGuard: s.fusedGuard };
+      out.push({ k: 'for', init: header.init, cond: s.cond, inc: [header.inc], body: header.body, ...credit });
       continue;
     }
     out.push(s);

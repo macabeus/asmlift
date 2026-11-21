@@ -295,7 +295,9 @@ describe('assertEffectsPreserved — a pinned device access', () => {
     lval: at({ k: 'const', value: addr }, true),
     value: { k: 'const', value: 1 },
   });
-  const checkReads = (fn: Fn, body: Stmt[]) => assertEffectsPreserved(fn, sfnWith(body));
+  /** `locals` are the tree's own names: an assignment to any other is a write to a global */
+  const checkReads = (fn: Fn, body: Stmt[], locals: string[] = []) =>
+    assertEffectsPreserved(fn, { ...sfnWith(body), locals: locals.map((name) => ({ name, type: T.s(32) })) });
 
   test('one pinned read rendered twice in sequence fails', () => {
     expect(() => checkReads(irReading([REG]), [read(REG), read(REG)])).toThrow(
@@ -328,11 +330,26 @@ describe('assertEffectsPreserved — a pinned device access', () => {
 
   test('one render the contract cannot place stands for one read, not for every one', () => {
     expect(() => checkReads(irReading([REG, REG + 2, REG + 4]), [readThrough('p')])).toThrow(
-      /dropped reads of the device registers at 0x4000006, 0x4000008, 0x400000a in 'F'/,
+      /dropped 2 of the reads of the device registers at 0x4000006, 0x4000008, 0x400000a in 'F'/,
     );
     expect(() =>
       checkReads(irReading([REG, REG + 2, REG + 4]), [readThrough('p'), readThrough('q'), readThrough('r')]),
     ).not.toThrow();
+  });
+
+  // Which addresses lost the read is unknown where a render at no constant address may stand for
+  // any of them, so the message says how many were lost, not that each one was.
+  test('a refusal with renders at no constant address counts the reads lost among the short addresses', () => {
+    expect(() =>
+      checkReads(irReading([REG, REG, REG + 2, REG + 2, REG + 4]), [
+        read(REG),
+        readThrough('p'),
+        read(REG + 2),
+        read(REG + 4),
+      ]),
+    ).toThrow(
+      /dropped 1 of the reads of the device registers at 0x4000006, 0x4000008 in 'F' — .* the source's 1 at no constant address may stand for the others/,
+    );
   });
 
   test('a read at no constant address needs a render no placed access already needs', () => {
@@ -466,6 +483,238 @@ describe('assertEffectsPreserved — a pinned device access', () => {
     expect(() => checkReads(irReading([null]), [readThrough('p')])).not.toThrow();
     expect(() => checkReads(irReading([null]), [readThrough('p'), readThrough('p')])).toThrow(
       /emitted 2 reads of device registers on one path in 'F', where the asm makes 1/,
+    );
+  });
+
+  // A guard-fused `while` (structure.ts, the guard fusion): the asm reads at the guard and at the
+  // latch, and the condition renders once. The fusion hands the loop the guard's test (`fusedGuard`),
+  // as its kept form would render it, and the guard's `site`.
+  const readAt = (addr: number): Expr => at({ k: 'const', value: addr }, true);
+  const fusedWhile = (test: Expr | undefined, cond: Expr = readAt(REG), site = 0): Stmt => ({
+    k: 'while',
+    cond,
+    body: [],
+    ...(test === undefined ? {} : { fusedGuard: { site, test } }),
+  });
+
+  test('a fused guard’s read is credited to the loop, and nothing else is', () => {
+    expect(() => checkReads(irReading([REG, REG]), [fusedWhile(undefined)])).toThrow(
+      /dropped the read of the device register at 0x4000006/,
+    );
+    expect(() => checkReads(irReading([REG, REG]), [fusedWhile(readAt(REG))])).not.toThrow();
+    // the credit stands for the guard only: a read the tree really lost still refuses
+    expect(() => checkReads(irReading([REG, REG, REG]), [fusedWhile(readAt(REG))])).toThrow(
+      /dropped the read of the device register at 0x4000006/,
+    );
+    expect(() => checkReads(irReading([REG, REG, REG]), [read(REG), fusedWhile(readAt(REG))])).not.toThrow();
+    // a guard that read another address covers nothing here
+    expect(() => checkReads(irReading([REG, REG]), [fusedWhile(readAt(0x4000008))])).toThrow(
+      /dropped the read of the device register at 0x4000006/,
+    );
+  });
+
+  // The credit claims the condition's first evaluation is the guard's, so the contract checks it
+  // against the condition: it stands for a read only where the condition renders one, once each.
+  test('a fused guard’s credit stands only for reads its own condition renders', () => {
+    expect(() =>
+      checkReads(irReading([REG, REG]), [read(REG), fusedWhile(readAt(REG), { k: 'var', name: 'x' })]),
+    ).toThrow(/dropped the read of the device register at 0x4000006/);
+    const twice: Expr = { k: 'bin', op: '+', l: readAt(REG), r: readAt(REG) };
+    expect(() => checkReads(irReading([REG, REG, REG]), [fusedWhile(twice)])).toThrow(
+      /dropped the read of the device register at 0x4000006/,
+    );
+  });
+
+  // The guard's test is keyed as the tree's renders are, so a guard through a named base, which
+  // renders at no constant address, is credited where its condition renders the same way.
+  test('a fused guard read through a named base is credited at no constant address', () => {
+    const named = at({ k: 'var', name: 'v0' }, true);
+    expect(() => checkReads(irReading([REG, REG]), [fusedWhile(undefined, named)])).toThrow(
+      /dropped the read of the device register at 0x4000006/,
+    );
+    expect(() => checkReads(irReading([REG, REG]), [fusedWhile(named, named)])).not.toThrow();
+    expect(() => checkReads(irReading([REG, REG]), [fusedWhile(readAt(REG), named)])).toThrow(
+      /dropped the read of the device register at 0x4000006/,
+    );
+  });
+
+  // The asm makes a guard's reads once, so a tree holding its loop twice (a copied tail) is credited
+  // for that guard once, past the renders the second copy's condition adds: two copies' conditions
+  // already render the guard's read and the latch's.
+  test('a guard credited by two copies of its loop is credited once for both', () => {
+    const arms = (then: Stmt[], other: Stmt[]): Stmt => ({ k: 'if', cond: { k: 'var', name: 'k' }, then, else: other });
+    const copy = () => [read(REG), fusedWhile(readAt(REG))];
+    // the asm: the discarded read, the guard and the latch, once
+    expect(() => checkReads(irReading([REG, REG, REG]), [arms(copy(), copy())])).not.toThrow();
+    // both copies lost the discarded read: the conditions stand for the guard and the latch only
+    expect(() =>
+      checkReads(irReading([REG, REG, REG]), [arms([fusedWhile(readAt(REG))], [fusedWhile(readAt(REG))])]),
+    ).toThrow(/dropped the read of the device register at 0x4000006/);
+    // two guards, each fused into its own loop, are two credits
+    expect(() =>
+      checkReads(irReading([REG, REG, REG, REG]), [
+        arms([fusedWhile(readAt(REG), readAt(REG), 0)], [fusedWhile(readAt(REG), readAt(REG), 1)]),
+      ]),
+    ).not.toThrow();
+  });
+
+  test('a `for` carries the credit as a `while` does', () => {
+    const counter = (value: Expr): Stmt => ({ k: 'assign', name: 'i', value });
+    const fusedFor = (test: Expr | undefined): Stmt => ({
+      k: 'for',
+      init: counter({ k: 'const', value: 0 }),
+      cond: { k: 'bin', op: '<', l: { k: 'var', name: 'i' }, r: readAt(REG) },
+      inc: [counter({ k: 'bin', op: '+', l: { k: 'var', name: 'i' }, r: { k: 'const', value: 1 } })],
+      body: [],
+      ...(test === undefined ? {} : { fusedGuard: { site: 0, test } }),
+    });
+    expect(() => checkReads(irReading([REG, REG]), [fusedFor(undefined)], ['i'])).toThrow(
+      /dropped the read of the device register at 0x4000006/,
+    );
+    expect(() => checkReads(irReading([REG, REG]), [fusedFor(readAt(REG))], ['i'])).not.toThrow();
+  });
+
+  // A word store at a fixed address, spelled plain, which no access in the loop (all of them u16)
+  // may alias: agbcc keeps such a cell in a register for the loop and stores it once at the exit.
+  const plainWord = (addr: Expr = { k: 'const', value: 0x4000010 }): Stmt => ({
+    k: 'store',
+    lval: {
+      k: 'index',
+      base: { k: 'cast', to: T.ptr(T.s(32)), e: addr },
+      idx: { k: 'const', value: 0 },
+      width: 4,
+      signed: true,
+    },
+    value: { k: 'const', value: 1 },
+  });
+  const pollWhile = (body: Stmt[], fused = false): Stmt => ({
+    k: 'while',
+    cond: readAt(REG),
+    body,
+    ...(fused ? { fusedGuard: { site: 0, test: readAt(REG) } } : {}),
+  });
+
+  // The credit is for loops the plain count refused; one that writes memory plain keeps that
+  // refusal, whatever the write.
+  test('a fused loop that writes memory plain is credited nothing', () => {
+    expect(() =>
+      checkReads(irReading([REG, REG], [], [0x4000010]), [pollWhile([write(0x4000010)], true)]),
+    ).not.toThrow();
+    // a u16 store beside the u16 poll, which agbcc keeps in the loop: the withheld credit refuses it
+    const plainHalf: Stmt = {
+      k: 'store',
+      lval: at({ k: 'const', value: 0x4000010 }, false),
+      value: { k: 'const', value: 1 },
+    };
+    expect(() => checkReads(irReading([REG, REG]), [pollWhile([plainHalf], true)])).toThrow(
+      /dropped the read of the device register at 0x4000006/,
+    );
+    // a local's assignment writes no memory
+    const local: Stmt = { k: 'assign', name: 'x', value: readAt(REG) };
+    expect(() => checkReads(irReading([REG, REG, REG]), [pollWhile([local], true)], ['x'])).not.toThrow();
+  });
+
+  test('a poll that stores plain at a fixed address no access in the loop may alias is refused', () => {
+    expect(() => checkReads(irReading([REG]), [pollWhile([plainWord()])])).toThrow(
+      /a loop that polls a device register writes memory plain at an address the loop never changes in 'F'/,
+    );
+    // a global assigned by its bare name is a cell too
+    expect(() =>
+      checkReads(irReading([REG]), [pollWhile([{ k: 'assign', name: 'gFlag', value: { k: 'const', value: 1 } }])]),
+    ).toThrow(/writes memory plain/);
+    // the same store, qualified, stays in the loop
+    const qualified = plainWord({ k: 'const', value: 0x4000010 });
+    if (qualified.k === 'store' && qualified.lval.k === 'index' && qualified.lval.base.k === 'cast') {
+      qualified.lval.base.volatile = true;
+    }
+    expect(() => checkReads(irReading([REG], [], [0x4000010]), [pollWhile([qualified])])).not.toThrow();
+  });
+
+  // Two plain elements of one base at constant subscripts whose bytes miss each other are one
+  // address register and two displacements to agbcc: neither keeps the other in the loop, and
+  // both sink out of it.
+  test('two plain stores through one base at apart subscripts are each refused', () => {
+    const element = (i: number): Stmt => {
+      const st = plainWord();
+      if (st.k === 'store' && st.lval.k === 'index') {
+        st.lval.idx = { k: 'const', value: i };
+      }
+      return st;
+    };
+    expect(() => checkReads(irReading([REG]), [pollWhile([element(5), element(1)])])).toThrow(
+      /a loop that polls a device register writes memory plain at an address the loop never changes in 'F'/,
+    );
+    // the same element twice is one cell, which loop.c keeps in one register for both stores
+    expect(() => checkReads(irReading([REG]), [pollWhile([element(1), element(1)])])).toThrow(/writes memory plain/);
+    // through two different bases, one store may alias the other: neither is refused
+    const other = plainWord({ k: 'var', name: 'p' });
+    expect(() => checkReads(irReading([REG]), [pollWhile([element(5), other])], ['p'])).not.toThrow();
+  });
+
+  // A rotated poll reads the register into a local in its body and tests the local.
+  test('a poll that reads the register into the local its condition tests is judged', () => {
+    const v0: Expr = { k: 'var', name: 'v0' };
+    const rotated = (body: Stmt[]): Stmt => ({ k: 'while', cond: v0, body });
+    expect(() =>
+      checkReads(irReading([REG]), [rotated([plainWord(), { k: 'assign', name: 'v0', value: readAt(REG) }])], ['v0']),
+    ).toThrow(/writes memory plain/);
+    // a body that reads the register into nothing the condition tests is no poll
+    expect(() =>
+      checkReads(
+        irReading([REG]),
+        [rotated([plainWord(), { k: 'assign', name: 'x', value: readAt(REG) }])],
+        ['v0', 'x'],
+      ),
+    ).not.toThrow();
+  });
+
+  // A global every write of which the IR placed by its declaration is assigned volatile by the
+  // header the recompile reads, though the tree spells it by its bare name.
+  test('a poll assigning a global its declaration makes volatile is not refused', () => {
+    const fn = irReading([REG]);
+    const ops = fn.blocks[0].ops;
+    const cell = mkValue(T.ptr(T.u(32)));
+    ops.splice(
+      ops.length - 1,
+      0,
+      mkOp('gaddr', { results: [cell], attrs: { sym: 'gWW' } }),
+      mkOp('store', { operands: [cell, mkValue(T.u(32))], attrs: { off: 0, width: 4, declaredVolatile: true } }),
+    );
+    const assign: Stmt = { k: 'assign', name: 'gWW', value: { k: 'const', value: 1 } };
+    expect(() => checkReads(fn, [pollWhile([assign])])).not.toThrow();
+    // another global, whose writes the IR did not place by a declaration, is still refused
+    expect(() => checkReads(fn, [pollWhile([{ ...assign, name: 'gFlag' }])])).toThrow(/writes memory plain/);
+  });
+
+  test('a plain store a poll may keep in the loop is not refused', () => {
+    // its address moves with a local the loop assigns
+    const walk: Stmt[] = [
+      plainWord({ k: 'bin', op: '+', l: { k: 'const', value: 0x4000010 }, r: { k: 'var', name: 'i' } }),
+      { k: 'assign', name: 'i', value: { k: 'bin', op: '+', l: { k: 'var', name: 'i' }, r: { k: 'const', value: 4 } } },
+    ];
+    expect(() => checkReads(irReading([REG]), [pollWhile(walk)], ['i'])).not.toThrow();
+    // the loop makes a call
+    expect(() => checkReads(irReading([REG]), [pollWhile([plainWord(), callStmt('g')])])).not.toThrow();
+    // a u16 store beside the u16 poll may alias it
+    const half: Stmt = {
+      k: 'store',
+      lval: at({ k: 'const', value: 0x4000010 }, false),
+      value: { k: 'const', value: 1 },
+    };
+    expect(() => checkReads(irReading([REG]), [pollWhile([half])])).not.toThrow();
+    // a loop that polls nothing pinned is not judged
+    expect(() =>
+      checkReads(
+        irReading([REG]),
+        [read(REG), { k: 'while', cond: { k: 'var', name: 'k' }, body: [plainWord()] }],
+        ['k'],
+      ),
+    ).not.toThrow();
+  });
+
+  test('a fused guard’s credit licenses no re-run on a path', () => {
+    expect(() => checkReads(irReading([REG, REG]), [read(REG), read(REG), fusedWhile(readAt(REG))])).toThrow(
+      /emitted 3 reads of the device register at 0x4000006 on one path/,
     );
   });
 });
