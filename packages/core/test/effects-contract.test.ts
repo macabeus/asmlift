@@ -594,8 +594,8 @@ describe('assertEffectsPreserved — a pinned device access', () => {
     ...(fused ? { fusedGuard: { site: 0, test: readAt(REG) } } : {}),
   });
 
-  // The credit is for loops the plain count refused; one that writes memory through a plain
-  // lvalue keeps that refusal, whatever the write.
+  // The credit is for loops the plain count refused; one that writes memory plain keeps that
+  // refusal, whatever the write.
   test('a fused loop that writes memory plain is credited nothing', () => {
     expect(() =>
       checkReads(irReading([REG, REG], [], [0x4000010]), [pollWhile([write(0x4000010)], true)]),

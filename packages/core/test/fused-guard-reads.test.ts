@@ -6,7 +6,7 @@
 // credits its reads to its dropped rule (contracts.ts `fusedGuardCredit`), so it does not count the
 // condition's one render as one read.
 //
-// Both functions below are agbcc output, compiled with
+// The functions below are agbcc output, compiled with
 // `agbcc -mthumb-interwork -O2 -fhex-asm` from:
 //
 //   typedef volatile u32 vu32;

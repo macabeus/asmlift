@@ -7933,17 +7933,16 @@ export const SYNTHETIC: SynthSpec[] = [
   // In `dvfusedwait` the guard and the latch test the same register, so the structurer fuses them back
   // into one `while`, which renders the read once and recompiles to both. The row pins that the
   // effect contract counts the deleted guard's read as made by the loop's first test
-  // (`fusedGuard`, structure.ts), so the function lifts instead of declining as a dropped
+  // (`fusedGuard`, l3/ast.ts), so the function lifts instead of declining as a dropped
   // device read. Cut from kl2dct sub_0803B958 and sub_080488C4. `dvforwait` is the same wait as a
   // counted spin, `while (d[2] > i) i++;`: its test reads the counter, so the fused loop is
   // re-spelled as a `for`, which keeps the credit. `dvnamedwait` stores to the DMA count after the
   // call, so the DMA base lives in a callee-saved register and is named (`v0`): the guard's read
   // renders at no constant address, and the contract credits it there, keyed as the tree's own
-  // renders are. `dvkeptwait` is the control: its latch tests a
-  // preheader copy of the mask (`add r1, r4, #0`), so the guard stays an `if` around a `do-while`
-  // and renders its own read, with nothing credited. agbcc only: the device pins
-  // come from `readOnlyAddressSinks`, which only the agbcc target sets, so the other toolchains have
-  // no pinned read for a guard to drop.
+  // renders are. `dvkeptwait` is the control: its latch tests a preheader copy of the mask
+  // (`add r1, r4, #0`), so the guard stays an `if` around a `do-while` and renders its own read,
+  // with nothing credited. agbcc only: the device pins come from `readOnlyAddressSinks`, which only
+  // the agbcc target sets, so the other toolchains have no pinned read for a guard to drop.
   {
     sym: 'dvfusedwait',
     src:
