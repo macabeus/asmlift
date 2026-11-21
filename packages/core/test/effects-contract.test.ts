@@ -468,6 +468,37 @@ describe('assertEffectsPreserved — a pinned device access', () => {
       /emitted 2 reads of device registers on one path in 'F', where the asm makes 1/,
     );
   });
+
+  // A guard-fused `while` (structure.ts, the guard fusion): the asm reads at the guard and at the
+  // latch, and the condition renders once. The fusion lists the guard's reads on the loop.
+  const fusedWhile = (credit: string[] | undefined, cond: Expr = at({ k: 'const', value: REG }, true)): Stmt => ({
+    k: 'while',
+    cond,
+    body: [],
+    ...(credit === undefined ? {} : { fusedGuardReads: credit }),
+  });
+
+  test('a fused guard’s read is credited to the loop, and nothing else is', () => {
+    expect(() => checkReads(irReading([REG, REG]), [fusedWhile(undefined)])).toThrow(
+      /dropped the read of the device register at 0x4000006/,
+    );
+    expect(() => checkReads(irReading([REG, REG]), [fusedWhile(['device:r:0x4000006'])])).not.toThrow();
+    // the credit stands for the guard only: a read the tree really lost still refuses
+    expect(() => checkReads(irReading([REG, REG, REG]), [fusedWhile(['device:r:0x4000006'])])).toThrow(
+      /dropped the read of the device register at 0x4000006/,
+    );
+    expect(() => checkReads(irReading([REG, REG, REG]), [read(REG), fusedWhile(['device:r:0x4000006'])])).not.toThrow();
+    // a credit at another address covers nothing here
+    expect(() => checkReads(irReading([REG, REG]), [fusedWhile(['device:r:0x4000008'])])).toThrow(
+      /dropped the read of the device register at 0x4000006/,
+    );
+  });
+
+  test('a fused guard’s credit licenses no re-run on a path', () => {
+    expect(() => checkReads(irReading([REG, REG]), [read(REG), read(REG), fusedWhile(['device:r:0x4000006'])])).toThrow(
+      /emitted 3 reads of the device register at 0x4000006 on one path/,
+    );
+  });
 });
 
 // A read of an object the symbol map declares volatile (`declaredVolatile`, the `declared` placement)

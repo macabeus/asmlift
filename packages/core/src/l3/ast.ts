@@ -341,7 +341,15 @@ export type Stmt =
   | { k: 'store'; lval: Expr; value: Expr }
   | { k: 'exprstmt'; value: Expr } // a side-effecting expression (e.g. a void call)
   | { k: 'if'; cond: Expr; then: Stmt[]; else: Stmt[] }
-  | { k: 'while'; cond: Expr; body: Stmt[] }
+  // `fusedGuardReads` is set only by the structurer's guard fusion (the un-rotation of a guarded
+  // self-loop), and is never printed. Fusing deletes the guard's `if`, so the guard's test is
+  // gone from the tree. The `while`'s first test evaluation runs in its place, so the pinned reads
+  // that test made in the asm are still executed. The field lists those reads, as the effect
+  // contract keys them (contracts.ts `guardReadKey`). The contract credits them to the dropped
+  // rule only, so the rotated loop's two read sites (the guard and the latch) are not counted as
+  // one. A pass that rebuilds the loop without the field loses the credit, and the contract then
+  // refuses the tree. That is the safe direction.
+  | { k: 'while'; cond: Expr; body: Stmt[]; fusedGuardReads?: readonly string[] }
   // A bottom-tested loop `do { body } while (cond);` — the body runs at least once, then the test at
   // the BOTTOM decides re-entry. This is the shape a compiler emits for a loop whose trip count it can
   // prove ≥1 (guard elided) or a source `do-while`. Distinct from `while` (test-at-top, body may run
