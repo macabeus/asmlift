@@ -382,4 +382,54 @@ describe('pret dialect: macros an included file defines', () => {
       d('clamp0', CLAMP0).source,
     );
   });
+
+  // MERGE466 b1*: arm-none-eabi-as 2.42, no -I. A marker an included file defines as more than the
+  // bookkeeping (`\name:` / `add r0, #5`) assembles a0 + 6; read as bookkeeping it lifted a0 + 1.
+  describe('a pret marker an included file defines', () => {
+    const PRET = '\t.align 2, 0\n\t.global \\name\n\t.thumb\n\t.thumb_func\n\t.type \\name, %function\n';
+    const END = '\t.macro thumb_func_end name:req\n\t.size \\name, .-\\name\n\t.endm\n';
+    const EMITS = (m: string) => `\t.macro ${m} name:req\n${PRET}\\name:\n\tadd r0, #5\n\t.endm\n${END}`;
+    const BODY = (m: string) => `\t.text\n\t${m} f\n\tadd r0, #1\n\tbx lr\n\tthumb_func_end f\n`;
+    test('b1: one that emits a label and an instruction declines (gas a0 + 6)', () => {
+      expect(() =>
+        lift(`\t.include "b1.inc"\n${BODY('thumb_func_start')}`, { 'b1.inc': EMITS('thumb_func_start') }),
+      ).toThrow(/defines as more than the pret function bookkeeping/);
+    });
+    test('b1n: so does one a nested include defines', () => {
+      expect(() =>
+        lift(`\t.include "b1n.inc"\n${BODY('thumb_func_start')}`, {
+          'b1n.inc': '\t.include "b1.inc"\n',
+          'b1.inc': EMITS('thumb_func_start'),
+        }),
+      ).toThrow(/defines as more than the pret function bookkeeping/);
+    });
+    test('b1u: and `non_word_aligned_thumb_func_start`', () => {
+      expect(() =>
+        lift(`\t.include "b1u.inc"\n${BODY('non_word_aligned_thumb_func_start')}`, {
+          'b1u.inc': EMITS('non_word_aligned_thumb_func_start'),
+        }),
+      ).toThrow(/defines as more than the pret function bookkeeping/);
+    });
+    test('b1f: the same definitions in the file itself decline', () => {
+      expect(() => d('f', `${EMITS('thumb_func_start')}${BODY('thumb_func_start')}`)).toThrow(FrontendUnsupportedError);
+    });
+    test("b1l: a bookkeeping-only definition, with the function's own label, lifts (gas a0 + 1)", () => {
+      const asm =
+        '\t.include "b1l.inc"\n\t.text\n\tthumb_func_start f\nf:\n\tadd r0, #1\n\tbx lr\n\tthumb_func_end f\n';
+      expect(lift(asm, { 'b1l.inc': `\t.macro thumb_func_start name:req\n${PRET}\t.endm\n${END}` })).toContain(
+        'return a0 + 1;',
+      );
+    });
+    test("sa3's spelling (`.type \\name, function`, an upper-case `THUMB_FUNC_START`) is bookkeeping too", () => {
+      const asm = '\t.include "f.inc"\n\t.text\n\tthumb_func_start f\nf:\n\tadd r0, #1\n\tbx lr\n\tthumb_func_end f\n';
+      const inc = `\t.macro THUMB_FUNC_START name\n${PRET.replace('%function', 'function')}\t.endm\n${END}`;
+      expect(lift(asm, { 'f.inc': inc })).toContain('return a0 + 1;');
+    });
+    test('a directive off the bookkeeping list (`.syntax unified`) makes the marker a macro', () => {
+      const asm = '\t.include "b2.inc"\n\t.text\n\tthumb_func_start f\nf:\n\tadd r0, #1\n\tbx lr\n\tthumb_func_end f\n';
+      expect(() =>
+        lift(asm, { 'b2.inc': `\t.macro thumb_func_start name:req\n${PRET}\t.syntax unified\n\t.endm\n${END}` }),
+      ).toThrow(/defines as more than the pret function bookkeeping/);
+    });
+  });
 });

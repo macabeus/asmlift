@@ -1456,12 +1456,45 @@ function addMacroNames(labels: string, operand: string, into: Set<string>): stri
   return added;
 }
 
-/** The pret function markers decode reads by name as bookkeeping (`thumb_func_start NAME` …), whatever
- *  an included `asm/macros.inc` defines them as: a pret unit includes their definitions, and reading
- *  each use of one as a macro call would decline every function in it. KNOWN GAP, as on main: an
- *  included definition of one of these names that does more than the bookkeeping is not read. */
+/** The pret function markers decode reads by name as bookkeeping (`thumb_func_start NAME` …). A pret
+ *  unit includes their definitions (`asm/macros.inc`), and reading each use of one as a macro call
+ *  would decline every function in it, so a use of one is read as bookkeeping where every definition
+ *  of it the resolved include chain holds is bookkeeping alone ({@link PRET_BOOKKEEPING}). One whose
+ *  definition holds anything else (a label, an instruction, data, another directive or macro call:
+ *  `\name:` / `add r0, #5` gives gas a0 + 6 where the body reads a0 + 1) is an ordinary macro, and
+ *  so is every marker where an included `.macro` may have any name (`*`). */
 const PRET_FUNCTION_MACRO =
   /^(?:non_word_aligned_thumb_func_start|thumb_func_start|arm_func_start|thumb_func_end|arm_func_end)$/;
+
+/** The statements a pret marker's included definition may hold and still be bookkeeping: these
+ *  directives, each operand the macro's own parameter (`\name`), a number, `function` (bare or after `%`, `@`
+ *  or `#`), or `.-\name`
+ *  (every real definition in the benchmark's checkouts and luvdis's: kleod, pokeemerald, sa3,
+ *  klonoa-empire-of-dreams). Anything else makes the marker a macro. */
+const PRET_BOOKKEEPING = /^\.(?:align|arm|global|globl|size|thumb|thumb_func|type)$/i;
+function isPretBookkeeping(statement: string, params: readonly string[]): boolean {
+  const m = statement.match(/^(\.[\w.]+)\s*(.*)$/);
+  if (m === null || !PRET_BOOKKEEPING.test(m[1])) {
+    return false;
+  }
+  const operands = m[2] === '' ? [] : m[2].split(',').map((o) => o.trim());
+  const param = (o: string) =>
+    o.startsWith('\\') &&
+    params.includes(
+      o
+        .slice(1)
+        .replace(/\\\(\)$/, '')
+        .toLowerCase(),
+    );
+  return operands.every(
+    (o) =>
+      /^(?:0x[0-9a-f]+|\d+)$/i.test(o) ||
+      /^[%@#]?function$/.test(o) ||
+      param(o) ||
+      (o.startsWith('.-') && param(o.slice(2))) ||
+      (o.startsWith('. - ') && param(o.slice(4))),
+  );
+}
 
 /** `.include "x"` with a plain quoted operand, the one spelling read through `LiftOptions.asmIncludes`. */
 const THUMB_INCLUDE = /^\.include\s+"([^"\\]*)"$/i;
@@ -1483,6 +1516,8 @@ function includedMacroNames(
     );
   }
   const depth = { n: 0 };
+  // the pret marker whose definition is being read, with its parameters, and the depth it opened at
+  let marker: { name: string; params: string[]; at: number } | undefined;
   for (const line of readGasLines(includes.get(op)!)) {
     for (const st of line.statements) {
       if (st.unread !== undefined) {
@@ -1500,7 +1535,28 @@ function includedMacroNames(
       }
       const md = rest.match(/^\.macro\b\s*([^\s,]*)/i);
       const head = rest.match(/^[\w.$]+/)?.[0].toLowerCase();
+      if (marker !== undefined && !(depth.n === marker.at + 1 && head === '.endm')) {
+        // a statement of a marker's definition: bookkeeping only, at the definition's own level
+        if (st.text !== '' && (labels !== '' || depth.n !== marker.at + 1 || !isPretBookkeeping(rest, marker.params))) {
+          into.add(`!${marker.name}`);
+        }
+      }
       if (md) {
+        const mname = md[1].toLowerCase();
+        if (labels === '' && marker === undefined && PRET_FUNCTION_MACRO.test(mname)) {
+          const params = rest
+            .slice(md[0].length)
+            .split(/[\s,]+/)
+            .map((p) => p.replace(/[:=].*$/, '').toLowerCase())
+            .filter((p) => p !== '');
+          marker = { name: mname, params, at: depth.n };
+        } else if (labels !== '') {
+          // a label before `.macro` names the macro (see the scan in `decode`): a marker defined so is
+          // read as an ordinary macro
+          for (const l of [...labels.matchAll(/([^\s:]+)\s*:/g)].map((x) => x[1].toLowerCase())) {
+            into.add(`!${l}`);
+          }
+        }
         // as in the file's own scan: a name that is no literal word, or a `.macro` inside a body,
         // gets its name only when gas expands it, so it stands for any name (`*`)
         for (const l of addMacroNames(labels, md[1], into)) {
@@ -1516,6 +1572,9 @@ function includedMacroNames(
         depth.n++;
       } else if (head !== undefined && /^\.(?:endm|endr)$/.test(head)) {
         depth.n = Math.max(0, depth.n - 1);
+        if (marker !== undefined && depth.n === marker.at) {
+          marker = undefined;
+        }
       } else if (/(?:^|[^\w.$])\.macro\b/i.test(rest)) {
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': '${st.text}' in the included file ${path} defines a macro whose name this ` +
@@ -1666,8 +1725,8 @@ function decode(
     // the statement.
     let anyName = false;
     let bodyDepth = 0;
-    // the names included files define: the pret function markers among them are read as this
-    // frontend reads them everywhere (bookkeeping, `PRET_FUNCTION_MACRO`), which is main's reading
+    // the names included files define (`includedMacroNames`): a pret function marker among them is
+    // read as bookkeeping where every included definition of it is (`PRET_FUNCTION_MACRO`)
     const fromIncludes = new Set<string>();
     for (const [k, line] of lines.entries()) {
       for (const [j, st] of line.statements.entries()) {
@@ -1715,7 +1774,17 @@ function decode(
         // a name an included file defines, or any name where one of its `.macro`s gets its name only
         // when expanded (`*`), except the pret markers, which are read as bookkeeping
         const fromAnIncluded =
-          head !== undefined && (fromIncludes.has(head) || fromIncludes.has('*')) && !PRET_FUNCTION_MACRO.test(head);
+          head !== undefined &&
+          (fromIncludes.has(head) || fromIncludes.has('*')) &&
+          !(PRET_FUNCTION_MACRO.test(head) && !fromIncludes.has('*') && !fromIncludes.has(`!${head}`));
+        // a pret marker read as a macro: its expansion may define the function's own label and code
+        // in front of it (`\name:` / `add r0, #5`), which no slice bound sees, so the input declines
+        if (code && fromAnIncluded && PRET_FUNCTION_MACRO.test(head!)) {
+          throw new FrontendUnsupportedError(
+            `cannot lift '${name}': '${st.text}' calls '${head}', which an included file defines as more than the ` +
+              `pret function bookkeeping this frontend reads it as`,
+          );
+        }
         if (code && head !== undefined && (anyName || defined.has(head) || fromAnIncluded)) {
           macroUses.add(codeLines.length - 1);
         }
