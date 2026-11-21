@@ -449,10 +449,8 @@ export type Stmt =
  *  deleted it. agbcc rotates a test-at-top loop: the exit test is duplicated into a guard ahead of
  *  the loop and a latch at its foot, so the asm tests at both. The fusion turns the pair back into
  *  one `while`, whose condition's first evaluation is the guard's test, so each pinned read that
- *  test made is still made, though the tree renders it once. The effect contract counts the
- *  guard's reads to its dropped rule from `test` (contracts.ts `fusedGuardCredit`), and counts no
- *  more of them than the loop's own condition renders at each address: the claim is that the
- *  condition's first evaluation is the guard's, so it covers nothing the condition does not read.
+ *  test made is still made, though the tree renders it once. The effect contract credits the
+ *  guard's reads to its dropped rule from `test` (contracts.ts `fusedGuardCredit`).
  *
  *  `test` is the guard's test as the kept form would render it (the `if` around a `do-while`), so
  *  the contract keys its reads as it keys every other render. `site` names the guard: the index of
@@ -462,8 +460,7 @@ export type Stmt =
  *  the same way; a pass that re-spells a credited loop keeps the field, and the contract re-checks
  *  it against whatever condition the new loop has. A pass that re-spells the addresses the
  *  condition renders maps `test` the same way ({@link mapFusedGuardTests}), or the two are keyed
- *  apart and the credit is lost. A loop that writes memory through a plain lvalue is credited
- *  nothing (contracts.ts `plainWriteIn`). */
+ *  apart and the credit is lost. */
 export interface FusedGuard {
   readonly site: number;
   readonly test: Expr;

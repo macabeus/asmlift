@@ -199,9 +199,8 @@ describe('M1 — Thumb sp-as-data loud-fails (the MIPS/PPC guard, ported)', () =
   // object where neither the declaration nor a member cast does. agbcc reads the byte at the loop's
   // guard and at its latch, and the structurer fuses the guard back into one `while`: its test runs
   // once before the first iteration and once after each, so the qualified C makes both reads again.
-  // The fusion records the guard (`fusedGuard`), and the function lifts. Plain, it
-  // would compile to a loop that never reads the byte again, so every read through the phi keeps
-  // its qualifier.
+  // The fusion records the guard (`fusedGuard`), and the function lifts. Plain, it would compile
+  // to a loop that never reads the byte again, so every read through the phi keeps its qualifier.
   test('a spin through a phi carrying a published capture keeps both its reads, qualified', () => {
     const ctx =
       'extern void h(unsigned char*, unsigned char*); extern unsigned char *gp; extern unsigned char gOther[8];\n';

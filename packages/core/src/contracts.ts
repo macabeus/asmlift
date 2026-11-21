@@ -495,7 +495,7 @@ function countEffects(
       const test: EffectCounts = new Map();
       effectsInExpr(s.fusedGuard.test, test, ctx);
       const cond = deviceReads(own);
-      // A loop that stores through a plain lvalue is credited nothing ({@link plainWriteIn}).
+      // A loop that writes memory plain is credited nothing ({@link plainWriteIn}).
       const credit = plainWriteIn(loopStmts(s), ctx)
         ? new Map<string, number>()
         : new Map([...deviceReads(test)].map(([k, n]) => [k, Math.min(n, cond.get(k) ?? 0)] as const));

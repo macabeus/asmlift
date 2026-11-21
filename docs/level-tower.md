@@ -1324,7 +1324,7 @@ localized _there_ instead of surfacing three stages later as mysterious wrong C.
   it, and the guard's site. The dropped rule counts that test's pinned reads as made, since the
   loop's first test is the guard's, capped at what the loop's own condition renders, once per
   guard however many copies of the loop the tree holds, and not at all for a loop that writes
-  memory through a plain lvalue. A pass that rebuilds such a loop carries the field, and one that
+  memory plain. A pass that rebuilds such a loop carries the field, and one that
   re-spells the condition's addresses re-spells the test with it (`mapFusedGuardTests`), or the
   credit is lost and the lift declines. And a loop that polls a pinned read and stores, plain, at
   an address it never changes, with no call and no access that may alias the store, is refused:
