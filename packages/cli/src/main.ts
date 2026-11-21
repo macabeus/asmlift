@@ -39,6 +39,7 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { readAsmIncludes } from './asm-includes';
 import { guessedArityNote } from './callees';
 import { type CommandCompilers, compilersFromCommand } from './compile-command';
 import { type AsmliftToolConfig, type UnitCompiler, asmliftBlock, resolveTarget } from './config';
@@ -549,6 +550,7 @@ export async function runCli(
   // rides along for free. Extraction failure only WARNS — the side-table is optional (a dense
   // switch then declines loudly downstream), and the disassembly itself already succeeded.
   let asm: string;
+  let asmIncludes = new Map<string, string>();
   let asmData: AsmData | undefined;
   let warn = '';
   if (typeof raw !== 'string' && isElfObject(raw)) {
@@ -586,7 +588,14 @@ export async function runCli(
     }
   } else {
     asm = typeof raw === 'string' ? raw : new TextDecoder().decode(raw);
+    // The files a text input `.include`s that gas finds with no `-I`, from the directory it runs in:
+    // the decomp.yaml directory, else the input's own (asm-includes.ts). Only those are read; every
+    // other `.include` keeps the reading it has with none.
+    if (input !== '-' || configDir !== undefined) {
+      asmIncludes = readAsmIncludes(asm, configDir ?? dirname(resolve(input)));
+    }
   }
+  const includesOpt = asmIncludes.size > 0 ? { asmIncludes } : {};
   const asmDataFlag = flags.get('asm-data') as string | undefined;
   if (asmDataFlag !== undefined) {
     if (asmData !== undefined) {
@@ -918,6 +927,7 @@ export async function runCli(
         contextGlobals,
         ...(ownContextProto ? { ownContextProto } : {}),
         ...(calleeBodies ? { calleeBodies } : {}),
+        ...includesOpt,
         onEnumerationError: (variations: readonly string[], error: string) => {
           const step = threwStep(variations);
           if (!enumerationErrors.has(step)) {
@@ -956,6 +966,7 @@ export async function runCli(
                 contextGlobals,
                 ownContextProto,
                 calleeBodies,
+                ...includesOpt,
               }),
             ) +
             ownArityNote(
@@ -966,6 +977,7 @@ export async function runCli(
                 contextGlobals,
                 ownContextProto,
                 calleeBodies,
+                ...includesOpt,
               }),
             ),
         }),
@@ -986,6 +998,7 @@ export async function runCli(
       contextGlobals,
       ...(ownContextProto ? { ownContextProto } : {}),
       ...(calleeBodies ? { calleeBodies } : {}),
+      ...includesOpt,
     });
     // THE ASSUMPTIONS THE SOURCE RESTS ON, on the path that prints no declarations. Every other
     // spelling asmlift emits for a named global — `((T *)&gSym)[i]` — reproduces the target's

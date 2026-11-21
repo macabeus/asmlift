@@ -24,6 +24,21 @@
 // recover `x` as `(hi << 16) + (s16)lo` for a positive or a negative offset alike.
 // The other GOT/PIC relocations (`%gp_rel`, `%got`, …) are declined LOUD — small-data /
 // position-independent access is not modelled.
+//
+// INCLUDED FILES. gas reads an `.include "x"` as if the text of `x` sat on that line, so a macro the
+// included file defines (`.macro nop` / `.set reorder` / `.endm`), and every reorder-mode or section
+// statement in it, is in force for the lines after it. A caller that has read those files hands
+// them in (`LiftOptions.asmIncludes`: each operand, as spelled, to its file's text, nested ones
+// included), and this reader then reads the included text in the place of the `.include` line
+// (`expandIncludes`), under every rule the input's own text is read by. What an included file
+// assembles is not the function: one of its statements inside the function's slice declines. An
+// `.include` whose operand the map does not hold, and every one when no map is given, is read as
+// before: the reorder mode is unknown until the next literal `.set (no)reorder`.
+// KNOWN GAP: a macro that an UNRESOLVED include defines is not seen, so where a file includes one
+// that names a mnemonic (`.macro nop`) and a literal `.set noreorder` follows the `.include`, the
+// addressed `nop` lifts as the instruction while gas expands the macro. The CLI resolves only what
+// gas finds with no `-I` (packages/cli/src/asm-includes.ts), and real projects' `macro.inc` is found
+// only through the build's `-I include`, so those keep this reading.
 import { CONTROL_BYTE, asciiTrim, isNonAscii } from './control-byte';
 import type { DisasmInstr, DisasmReloc } from './disasm';
 import { FrontendUnsupportedError } from './errors';
@@ -174,7 +189,8 @@ export function isSplatMips(asm: string): boolean {
  *  instruction written. `*` stands for a name this reader cannot read (`.macro \\x`), which matches
  *  every mnemonic, and so does a line that leaves a comment, string or character constant open
  *  or holds a control byte or a non-ASCII character in code.
- *  KNOWN GAP: a macro an `.include` defines is not seen here. */
+ *  `lines` holds the text of every `.include` the caller handed in (`expandIncludes`); a macro an
+ *  unresolved `.include` defines is not seen here (the header's KNOWN GAP). */
 function definedMacros(lines: string[]): Set<string> {
   const names = new Set<string>();
   for (const raw of lines) {
@@ -195,13 +211,81 @@ function definedMacros(lines: string[]): Set<string> {
   return names;
 }
 
+// `.include "x"` as one statement: gas's spelling with a plain quoted operand. Any other spelling of
+// an `.include` is read as one whose file nobody handed in.
+const INCLUDE_STATEMENT = /^\.include[ \t\r]+"([^"\\]*)"$/i;
+
+/** One line as gas reads it: `from` names the include chain whose text holds it, absent for the
+ *  input's own lines. */
+interface SplatLine {
+  text: string;
+  from?: string;
+}
+
+// How deep, and how many lines, an include chain may run to before it declines.
+const MAX_INCLUDE_DEPTH = 32;
+const MAX_INCLUDED_LINES = 1_000_000;
+
+/** The input's lines with each `.include` the map holds replaced by its file's lines, recursively
+ *  (see the header). An `.include` the map does not hold stays a line. A resolved one declines where
+ *  this reader cannot place its text as gas does: sharing its line with another statement, inside
+ *  a conditional, macro or repeated body (gas reads it there only as the body says), an operand
+ *  already on the chain (gas includes it again until it fails), or a chain past the bounds above. */
+function expandIncludes(name: string, asm: string, includes: ReadonlyMap<string, string> | undefined): SplatLine[] {
+  const lines = asm.split('\n');
+  if (includes === undefined || includes.size === 0) {
+    return lines.map((text) => ({ text }));
+  }
+  const out: SplatLine[] = [];
+  let depth = 0;
+  const visit = (text: readonly string[], chain: readonly string[]): void => {
+    const from = chain.length === 0 ? undefined : chain.map((c) => JSON.stringify(c)).join(' -> ');
+    for (const raw of text) {
+      const sts = CONTROL_BYTE.test(raw) ? null : splatStatements(raw);
+      const bare = (sts ?? []).map(bareStatement);
+      const at = bare.findIndex((t) => INCLUDE_STATEMENT.test(t) && includes.has(t.match(INCLUDE_STATEMENT)![1]));
+      if (at === -1) {
+        for (const t of bare) {
+          const d = t.match(LINE_DIRECTIVE)?.[1].toLowerCase();
+          depth +=
+            d === undefined ? 0 : /^(?:if\w*|macro|rept|irpc?)$/.test(d) ? 1 : /^(?:endif|endm|endr)$/.test(d) ? -1 : 0;
+        }
+        out.push(from === undefined ? { text: raw } : { text: raw, from });
+        continue;
+      }
+      const op = bare[at].match(INCLUDE_STATEMENT)![1];
+      const refuse = (why: string): never => {
+        throw new FrontendUnsupportedError(`cannot lift '${name}': \`.include "${op}"\` ${why}`);
+      };
+      if (bare.some((t, k) => k !== at && t !== '')) {
+        refuse('shares its line with another statement, which this reader does not place around the included text');
+      }
+      if (depth !== 0) {
+        refuse('sits inside a conditional, macro or repeated body, where gas reads it only as the body says');
+      }
+      if (chain.includes(op)) {
+        refuse(
+          `includes itself (${[...chain, op].map((c) => JSON.stringify(c)).join(' -> ')}), which gas repeats until it fails`,
+        );
+      }
+      if (chain.length >= MAX_INCLUDE_DEPTH || out.length > MAX_INCLUDED_LINES) {
+        refuse('nests deeper or includes more text than this reader reads');
+      }
+      visit(includes.get(op)!.split('\n'), [...chain, op]);
+    }
+  };
+  visit(lines, []);
+  return out;
+}
+
 /** Parse Splat-dialect text into one function's `DisasmInstr[]`. When `glabel` markers are present
  *  the text is sliced to exactly `name` (an absent symbol declines LOUD — emitting some other
  *  function's body under the requested name is the silent miscompile the cardinal rule forbids);
  *  a marker-less fragment is parsed whole. Branch targets are resolved against the local-label
  *  map, so an unresolved `.L` target declines here rather than crashing deep in the frontend. */
-export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
-  const lines = asm.split('\n');
+export function parseSplatMips(asm: string, name: string, includes?: ReadonlyMap<string, string>): DisasmInstr[] {
+  const expanded = expandIncludes(name, asm, includes);
+  const lines = expanded.map((l) => l.text);
   const macros = definedMacros(lines);
   // A line that leaves a comment, string or character constant open hides from this reader what
   // gas assembles after it (a `*/ .macro nop` on the next line is a macro definition, measured), so
@@ -238,7 +322,8 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
     const call = statement.match(INSN_LINE)?.[2].toLowerCase();
     if (call !== undefined && (macros.has(call) || macros.has('*'))) {
       throw new FrontendUnsupportedError(
-        `cannot lift '${name}': '${statement}' calls '${call}', a name a \`.macro\` in this file defines, and gas ` +
+        `cannot lift '${name}': '${statement}' calls '${call}', a name a \`.macro\` in this file or a file it ` +
+          `includes defines, and gas ` +
           `expands the macro before it reads an instruction of that name, which this reader does not do`,
       );
     }
@@ -270,6 +355,7 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
     }
     slice = lines.slice(glabels[at].line, end);
     sliceFrom = glabels[at].line;
+
     // A function whose `glabel` sits inside a conditional, macro or repeated body is assembled as
     // the body is (never, under `.if 0`), which this reader does not model.
     let depth = 0;
@@ -284,6 +370,21 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': its \`glabel\` sits inside a conditional, macro or repeated body, which this reader ` +
           `does not model`,
+      );
+    }
+  }
+
+  // What an included file assembles is not the function: its `glabel`, or any statement of it
+  // inside the slice (a marker-less fragment's slice is the whole text), declines.
+  for (let i = sliceFrom; i < sliceFrom + slice.length; i++) {
+    const from = expanded[i].from;
+    if (
+      from !== undefined &&
+      ((glabels.length > 0 && i === sliceFrom) || readStatements(lines[i]).some((st) => bareStatement(st) !== ''))
+    ) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': the included file ${from} assembles '${asciiTrim(lines[i])}' inside the function, ` +
+          `which is not the function's own text`,
       );
     }
   }

@@ -105,6 +105,7 @@ export interface TraceOptions {
   contextGlobals?: ContextGlobals; // the declaration context's globals, as in decompile()
   ownContextProto?: FnProto; // the context's own entry, as in decompile()
   calleeBodies?: CalleeBodies; // bodies of callees outside the input, as in decompile()
+  asmIncludes?: ReadonlyMap<string, string>; // the input's included texts, as in decompile()
   onGap?: OnGap; // "strict" (default) | "annotate", as in decompile()
   /** Source probe at pattern boundaries: the source asmlift would emit there, which the cli report
    *  scores. One call per boundary: pattern N's after-source is pattern N+1's before-source. Absent ⇒
@@ -217,7 +218,7 @@ function traceTower(
     opts.asmData,
     opts.symbols,
     opts.contextGlobals,
-    { calleeBodies: opts.calleeBodies },
+    { calleeBodies: opts.calleeBodies, asmIncludes: opts.asmIncludes },
     ownContext.ownContextProto,
   );
   trace.push({ id: 'stage:lift', title: 'Lift (ISA frontend → typed-SSA IR)', irDump: irDump(fn), verified: true });
