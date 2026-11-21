@@ -8049,8 +8049,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // after it (loop.c `load_mems`), as nothing the loop reads, the s32 count, may alias a u16, so the
   // lift is refused rather than spelled to write once. `dvsunkwait`'s guard fuses, and a fused loop
   // that writes memory plain is credited nothing; `dvpollstore` is a jump-to-test loop with no guard
-  // to fuse, refused by the poll-store rule alone (contracts.ts `sunkPollStore`). agbcc only, as
-  // above.
+  // to fuse, refused by the poll-store rule alone (contracts.ts `sunkPollStore`). `dvtwostore` makes
+  // two such `vu16` stores at one base: neither keeps the other in the loop, so it is refused too.
+  // `dvrotpoll` reads the register in the loop's body and tests the value it read, and its plain
+  // store is refused as a poll's. `dvdeclstore` assigns a scalar the context declares `volatile`,
+  // which the recompile writes every time round, so it lifts. agbcc only, as above.
   {
     sym: 'dvhomedwait',
     src:
@@ -8089,6 +8092,45 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'extern u16 gDvI[];\nextern s32 *gDvP[];\nvoid g(void);\nvoid dvpollstore(u32 n);',
     proto: { dvpollstore: { params: ['u32'], returnsVoid: true }, g: { params: [], returnsVoid: true } },
+  },
+  {
+    sym: 'dvtwostore',
+    src:
+      'typedef volatile u32 vu32;\ntypedef volatile u16 vu16;\n' +
+      'extern u16 gDvI[];\nextern s32 *gDvP[];\nvoid g(void);\n' +
+      'void dvtwostore(u32 n)\n{\n    u16 t = gDvI[3];\n    vu32 *d = (vu32 *)0x40000d4;\n' +
+      '    d[0] = (u32)&t;\n    d[1] = (u32)gDvP[2];\n    d[2] = 0x80000000 | (n >> 1);\n' +
+      '    d[2];\n    while (d[2] & 0x80000000) {\n        ((vu16 *)d)[5] = n;\n        ((vu16 *)d)[1] = n;\n    }\n    g();\n}',
+    features: ['pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'extern u16 gDvI[];\nextern s32 *gDvP[];\nvoid g(void);\nvoid dvtwostore(u32 n);',
+    proto: { dvtwostore: { params: ['u32'], returnsVoid: true }, g: { params: [], returnsVoid: true } },
+  },
+  {
+    sym: 'dvrotpoll',
+    src:
+      'typedef volatile u32 vu32;\ntypedef volatile u16 vu16;\n' +
+      'extern u16 gDvI[];\nextern s32 *gDvP[];\nvoid g(void);\n' +
+      'void dvrotpoll(u32 n)\n{\n    u16 t = gDvI[3];\n    vu32 *d = (vu32 *)0x40000d4;\n' +
+      '    d[0] = (u32)&t;\n    d[1] = (u32)gDvP[2];\n    d[2] = 0x80000000 | (n >> 1);\n' +
+      '    while (((vu16 *)d)[5] & 0x8000)\n        d[5] = n;\n    g();\n}',
+    features: ['pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'extern u16 gDvI[];\nextern s32 *gDvP[];\nvoid g(void);\nvoid dvrotpoll(u32 n);',
+    proto: { dvrotpoll: { params: ['u32'], returnsVoid: true }, g: { params: [], returnsVoid: true } },
+  },
+  {
+    sym: 'dvdeclstore',
+    src:
+      'typedef volatile u32 vu32;\ntypedef volatile u16 vu16;\n' +
+      'extern u16 gDvI[];\nextern s32 *gDvP[];\nextern volatile u32 gDvW;\nvoid g(void);\n' +
+      'void dvdeclstore(u32 n)\n{\n    u16 t = gDvI[3];\n    vu32 *d = (vu32 *)0x40000d4;\n' +
+      '    d[0] = (u32)&t;\n    d[1] = (u32)gDvP[2];\n    d[2] = 0x80000000 | (n >> 1);\n' +
+      '    d[2];\n    while (d[2] & 0x80000000)\n        gDvW = n;\n    g();\n}',
+    features: ['pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'extern u16 gDvI[];\nextern s32 *gDvP[];\nextern volatile u32 gDvW;\nvoid g(void);\nvoid dvdeclstore(u32 n);',
+    proto: { dvdeclstore: { params: ['u32'], returnsVoid: true }, g: { params: [], returnsVoid: true } },
   },
   // What the discard register does NOT say. `dvnarrow` is the control for a load that leaves it:
   // CodeWarrior at -O0,p reads the plain `s8 x; x = p[5];` as `lwz r0` + `extsb r31,r0`, a home,
