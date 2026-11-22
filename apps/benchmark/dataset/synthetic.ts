@@ -8181,6 +8181,55 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void g(void);\nvoid pollhoist(s32 a0);',
     proto: { pollhoist: { params: ['s32'], returnsVoid: true }, g: { params: [], returnsVoid: true } },
   },
+  // The poll-store rule loop by loop, and the poll-read pin beside a stepped store. `pollnest`'s
+  // store sits in a branch-free `for` nested in a poll: agbcc's `load_mems` runs on that inner loop
+  // too and writes the cell once after it, so the plain store is refused. `pollglobal` is IDO's
+  // hoist under a poll of a global the project declares `volatile`: the lone store is written once
+  // ahead of the loop, so it is refused too. `pollpair`'s two stores keep each other in IDO's loop,
+  // and the guard its rotated `while` copies the test into is fused and credited. `pollstep`'s `u16`
+  // read beside an `s32` store through a stepped pointer is in another alias set under agbcc's
+  // `-O2`, which loads it once ahead of the loop when plain, so it is printed volatile.
+  {
+    sym: 'pollnest',
+    src:
+      'void g(void);\nvoid pollnest(s32 a0, s32 a1)\n{\n    s32 v;\n    do {\n        s32 i;\n' +
+      '        v = ((volatile s32 *)0x40000d4)[2];\n        for (i = 0; i < a1; i++)\n' +
+      '            ((volatile s32 *)0x40000e0)[1] = a0;\n    } while (v & 0x80000000);\n    g();\n}',
+    features: ['device-access'],
+    toolchains: ['agbcc'],
+    ctx: 'void g(void);\nvoid pollnest(s32 a0, s32 a1);',
+    proto: { pollnest: { params: ['s32', 's32'], returnsVoid: true }, g: { params: [], returnsVoid: true } },
+  },
+  {
+    sym: 'pollglobal',
+    src:
+      'extern volatile s32 gPollF;\nvoid g(void);\nvoid pollglobal(s32 a0)\n{\n' +
+      '    while (gPollF == 0)\n        ((volatile u32 *)0xA4600000)[5] = a0;\n    g();\n}',
+    features: ['device-access', 'global'],
+    toolchains: ['ido7.1'],
+    ctx: 'extern volatile s32 gPollF;\nvoid g(void);\nvoid pollglobal(s32 a0);',
+    proto: { pollglobal: { params: ['s32'], returnsVoid: true }, g: { params: [], returnsVoid: true } },
+  },
+  {
+    sym: 'pollpair',
+    src:
+      'void g(void);\nvoid pollpair(s32 a0, s32 a1)\n{\n    while (((volatile u32 *)0xA4600010)[0] & 3) {\n' +
+      '        ((s32 *)0xA4600000)[5] = a0;\n        ((u16 *)0xA4500000)[2] = a1;\n    }\n    g();\n}',
+    features: ['device-access'],
+    toolchains: ['ido7.1'],
+    ctx: 'void g(void);\nvoid pollpair(s32 a0, s32 a1);',
+    proto: { pollpair: { params: ['s32', 's32'], returnsVoid: true }, g: { params: [], returnsVoid: true } },
+  },
+  {
+    sym: 'pollstep',
+    src:
+      'void g(void);\nvoid pollstep(s32 *p)\n{\n    while (*(volatile u16 *)0x4000006 != 160)\n' +
+      '        *p++ = 0;\n    g();\n}',
+    features: ['device-access', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void g(void);\nvoid pollstep(s32 *p);',
+    proto: { pollstep: { params: ['s32 *'], returnsVoid: true }, g: { params: [], returnsVoid: true } },
+  },
   // What the discard register does NOT say. `dvnarrow` is the control for a load that leaves it:
   // CodeWarrior at -O0,p reads the plain `s8 x; x = p[5];` as `lwz r0` + `extsb r31,r0`, a home,
   // which stays unstamped (the volatile twin is the same code). `dvdword` is IDO's doubleword
