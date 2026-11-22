@@ -14,6 +14,7 @@ import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
 import type { AggregateLayout, Prototypes } from '../src/proto';
+import { globalsFromContext } from '../src/proto-context';
 import { MIPS_GCC, MIPS_IDO, type TargetDescription } from '../src/target';
 import { relocs } from './helpers';
 
@@ -567,18 +568,24 @@ describe('what the lowering does not build still declines', () => {
   test('a float argument', () => {
     expect(() => lift('sretf', IDO_SRETF, MIPS_IDO)).toThrow(/cannot lift 'sretf': `mkf` returns struct SF/);
   });
+});
 
-  // `void sretfl(s32 x){ struct Fl s = mkfl(x); gF = s.f; }`, `extern float gF;`: gcc reads the
-  // member as a word (`lw v0,16(sp)`), and `gF = *(s32 *)&sp16;` would convert those bits
-  test('a floating member read as the word it is', () => {
-    const KMC_SRETFL: Fixture = {
-      lines: KMC_SRET1W.lines,
-      rs: [[0xc, 'R_MIPS_26', 'mkfl'], ...KMC_SRET1W.rs.slice(1)],
-    };
-    expect(() => lift('sretfl', KMC_SRETFL, MIPS_GCC)).toThrow(
-      /a 4-byte read of the floating member 'f' of a struct local is an integer here/,
-    );
-  });
+// `void sretfl(s32 x){ struct Fl s = mkfl(x); gW = s.f; }`: gcc reads the member as a word (`lw
+// v0,16(sp)`) and stores it, so the bits are copied as bits wherever the lift types the store's
+// lvalue: a global nothing declares is the word the lift's own declaration makes it, and one a
+// context declares `float` is stored through its integer cell, since `gW = *(s32 *)&sp16;` against
+// that declaration would convert them
+test('a floating member read as the word it is is stored as its bits', () => {
+  const asm = obj('sretfl', KMC_SRET1W.lines);
+  const asmData = relocs([[0xc, 'R_MIPS_26', 'mkfl'], ...KMC_SRET1W.rs.slice(1)]);
+  const prototypes: Prototypes = { ...PROTOS, sretfl: { returnsVoid: true } };
+  expect(decompile('sretfl', asm, MIPS_GCC, { asmData, prototypes }).source).toMatch(
+    /sp16 = mkfl\(a0\);\s+gW = \*\(s32 \*\)&sp16;/,
+  );
+  const contextGlobals = globalsFromContext('extern float gW;', 'c');
+  expect(decompile('sretfl', asm, MIPS_GCC, { asmData, prototypes, contextGlobals }).source).toMatch(
+    /\*\(s32 \*\)&gW = \*\(s32 \*\)&sp16;/,
+  );
 });
 
 // THE EVEN-WORD RULE COUNTS THE HIDDEN POINTER. An 8-aligned struct starts at an even argument word,
