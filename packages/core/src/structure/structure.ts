@@ -4069,15 +4069,18 @@ function structureRanked(
       const through = calleeValue(d);
       // a struct passed by value is the object its operand addresses — a frame object stamped as
       // that struct, or a global — spelled bare (frontend/call-plan.ts `foldByValueArgs`)
+      // …or the pointee of a pointer read whole, `*p`, where the operand is that pointer
+      const pointee = (d.attrs.byValuePointee as number[] | undefined) ?? [];
       const byValue = byValueOperands(d).map(({ at, param }) => {
         const o = defs.get(d.operands[at]);
         const t = d.operands[at].type;
         const type = t.kind === 'ptr' && t.to.kind === 'struct' ? t.to : undefined;
         const object =
           type !== undefined &&
-          (o?.opcode === 'laddr'
-            ? o.attrs.aggregate === true
-            : o?.opcode === 'gaddr' && o.attrs.passedAs === structSpelling(type));
+          (pointee.includes(param) ||
+            (o?.opcode === 'laddr'
+              ? o.attrs.aggregate === true
+              : o?.opcode === 'gaddr' && o.attrs.passedAs === structSpelling(type)));
         if (!object) {
           throw new Error(
             `internal: a by-value argument of '${d.attrs.target}' is not the address of an object of the struct it passes`,
@@ -4087,7 +4090,11 @@ function structureRanked(
       });
       const args = callArgs(d).map((v, i): Expr => {
         const x = e(v);
-        return byValue.some((b) => b.at === i) && x.k === 'addr' ? { k: 'var', name: x.name } : x;
+        const passed = byValue.find((b) => b.at === i);
+        if (passed !== undefined && pointee.includes(passed.param)) {
+          return { k: 'index', base: x, idx: { k: 'const', value: 0 }, width: 4, signed: false, whole: true };
+        }
+        return passed !== undefined && x.k === 'addr' ? { k: 'var', name: x.name } : x;
       });
       return {
         k: 'call',

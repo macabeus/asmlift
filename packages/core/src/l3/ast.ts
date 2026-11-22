@@ -243,6 +243,13 @@ export type Expr =
        *  and on an element of a frame array, where it only keeps the element spelling at index 0
        *  (structure/memory-access.ts `bareArrayIndex`, l3/constinit.ts `asElement`). */
       subscript?: true;
+      /** The element is the whole STRUCT the base points at, read by value: a struct argument
+       *  passed as `*p` (frontend/call-plan.ts `foldByValueArgs`). Printed over the base as it is
+       *  typed, never through an integer cast (backend/cfamily.ts `legalizedIndexBase`). Its
+       *  `width` is 4, a word, which only keeps every scalar-width rule satisfied: the read is the
+       *  base's pointee, whatever its size, and only a call argument of a by-value parameter holds
+       *  one. */
+      whole?: true;
     }
   // A named struct-field access `base->name` (raise/structs.ts recovered `base` as a struct
   // pointer, so the byte offset resolves to a named field instead of a scaled array index).

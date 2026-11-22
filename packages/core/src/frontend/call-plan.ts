@@ -1538,7 +1538,7 @@ export function registerStructLocal(
 /** A STRUCT PASSED BY VALUE IS THE ONE OBJECT ITS ARGUMENT WORDS HOLD AT THE CALL. The lowering
  *  hands its words over one operand each (`byValueWords`, pairs of first operand and word count);
  *  C passes the struct, so the words must be one object's, whole, and that object is what the call
- *  is handed. Two objects are:
+ *  is handed. Three objects are:
  *
  *  - A FRAME OBJECT the words are loaded off — word loads at consecutive words from one `laddr`
  *    offset. The operand becomes that offset's address, and the frame-object audit judges the
@@ -1553,10 +1553,17 @@ export function registerStructLocal(
  *    symbol's own address too, and `take(gQs)` is a type error against the header that declares
  *    it (`bareStructRefusal`).
  *
- *  Either way every access is unqualified and in the call's own block, and no store or call lies
+ *  - THE POINTEE OF ONE POINTER — word loads at consecutive words from byte 0 of one value that is
+ *    no address op's (a parameter, a loaded pointer) and that nothing else in the function reads.
+ *    The value is retyped a pointer to the struct, the operand becomes it, and the call names it in
+ *    `byValuePointee` (by declared parameter), which structure.ts spells `*p`. A pointer read
+ *    anywhere else keeps the type its other reads give it, so that one declines.
+ *
+ *  Every way, every access is unqualified and in the call's own block, and no store or call lies
  *  between the earliest of them and the call but those accesses themselves, so the object holds at
  *  the call what the words carry. Every other source — registers computed in place, words off two
- *  objects, off a pointer or into a global's interior, a store the call may not see last — refuses.
+ *  objects, off a pointer past its byte 0 or one read elsewhere, into a global's interior, a store
+ *  the call may not see last — refuses.
  *
  *  The operand's value is typed a pointer to the struct, and a global's `gaddr` is a fresh one that
  *  names the struct too (`passedAs`), so value numbering never merges it with a plain address of
@@ -1590,6 +1597,8 @@ export function foldByValueArgs(
         }
         return { first: words[2 * i], n: words[2 * i + 1], type, param: arg!.param };
       });
+      // the first words of the structs passed as a pointer's pointee rather than an object's address
+      const pointees = new Set<number>();
       // highest first, so folding one leaves the operand places of those below it as they were
       for (const { first, n, type } of [...pairs].sort((x, y) => y.first - x.first)) {
         const at = blk.ops.indexOf(call);
@@ -1670,11 +1679,33 @@ export function foldByValueArgs(
             });
           }
         }
+        // THE POINTEE OF ONE POINTER, read whole: word loads at consecutive words from byte 0 of one
+        // value no address op defines (a parameter, a loaded pointer), which nothing else in the
+        // function reads, so the value is that struct's pointer and nothing else — typed so, it is
+        // passed as `*p` (structure.ts). A base read anywhere else keeps its own type and declines.
+        if (
+          object === undefined &&
+          loaded &&
+          base0 !== undefined &&
+          baseDef?.opcode !== 'gaddr' &&
+          loads.every((d, i) => wordAt(d, i, base0)) &&
+          settled(loads as Op[]) &&
+          onlyReadBy(irBlocks, base0, loads as Op[])
+        ) {
+          base0.type = T.ptr(type);
+          pointees.add(first);
+          const n0 = passed.length;
+          call.operands.splice(first, n0, base0);
+          for (const d of loads) {
+            dropIfUnread(irBlocks, d!);
+          }
+          continue;
+        }
         if (object === undefined) {
           throw new FrontendUnsupportedError(
             `cannot lift '${name}': the call to \`${callee ?? 'a function pointer'}\` passes ${structSpelling(type)} ` +
-              'by value, and its words are not one frame object or one global, read whole just before the call — ' +
-              'a struct passed from anywhere else is not modelled',
+              'by value, and its words are not one frame object, one global or the pointee of one pointer nothing ' +
+              'else reads, read whole just before the call — a struct passed from anywhere else is not modelled',
           );
         }
         blk.ops.splice(at, 0, object);
@@ -1701,6 +1732,9 @@ export function foldByValueArgs(
           first - pairs.filter((q) => q.first < first).reduce((m, q) => m + q.n - 1, 0),
           param,
         ]),
+        ...(pointees.size > 0
+          ? { byValuePointee: sorted.filter(({ first }) => pointees.has(first)).map(({ param }) => param) }
+          : {}),
       };
     }
   }
@@ -1744,6 +1778,15 @@ function bareStructRefusal(
     return `the symbol map types it as ${info.shape === 'struct' ? `struct ${info.structName ?? '(untagged)'}` : `${info.shape === 'array' ? 'an' : 'a'} ${info.shape}`}`;
   }
   return undefined;
+}
+
+/** Whether every read of `v` — operands and branch arguments alike — is one of `readers`. */
+function onlyReadBy(irBlocks: Block[], v: Value, readers: readonly Op[]): boolean {
+  return irBlocks.every((b) =>
+    b.ops.every(
+      (x) => (readers.includes(x) || !x.operands.includes(v)) && x.successors.every((sc) => !sc.args.includes(v)),
+    ),
+  );
 }
 
 /** Removes `op` where nothing reads its result. */

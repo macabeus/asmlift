@@ -154,15 +154,16 @@ describe('a struct passed by value from a global recompiles byte-exact', () => {
     60_000,
   );
 
-  // words read through a pointer are no object the fold names, and the arity guess would split them
+  // words read through a pointer nothing else reads are its pointee, `*p`
   test.runIf(gcc272Available())(
-    'gcc2.7.2: through a pointer it declines',
+    'gcc2.7.2: through a pointer it passes the pointee',
     () => {
+      const flags = TOOLCHAIN_TARGETS['gcc2.7.2'].canonicalFlags;
       const body = 'void bvqp(s32 k, struct Q *p)\n{\n    takeQ(k, *p);\n}\n';
-      const { obj, asm } = compileMipsGcc272Target(HEADER + body, 'bvqp', TOOLCHAIN_TARGETS['gcc2.7.2'].canonicalFlags);
-      expect(() => lift('bvqp', asm, obj, MIPS_GCC, prototypes)).toThrow(
-        /the call to `takeQ` passes struct Q by value, and its words are not one frame object or one global/,
-      );
+      const { obj, asm } = compileMipsGcc272Target(HEADER + body, 'bvqp', flags);
+      const source = lift('bvqp', asm, obj, MIPS_GCC, prototypes);
+      expect(source).toContain('    takeQ(a0, *a1);\n');
+      expect(scoreObjects(obj, compileMipsGcc272Target(HEADER + source, 'bvqp', flags).obj, 'bvqp').score).toBe(0);
     },
     60_000,
   );

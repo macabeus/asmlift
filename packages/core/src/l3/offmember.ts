@@ -354,7 +354,8 @@ export function spellOperandMembers(sfn: SFn, opts: OffmemberOpts = {}): SFn | n
     return null;
   }
   const rewrite = (e: Expr): Expr => {
-    if (e.k === 'index' && e.idx.k === 'const' && e.lead === undefined) {
+    // a struct read whole (`whole`, `*p` passed by value) is no member of a recovered struct
+    if (e.k === 'index' && e.idx.k === 'const' && e.lead === undefined && e.whole !== true) {
       const hit = admitted.get(baseKey(e.base));
       if (hit) {
         return { k: 'field', base: { k: 'cast', to: hit.type, e: e.base }, name: `m${e.idx.value * e.width}` };
