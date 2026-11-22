@@ -38,7 +38,7 @@ describe('the Flags field', () => {
   });
 
   test('every flag set of a toolchain decompiles against that toolchain’s description', () => {
-    const a = read('agbcc', '-O1');
+    const a = read('agbcc', '-O2 -mthumb-interwork');
     const b = read('agbcc', canonicalFlagsText('agbcc'));
     expect('error' in a || 'error' in b).toBe(false);
     expect('error' in a ? null : a.resolved.target).toBe(TOOLCHAIN_TARGETS.agbcc.description);
