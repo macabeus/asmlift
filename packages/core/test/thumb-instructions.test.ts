@@ -42,9 +42,8 @@ describe('an immediate idiom is keyed on the VALUE, not the spelling', () => {
   });
 
   // REFUSALS at the `rsb` site, where a non-match declines. `parseInt` reads every one of these as
-  // zero; the shape test is the only thing between them and a confident negate. A spelling that is
-  // no literal never reaches the site: every immediate of the function is read before any lowering
-  // (`refuseUnreadableImmediates`), and it refuses there, naming the instruction.
+  // zero. Only `#0X10` reaches the shape test: a spelling that is no literal refuses earlier, where
+  // every immediate of the function is read (`refuseUnreadableImmediates`), naming the instruction.
   test.each([
     ['#0X10', /unmodelled instruction 'rsb'/],
     ['#0b1', /'rsb r0, r1, #0b1' — immediate '#0b1' is not an integer literal/],
@@ -59,7 +58,7 @@ describe('an immediate idiom is keyed on the VALUE, not the spelling', () => {
 
   // At the `add` site a non-match falls through to `constVal(imm(…))`, and `imm` reads only a
   // literal whose gas value is certain (frontend/gas-int.ts), so the spelling the shape test turns
-  // away is refused there too. It used to be read: `#0b1` as `+ 0`, where gas assembles `+ 1`.
+  // away is refused there too, not read as `+ 0` where gas assembles `+ 1`.
   test('a binary immediate at the `add` site declines rather than reading its prefix', () => {
     const add = (imm: string) => `\tpush\t{r4, lr}\n\tadd\tr0, r1, ${imm}\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`;
     expect(dc('f', add('#0X1')).source).toBe('s32 f(s32 a0, s32 a1) {\n    return a1 + 1;\n}\n'); // the radix fix

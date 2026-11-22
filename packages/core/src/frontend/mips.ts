@@ -2118,8 +2118,8 @@ function liftOnce(
       // ONLY A REGISTER NAME IS A REGISTER. Anything else in a register slot is an operand the
       // assembler reads otherwise — a literal (`addu $v0, $a0, 8` is gas's `addiu v0,a0,8`), a
       // memory operand with no base (`lw $v0, 0x8` is `lw v0,8(zero)`), a numbered register — and
-      // reading it as one invented a parameter for it: both lifted `a0 + a1` and `*a0`. Thumb
-      // refuses the same shape. An FPU register passes, for the float paths' own refusals to name.
+      // reading it as one would invent a parameter for it. Thumb refuses the same shape. An FPU
+      // register passes, for the float paths' own refusals to name.
       if (!O32_GPR_NAME.test(r) && !MIPS_FP_REG.test(r)) {
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': operand '${r}' read as a register — it names no O32 register`,
@@ -2204,9 +2204,9 @@ function liftOnce(
     // rD,%hi(SYM)` deliberately reassigns rD's meaning without it).
     const cmpDef = new Map<Value, { opcode: string; lhs: Value; rhs: Value }>();
     // A WRITE NAMES A REGISTER BY THE SAME LIST A READ DOES. A numbered register keeps its sigil
-    // (splat.ts `registerToken`), so in a destination slot `$2` became a variable of its own beside
-    // v0 and the write was lost: `addiu $v0, $zero, 5; addiu $2, $zero, 7` lifted `return 5;` where
-    // gas encodes `li v0,7` last. Refused at every destination, as `read` refuses at every source.
+    // (splat.ts `registerToken`), so in a destination slot `$2` would be a variable of its own
+    // beside v0 and the write to v0 lost (`addiu $v0, $zero, 5; addiu $2, $zero, 7` as `return 5;`).
+    // Refused at every destination, as `read` refuses at every source.
     const write = (r: string, v: Value) => {
       if (isZero(r)) {
         return;
@@ -2347,8 +2347,8 @@ function liftOnce(
           // mirroring PPC's `addi r1`. Any OTHER read of sp falls through to `read`, which loud-fails.
           // Skipping is sound only for the frame every compiler builds, so the write is READ first:
           // from sp itself, by a literal (`addiu $sp, $sp, FS` or `0x18 + 0x8` refuses in `imm`),
-          // and a release only of the bytes the one push took. A release of another size leaves sp
-          // where no compiler leaves it, and lifted `return g();` as if balanced.
+          // and, in a function with one push, a release only of the bytes it took. A release of
+          // another size leaves sp where no compiler leaves it, and skipped it reads as balanced.
           if (isStackPtr(d)) {
             const by = imm(ins, t);
             if (!isStackPtr(s ?? '') || (by > 0 && pushes.length < 2 && by !== frameSize)) {

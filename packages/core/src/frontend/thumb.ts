@@ -339,13 +339,11 @@ function classifyXfer(ins: Instr): XferKind | null {
 }
 
 // A raw `#…` immediate's value, or a refusal. gas reads the operand as an EXPRESSION — a `.set`
-// symbol, a character constant, `2*2`, an octal `010` — and a prefix reader answered NaN for the
-// first two (rendered as the text `NaN`) and the digit prefix for the rest (`#010` as 10 where gas
-// encodes 8). Only a literal whose gas value is certain is read (frontend/gas-int.ts); every caller
-// reaches here with an operand it has already seen start with `#`.
-// Every instruction of the lifted function has its immediates read once, up front, by
-// `refuseUnreadableImmediates`, which names the function and the instruction; a refusal here is
-// the backstop for a reader that runs before it.
+// symbol, a character constant, `2*2`, an octal `010` — so only a literal whose gas value is
+// certain is read (frontend/gas-int.ts); every caller reaches here with an operand it has already
+// seen start with `#`. Every instruction of the lifted function has its immediates read once, up
+// front, by `refuseUnreadableImmediates`, which names the function and the instruction; a refusal
+// here is the backstop for a reader that runs before it.
 const imm = (s: string, where = ''): number => {
   const v = s.startsWith('#') ? gasIntLiteral(s.slice(1)) : null;
   if (v === null) {
@@ -361,18 +359,16 @@ const imm = (s: string, where = ''): number => {
 /** The instruction as a refusal names it: the spelling the input used. */
 const sayInstr = (ins: Instr): string => `'${ins.asWritten ?? ins.mnemonic} ${ins.ops.join(', ')}'`;
 
-/** EVERY `#k` OF THE LIFTED FUNCTION IS READ HERE ONCE, before any lowering, so an immediate
- *  gas would resolve (a symbol, a character, an expression, a literal past a word) refuses naming
- *  the function and the instruction: `imm` is reached from some twenty lowering and predicate
- *  sites, and its own refusal named neither. Read are a bare `#k` operand and the displacement of
- *  `[rB, #k]`.
+/** EVERY `#k` OF THE LIFTED FUNCTION IS READ HERE ONCE, before jump-table recovery and the
+ *  decode, so an immediate gas would resolve (a symbol, a character, an expression, a literal past
+ *  a word) refuses naming the function and the instruction rather than at whichever of `imm`'s
+ *  callers meets it first. Read are a bare `#k` operand and the displacement of `[rB, #k]`.
  *
- *  Whether the value FITS the instruction's field is not asked. gas refuses `mov r0, #256`,
- *  `lsl r0, r0, #32` and `ldr r0, [r0, #128]`, so only a hand-typed input carries one, and the
+ *  KNOWN GAP: whether the value FITS the instruction's field is not asked. gas refuses `mov r0,
+ *  #256`, `lsl r0, r0, #32` and `ldr r0, [r0, #128]`, so only hand-typed input carries one, and the
  *  frontend's own tests lean on exactly such text to reach the refusals downstream of the decode (a
- *  struct member at `[r1, #0x4E]` through `ldrb`, an unaligned `[sp, #2]` slot, `add r2, r1, #8`):
- *  27 tests over 10 files failed under a check of each field against gas's bounds. Valid input is
- *  not affected either way. */
+ *  struct member at `[r1, #0x4E]` through `ldrb`, an unaligned `[sp, #2]` slot, `add r2, r1, #8`).
+ *  Valid input is not affected either way. */
 function refuseUnreadableImmediates(name: string, instrs: readonly Instr[]): void {
   for (const ins of instrs) {
     const where = `cannot lift '${name}': ${sayInstr(ins)} — `;
@@ -402,7 +398,7 @@ function refuseUnreadableImmediates(name: string, instrs: readonly Instr[]): voi
 // and `imm` read through `gasIntLiteral`, so they agree on every spelling: a non-literal fails this
 // test, and at the `add`/`sub` sites that then fall through to `constVal(imm(…))` it declines there.
 //
-// The literal is UNSIGNED here, as it always was: a signed one (`#-0x4` ×287 in the corpus) is
+// The literal is UNSIGNED here: a signed one (`#-0x4` ×287 in the corpus) is
 // never 0 or 2 save `#-0`, which no producer spells, so a sign only ever meant "not this idiom".
 const IMM_LITERAL = /^#\s*(?:0[xX][0-9a-fA-F]+|[0-9]+)$/;
 const immEq = (op: string | undefined, want: number): boolean =>

@@ -12,21 +12,18 @@
 //
 // An immediate, a displacement or a shift amount in assembly text is an EXPRESSION to gas: `#K`
 // after `.set K, 2`, `#'a'`, `#2*2`, `#(3)`, and the radix prefixes `0b11` and `010` (octal) are
-// all values the assembler resolves. `parseInt` reads none of them: it stops at the first character
-// it cannot use, so a symbol or a character constant read as NaN and rendered as the text `NaN`,
-// and everything that starts with digits read as its digit PREFIX — `#010` as 10 where gas encodes
-// 8, `#2*2` as 2 where gas encodes 4, `#0b11` as 0 where gas encodes 3. Each of those is ordinary,
-// compiling C with the wrong constant in it.
+// all values the assembler resolves. `parseInt` reads none of them: it answers NaN for a symbol or
+// a character and the digit PREFIX for the rest — `#010` as 10 where gas encodes 8, `#2*2` as 2
+// where gas encodes 4 — which is ordinary, compiling C with the wrong constant in it.
 //
 // So this is an ALLOWLIST of the spellings whose value is certain, and every other spelling is
 // null for the caller to refuse: an optional sign, then a decimal without a leading zero, a `0x`/`0X`
 // hex, or a run of zeros with at most one octal digit after it (`0`, `00`, `04`, `007`: octal to
 // gas, and a single octal digit is the same value under any radix), whose value lies in a 32-bit
-// word read either way (`GAS_WORD_MIN` below). Whitespace
-// around the sign and the digits is gas's too (`# 7`, `#- 8`, `+ 8(a0)`).
-// Each accepted spelling is pinned against the encoding `arm-none-eabi-as -mcpu=arm7tdmi` and
-// `mips-linux-gnu-as -march=r4300` give it (test/gas-immediate.test.ts); objdump, the other
-// producer, prints only decimal and `0x` hex.
+// word read either way (`GAS_WORD_MIN` below). Whitespace around the sign and the digits is gas's
+// too (`# 7`, `#- 8`, `+ 8(a0)`). Each accepted spelling is pinned against the encoding
+// `arm-none-eabi-as -mcpu=arm7tdmi` and `mips-linux-gnu-as -march=r4300` give it
+// (test/gas-immediate.test.ts); objdump, the other producer, prints only decimal and `0x` hex.
 //
 // Reading the rest is deliberately not built. No compiler emits it: agbcc folds an enum, an octal
 // and a character constant into a plain literal, and the only non-literal immediates over the
@@ -52,8 +49,7 @@ export function gasIntLiteral(text: string): number | null {
  *  gas value is the number it spells. Past it the two assemblers part, and neither gives the number:
  *  `arm-none-eabi-as -mcpu=arm7tdmi` truncates the expression to 32 bits without a word (`mov r0,
  *  #0x100000008` assembles `movs r0, #8`, `#-4294967295` assembles 1), and `mips-linux-gnu-as
- *  -march=r4300` refuses it ("number larger than 32 bits"). Read as the number, `#0x100000008`
- *  lifted `return 4294967304;` and `add sp, #-0x100000000` ran the lift out of memory. Splat's
- *  constant expressions hold every intermediate value to the same range (`evalConst`). */
+ *  -march=r4300` refuses it ("number larger than 32 bits"). Splat's constant expressions hold
+ *  every intermediate value to the same range (`evalConst`). */
 export const GAS_WORD_MIN = -0x80000000;
 export const GAS_WORD_END = 0x100000000;

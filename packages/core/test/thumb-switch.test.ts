@@ -650,7 +650,7 @@ test('a shift that is not by two still DECLINES, whatever it is spelled like', (
   // dispatches to the wrong block, silently. The first cut of this guard used `parseInt`, which
   // stops at the first character it cannot consume, and accepted every one of them; the earlier
   // version of THIS test sampled only the values above and passed while the property was false.
-  // Each now refuses before the recogniser runs, where every immediate of the function is read.
+  // Each refuses before the recogniser runs, where every immediate of the function is read.
   const unread = /is not an integer literal/;
   expect(() => spelled('lsl', '#2*2', 'add')).toThrow(unread);
   expect(() => spelled('lsl', '#2<<1', 'add')).toThrow(unread);

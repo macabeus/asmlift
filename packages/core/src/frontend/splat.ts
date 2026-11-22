@@ -554,9 +554,9 @@ export function parseSplatMips(asm: string, name: string, includes?: ReadonlyMap
     // space here, before any operand is cut out or read: Splat writes one after an instruction it
     // did not attribute to the compiler (`lw $v0, 0x8($a0) /* handwritten instruction */`, 140 lines
     // in marioparty3's OS asm, `addi $t7, $a1, 0x20 /* … */` in af's). Read as part of the operand it
-    // hid the memory shape (offset 0 and a mangled base) or, cut at the first one, the rest of an
-    // expression (`0x8 /* x */ + 1 /* y */` as 8, against gas's 9). The statement reader has already
-    // closed every comment, so the first `*\/` after a `/*` is that comment's end.
+    // would hide the memory shape, or the rest of an expression (`0x8 /* x */ + 1 /* y */`, gas 9).
+    // The statement reader has already closed every comment, so the first `*\/` after a `/*` is that
+    // comment's end.
     const operands = asciiTrim(m[3].replace(/\/\*.*?\*\//g, ' '));
     const normalized = operands ? splitOperands(operands).map((o) => normalizeOperand(name, o)) : [];
     const ops = normalized.map((n) => n.op);
@@ -573,12 +573,10 @@ export function parseSplatMips(asm: string, name: string, includes?: ReadonlyMap
     // constant as an unsigned mask (`(0x8000ABCD & 0xFFFF)` = 0xABCD), so re-sign it here to match
     // the hardware — and the objdump path, which prints the already-signed value. Zero-extending ops
     // (ori/andi/xori) and lui keep the unsigned value, so they are deliberately excluded.
-    // Every literal spelling is re-signed, `0XFFFF` too (gas reads it as 0xFFFF, and a lowercase-only
-    // test left it 65535, so `addiu $v0, $a0, 0XFFFF` lifted `a0 + 65535` against the hardware's -1).
-    // `slti`/`sltiu` sign-extend the same field (`sltiu` then compares unsigned against the extended
-    // word): `slti $v0, $a0, 0xFFFF` encodes `slti v0,a0,-1` and lifted `a0 < 65535`. A value no
-    // 16-bit field holds is gas's "operand 3 out of range" on all four, and refuses rather than
-    // being masked (`addiu $v0, $a0, 0x10000` lifted `a0 + 0`).
+    // Every literal spelling is re-signed, `0XFFFF` too. `slti`/`sltiu` sign-extend the same field
+    // (`sltiu` then compares unsigned against the extended word): `slti $v0, $a0, 0xFFFF` encodes
+    // `slti v0,a0,-1`. A value no 16-bit field holds is gas's "operand 3 out of range" on all four,
+    // and refuses rather than being masked (`addiu $v0, $a0, 0x10000` is not `a0 + 0`).
     const field = SIGNED_FIELD.test(mnemonic) && ops.length === 3 ? gasIntLiteral(ops[2]) : null;
     if (field !== null) {
       if (field < -0x8000 || field > 0xffff) {
@@ -590,9 +588,9 @@ export function parseSplatMips(asm: string, name: string, includes?: ReadonlyMap
       ops[2] = String(signExtend16(field));
     }
     // The other fields an immediate fills hold what gas lets them, and anything else is gas's
-    // "operand N out of range" too (`mips-linux-gnu-as -march=r4300`): `lui $v0, 0x10000` lifted
-    // `return 0;`, `andi $v0, $a0, -1` lifted `a0 & -1`, `sll $v0, $a0, 32` lifted `a0 << 32`. An
-    // input the assembler refuses has no encoding to lift, so it refuses here as well. A `%lo`
+    // "operand N out of range" too (`mips-linux-gnu-as -march=r4300`): `lui $v0, 0x10000`,
+    // `andi $v0, $a0, -1`, `sll $v0, $a0, 32`. An input the assembler refuses has no encoding to
+    // lift, so it refuses here as well. A `%lo`
     // operand is the relocation's to fill, and its immediate here is the signed low half.
     const bounded = relocs.length === 0 ? UNSIGNED_FIELD[mnemonic] : undefined;
     const at = mnemonic === 'lui' ? 1 : 2;
@@ -813,13 +811,14 @@ export const O32_GPR_NAME = /^(zero|at|v[01]|a[0-3]|t[0-9]|s[0-8]|k[01]|gp|sp|fp
 
 /** A GPR token as the frontend reads it: `$a0` becomes `a0`, objdump's spelling. ONLY a named
  *  register loses its sigil. To gas a register is `$name` or `$N` and a bare word is a symbol or a
- *  literal, so stripping every `$` made two different operands one text: `sll $v0, $a0, $2` (gas
- *  `sllv v0,a0,v0`) lifted `a0 << 2`, the numbered register read as the shift amount. A numbered
- *  register keeps its sigil, which no immediate reader and no register name accepts, so it
- *  refuses where it is used (0 numbered GPR operands over the three Splat trees outside `cfc1`/`ctc1`'s
- *  `$31`, which is filed by its mnemonic). A register NAME written bare is refused here: gas reads
- *  `a0` as a symbol (`addu $v0, a0, $a1` is "operand 2 must be constant", `lw $v0, 4(a0)` "invalid
- *  operands" under `mips-linux-gnu-as -march=r4300`), and this reader would hand it on as `$a0`. */
+ *  literal, so stripping every `$` would make two operands one text: `sll $v0, $a0, $2` (gas
+ *  `sllv v0,a0,v0`) read as `a0 << 2`. A numbered register keeps its sigil, which no immediate
+ *  reader and no register name accepts, so it refuses where it is used (over the three Splat trees
+ *  a numbered operand is only a coprocessor register: `cfc1`/`ctc1`'s `$31`, filed by its mnemonic,
+ *  and hand-written `mfc0`/`mtc0`, which refuse). A register NAME written bare is refused here:
+ *  gas reads `a0` as a symbol (`addu $v0, a0, $a1` is "operand 2 must be constant", `lw $v0, 4(a0)`
+ *  "invalid operands" under `mips-linux-gnu-as -march=r4300`), and this reader would read it as
+ *  `$a0`. */
 function registerToken(name: string, tok: string, operand: string): string {
   if (tok.startsWith('$') && O32_GPR_NAME.test(tok.slice(1))) {
     return tok.slice(1);
@@ -851,7 +850,7 @@ function registerToken(name: string, tok: string, operand: string): string {
  *
  *  THE PLACEMENT IS THE POINT. The rule belongs to the readers that turn a digit string into a
  *  value, not to the patterns that feed them: a guard on one caller's regex leaves the next caller
- *  reading base 10. The three readers that do — `evalConst`'s literal, the `addi`/`addiu` re-sign
+ *  reading base 10. The three readers that do — `evalConst`'s literal, the signed-field re-sign
  *  and the shared `parseImm` — all read through `gasIntLiteral` (frontend/gas-int.ts), so they
  *  agree on every spelling; this pattern only names the refusal. */
 const OCTAL_MAGNITUDE = /^[-+]?0\d/;
@@ -865,22 +864,22 @@ const refuseOctal = (name: string, tok: string, operand: string): never => {
 // Evaluate a constant integer expression (the assembler's hi/lo split: hex/dec literals with
 // `+ - * << >> & | ^ ~` and parentheses). Precedence-climbing on GAS's precedence, which is not C's:
 // three left-associative levels, `* << >>` above `| & ^` above `+ -` (the GNU as manual, "Infix
-// Operators"). C's table lifted `(3 | 1 + 1)` as 3 and `(1 + 2 << 3)` as 24, where
-// `mips-linux-gnu-as -march=r4300` and `arm-none-eabi-as` both encode 4 and 17. Anything unparsable
+// Operators"): `(3 | 1 + 1)` is 4 and `(1 + 2 << 3)` 17 to `mips-linux-gnu-as -march=r4300` and
+// `arm-none-eabi-as` both, where C's table gives 3 and 24. Anything unparsable
 // declines LOUD rather than silently yielding NaN.
 //
 // THE ARITHMETIC IS EXACT, AND HELD TO A WORD. MIPS gas evaluates in a 64-bit word, and wrapped
-// 32-bit JS arithmetic (with its shift counts taken mod 32) is a different machine: `(0x1000 >> 32)`
-// lifted 4096 where gas encodes 0, `((1 << 36) >> 24)` 0 where gas encodes 0x1000, and
-// `((0x10000 * 0x10000) >> 20)` 0 against 0x1000. So each value is computed exactly (BigInt), and
+// 32-bit JS arithmetic (with its shift counts taken mod 32) is a different machine: it gives
+// `(0x1000 >> 32)` 4096 where gas encodes 0, and `((1 << 36) >> 24)` 0 where gas encodes 0x1000. So
+// each value is computed exactly (BigInt), and
 // every one — a literal, each operator's result — must lie in `[-2^31, 2^32)`, a shift count in
 // 0..31, and a value shifted right must not be negative: inside those bounds gas's 64-bit word holds
 // the exact value, outside them it does not (`((-16 >> 2) >> 28)` is a logical 64-bit shift to gas,
 // "operand 3 out of range" in an `addiu`), and the expression refuses. Every real Splat expression
 // is `(0xH >> 16)` or `(0xH & 0xFFFF)` on a 32-bit H, well inside them.
 function evalConst(name: string, expr: string): number {
-  // Every character is a token or whitespace: a match that skipped the rest read `(0x10 + K1)` as
-  // 0x10 + 1 (the `K` dropped, gas 18 against 17) and `K1($a0)` as offset 1.
+  // Every character is a token or whitespace: a match that skipped the rest would read
+  // `(0x10 + K1)` as 0x10 + 1 (the `K` dropped) and `K1($a0)` as offset 1.
   const TOKEN = /0[xX][0-9a-fA-F]+|\d+|<<|>>|[-+*&|^()~]/g;
   const toks = expr.match(TOKEN);
   if (!toks || asciiTrim(expr.replace(TOKEN, ' ')) !== '') {

@@ -226,8 +226,8 @@ const isFpKey = (k: string) => PPC_FP_REG.test(k);
 // non-register base is an SDA/global placeholder assertOrdinaryMem declines.
 const parseMem = (operand: string): { off: number; base: string } => parseSharedMem(operand, /r\d+/);
 // EVERY immediate this frontend reads goes through here, as MIPS's do through its `imm`. objdump
-// prints a number, so anything else (a symbol, a character, `2*2`) is not one this reads (an
-// unguarded NaN rendered as the text `NaN`: `li r3,K` lifted `return NaN;`). The shared `parseImm`
+// prints a number, so anything else (a symbol, a character, `2*2`) is not one this reads; an
+// unguarded NaN would render as the text `NaN` (`li r3,K` as `return NaN;`). The shared `parseImm`
 // refuses the same spellings; this one refuses them as this frontend's error.
 const parseImm = (text: string): number => {
   const v = gasIntLiteral(text);
@@ -2082,9 +2082,8 @@ function liftOnce(
     // / mflr / mtlr / r1-relative spills / the save routines' frame address are handled before `read`.
     // ONLY A REGISTER NAME IS A REGISTER, as on MIPS (`read` there): anything else in a register slot
     // is an operand objdump never prints and the lift has no reading of — a `.set` symbol (`mr
-    // r3,K`, `add r3,r3,K`, `stw K,8(r3)`) or a bare number — and reading it as a register invented a
-    // parameter for it (`return a0;`, `a0 + a1`, `a0[2] = a1`). It refuses at every source and every
-    // destination (`write`).
+    // r3,K`, `add r3,r3,K`, `stw K,8(r3)`) or a bare number — and reading it as a register would
+    // invent a parameter for it. It refuses at every source and every destination (`write`).
     const refuseNonRegister = (r: string, how: 'read' | 'written') => {
       if (!PPC_REG_NAME.test(r)) {
         throw new PpcUnsupportedError(
