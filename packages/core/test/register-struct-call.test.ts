@@ -65,9 +65,9 @@ describe('agbcc: a struct of one member comes back in r0', () => {
       { name: 'w', type: 'u32' },
       { name: 'h', type: 'u16' },
     ]);
-    // r0 whole (the strh truncates the word the union's four bytes fill)
+    // the strh keeps the low halfword of r0, which is `h` (raise/aggmembers.ts names it by width)
     expect(decompile('c_un', agbcc('c_un', 'strh'), ARMV4T_AGBCC, { prototypes: { mk: wh } }).source).toMatch(
-      /union T mk_ret;\s+mk_ret = mk\(a0\);\s+gV = \*\(s32 \*\)&mk_ret;/,
+      /union T mk_ret;\s+mk_ret = mk\(a0\);\s+gV = mk_ret\.h;/,
     );
     const [c] = enumerateCandidates('c_un', agbcc('c_un', 'strh'), ARMV4T_AGBCC, { prototypes: { mk: wh } });
     expect(renderDeclarations(c.symbolRefs ?? [])).toContain('union T { u32 w; u16 h; };');

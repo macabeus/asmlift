@@ -37,7 +37,10 @@ function frameStructOf(defs: ReadonlyMap<Value, Op>, base: Value): StructType | 
 
 /** The declared integer member at exactly `[byte, byte + width)`: its signedness, or undefined. */
 function memberAt(st: StructType, byte: number, width: number): boolean | undefined {
-  const f = st.fields.find((m) => m.off === byte);
+  // a union of integers sets every member at byte 0 (aggregate.ts `integerUnionType`): the one of
+  // this width
+  const at = st.fields.filter((m) => m.off === byte);
+  const f = at.find((m) => m.type.kind === 'int' && m.type.width === width * 8) ?? at[0];
   return f !== undefined && f.type.kind === 'int' && f.type.width === width * 8 ? f.type.signed : undefined;
 }
 
