@@ -1281,6 +1281,17 @@ export interface LoadBehaviors {
   //
   // ABSENT ⇒ false: a store does not keep the read, and the pin stamps it.
   keepsInvariantReadsBesideStores?: boolean;
+  // DOES A STORE KEEP A READ IN ITS LOOP ONLY WHERE THEIR TYPES MAY ALIAS? Strict aliasing: agbcc
+  // at `-O2` and `-Os` (toplev.c:3616, `optimize >= 2`; `-Os` forces 2) takes two accesses in
+  // disjoint alias sets for apart whatever their addresses (alias.c `true_dependence`,
+  // `DIFFERENT_ALIAS_SETS_P`), so a store through a stepped pointer keeps a read at a fixed address
+  // only where one of the two is a byte (`while (*(u16 *)0x4000006 != 160) *p++ = 0;` with `s32 *p`
+  // loads the register once, ahead of the loop). Read by the poll-read pin (frontend/poll-reads.ts
+  // `keptBesideMoving`).
+  // ABSENT ⇒ a store at an address the loop moves keeps every read beside it: agbcc at `-O1`, KMC
+  // gcc 2.7.2 (which has no alias sets), and IDO 7.1, measured at `-O2` with a `u16`, a `u8` and an
+  // `s32` read beside an `s32` and a `u16` stepped store.
+  strictAliasing?: boolean;
   // HOW THIS COMPILER MOVES a plain store at a loop-invariant address out of a poll loop (a loop
   // whose test reads memory at a fixed address, pinned `volatile`), which the effect contract
   // refuses to print plain (contracts.ts `sunkPollStore`). COMPILED at the canonical flags:
@@ -1658,6 +1669,8 @@ export const ARMV4T_AGBCC: TargetDescription = {
   compilerBehaviors: {
     // a plain in-loop store no access provably keeps is written once after the loop (the field)
     pollStoreMotion: 'sinks',
+    // under `-O2`'s alias sets; cleared below it (`strictAliasingAt`)
+    strictAliasing: true,
     coalesceLoopInit: false,
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,
@@ -2422,6 +2435,18 @@ export function keepsLoopInvariantReadsAt(family: FlagFamily, level: string | un
   return n === undefined || Number(n) < (family === 'mwcc' ? 3 : family === 'ido' ? 2 : 1);
 }
 
+/** Does agbcc at optimisation level `level` (the profile's `O` slot) keep alias sets
+ *  (`compilerBehaviors.strictAliasing`)? From `-O2`, and at `-Os`, which forces `optimize` to 2
+ *  (toplev.c:3576-3577, :3616); not at `-O0` or `-O1`. `flag` is the `-fstrict-aliasing` slot, which
+ *  `-fno-strict-aliasing` sets `off` and overrides the level.
+ *  No level names `-O0`. */
+export function strictAliasingAt(level: string | undefined, flag: string | undefined): boolean {
+  if (flag === 'on' || flag === 'off') {
+    return flag === 'on';
+  }
+  return level !== undefined && (level === 's' || Number(/^\d+/.exec(level)?.[0] ?? 0) >= 2);
+}
+
 /** The level `keepsUnusedReadsAt` judges a profile at: its `O` slot, or none where a word the table
  *  does not read may set it too — mwcc's `-opt off` and `-opt level=0` compile at `-O0`, and the
  *  table reads neither, so a profile that spells one has a level nothing here knows. */
@@ -2442,6 +2467,13 @@ export function targetFor(toolchain: ToolchainId, cflags: readonly string[]): Re
   }
   if (keepsLoopInvariantReadsAt(t.family, unusedReadLevel(profile))) {
     target = { ...target, compilerBehaviors: { ...target.compilerBehaviors, keepsLoopInvariantReads: true } };
+  }
+  if (
+    target.compilerBehaviors.strictAliasing === true &&
+    !strictAliasingAt(profile.slots.O, profile.slots['-fstrict-aliasing'])
+  ) {
+    const { strictAliasing: _set, ...behaviors } = target.compilerBehaviors;
+    target = { ...target, compilerBehaviors: behaviors };
   }
   if (profile.slots['-fshort-enums'] === 'on') {
     // every enum is the smallest integer its values fit (c-decl.c:6064-6065, :6123; compiled,

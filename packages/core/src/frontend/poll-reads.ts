@@ -27,10 +27,12 @@
  *     (871-887) do not look at exit targets;
  *   • where the loop stores, only a read a branch that leaves the loop or goes round it again
  *     decides on (`testedReads`): a poll's. Where an access's address moves, not a read the
- *     compiler provably keeps beside it (`keptBesideMoving`): a store through a stepped pointer keeps
+ *     compiler provably keeps beside it (`keptBesideMoving`): under alias sets (target.ts
+ *     `strictAliasing`, agbcc at `-O2`), a store through a stepped pointer keeps
  *     a read at a fixed address only where one of the two is a byte, so a copy loop's `u8` bound
  *     beside an `s32` copy stays plain (kl2dct's `AgbMain`), and `while (*(u16 *)0x4000006 != 160)
- *     *p++ = 0;` with `s32 *p`, which agbcc loads once ahead of the loop, is pinned. Where every
+ *     *p++ = 0;` with `s32 *p`, which agbcc loads once ahead of the loop, is pinned; without alias
+ *     sets (IDO, KMC, agbcc at `-O1`) such a store keeps every read beside it, and none is pinned. Where every
  *     access is at a fixed address, whether a store keeps a plain read in the loop is the
  *     compiler's alias analysis, decided on register history the lift cannot see — agbcc keeps
  *     `while (((volatile s32 *)0x40000d4)[2] & M) ((s32 *)0x40000d4)[5] = a0;`'s read but moves
@@ -161,7 +163,14 @@ export function pinPollReads(irBlocks: readonly Block[], target: TargetDescripti
     const moves = (op: Op): boolean =>
       MEM_BASE_OPS.has(op.opcode) &&
       !op.operands.slice(0, op.opcode === 'aload' || op.opcode === 'astore' ? 2 : 1).every((o) => invariant(o));
-    const kept = stores && ops.some(moves) ? keptBesideMoving(ops, moves, defOf, incoming) : undefined;
+    // Where an access's address moves, the reads a store keeps beside it stay as they were: under
+    // alias sets, only those `keptBesideMoving` proves; without them, every one.
+    const kept =
+      stores && ops.some(moves)
+        ? target.compilerBehaviors.strictAliasing === true
+          ? keptBesideMoving(ops, moves, defOf, incoming)
+          : () => true
+        : undefined;
     const tested = stores ? testedReads(loop, defOf) : undefined;
     const fromFrame = (v: Value, depth = 0): boolean => {
       const d = defOf.get(v);
@@ -276,12 +285,13 @@ function addressRoots(
   return out;
 }
 
-/** In a loop that stores, where an access's address moves: the header reads the compiler provably
- *  keeps in the loop, which stay as they were. A read at an invariant address is loop-invariant to
- *  agbcc only when no store in the loop may alias it (loop.c `invariant_p` over `loop_store_mems`,
- *  alias.c `true_dependence`), so a store whose address moves keeps it where their alias sets
- *  conflict — and under `-O2`'s strict aliasing (toplev.c:3616) they conflict, whatever the store's
- *  address, only where one of the two is a byte (c-common.c:1969-1974, the character types' set 0):
+/** In a loop that stores, where an access's address moves, on a compiler with alias sets (target.ts
+ *  `strictAliasing`): the header reads the compiler provably keeps in the loop, which stay as they
+ *  were. A read at an invariant address is loop-invariant to agbcc only when no store in the loop
+ *  may alias it (loop.c `invariant_p` over `loop_store_mems`, alias.c `true_dependence`), so a store
+ *  whose address moves keeps it where their alias sets conflict — and under `-O2`'s strict aliasing
+ *  (toplev.c:3616) they conflict, whatever the store's address, only where one of the two is a byte
+ *  (c-common.c:1969-1974, the character types' set 0):
  *  `while (*(u8 *)0x4000006 != 160) *p++ = 0;` keeps its read, `while (*(u16 *)0x4000006 != 160)
  *  *p++ = 0;` with `s32 *p` loads it once ahead of the loop, and so does a 2-byte store beside a
  *  4-byte read. Two accesses of one width are no proof: `int`, `long`, a pointer and an enum are

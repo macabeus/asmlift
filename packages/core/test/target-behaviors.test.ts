@@ -13,6 +13,7 @@ import type { CompilerBehaviors, TargetDescription } from '../src/target';
 const BEHAVIORS: Record<string, CompilerBehaviors> = {
   ARMV4T_AGBCC: {
     pollStoreMotion: 'sinks',
+    strictAliasing: true,
     // ControlFlowBehaviors
     coalesceLoopInit: false,
     preserveDivergentBranchSense: true,

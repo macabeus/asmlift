@@ -72,7 +72,6 @@ describe('targetFor', () => {
   // ido7.1 declares coalesceLoopInit TRUE and switchAllowsNeqCase FALSE, and the structurer's
   // absent value is the opposite of both.
   test.each([
-    ['agbcc', ['-O1', '-mthumb-interwork']],
     ['agbcc', ['-mthumb-interwork', '-O2', '-fhex-asm', '-g', '-ansi']],
     ['ido7.1', ['-mips2', '-O2', '-g3', '-32', '-non_shared', '-G', '0']],
     [
@@ -103,7 +102,9 @@ describe('targetFor', () => {
     expect(keepsUnusedReads).toBe(true);
     // every level that keeps an unused read also leaves a loop-invariant read in its loop
     expect(keepsLoopInvariantReads).toBe(true);
-    expect(rest).toEqual(DESCRIPTIONS[id].compilerBehaviors);
+    // …and none keeps alias sets, which gcc's `-O2` turns on (`strictAliasingAt`)
+    const { strictAliasing: _declared, ...declared } = DESCRIPTIONS[id].compilerBehaviors;
+    expect(rest).toEqual(declared);
   });
 
   // …and one more the LEVEL changes: a level whose loop pass does not move a loop-invariant read
@@ -118,6 +119,22 @@ describe('targetFor', () => {
     ['agbcc', ['-Os', '-mthumb-interwork'], true],
   ] as const)('%s at %j keeps a loop-invariant read: %s', (id, flags, keeps) => {
     expect(targetFor(id, flags).target.compilerBehaviors.keepsLoopInvariantReads === true).toBe(keeps);
+  });
+
+  // …and one more: agbcc keeps alias sets from `-O2` and at `-Os` (target.ts `strictAliasingAt`).
+  test.each([
+    [['-O0', '-mthumb-interwork'], false],
+    [['-O1', '-mthumb-interwork'], false],
+    [['-O2', '-mthumb-interwork'], true],
+    [['-Os', '-mthumb-interwork'], true],
+    [['-O2', '-fno-strict-aliasing', '-mthumb-interwork'], false],
+    [['-O1', '-fstrict-aliasing', '-mthumb-interwork'], true],
+  ] as const)('agbcc at %j keeps alias sets: %s', (flags, strict) => {
+    const behaviors = targetFor('agbcc', flags).target.compilerBehaviors;
+    expect(behaviors.strictAliasing === true).toBe(strict);
+    const { strictAliasing: _a, keepsLoopInvariantReads: _k, keepsUnusedReads: _u, ...rest } = behaviors;
+    const { strictAliasing: _d, ...declared } = DESCRIPTIONS.agbcc.compilerBehaviors;
+    expect(rest).toEqual(declared);
   });
 
   // …save one the flags change: under `-fshort-enums` an enum is the smallest integer its values fit,

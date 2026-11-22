@@ -409,6 +409,8 @@ describe('a poll read the compiler would move out of its loop is pinned volatile
   test('agbcc: a read beside a store through a stepped pointer is pinned unless a byte keeps it', () => {
     expect(decompile('st1', ST1, AGBCC, { prototypes }).source).toContain('while (*(volatile u16 *)67108870 != 160) {');
     expect(decompile('se', SE, AGBCC, { prototypes }).source).toContain('while (*(u8 *)67108870 != 160) {');
+    const o1 = targetFor('agbcc', ['-mthumb-interwork', '-O1']).target;
+    expect(decompile('st1', ST1, o1, { prototypes }).source).toContain('while (*(u16 *)67108870 != 160) {');
   });
 
   test('agbcc: a header read of a loop left for two places is pinned', () => {
