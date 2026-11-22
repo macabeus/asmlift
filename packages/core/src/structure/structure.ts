@@ -3461,6 +3461,17 @@ function structureRanked(
     }
     const t = ctype(lval);
     const own = root.k !== 'var' || varType.has(root.name);
+    // …or a bare global NOTHING declares — no context, map or static names it — which the lift's
+    // own declaration types as the integer of its access's width (rank-declare.ts): `gF =
+    // *(s32 *)&s;` against that `extern s32 gF;` copies the bits, as `str r0` does
+    const undeclared =
+      lval.k === 'var' &&
+      !varType.has(lval.name) &&
+      symbols?.has(lval.name) !== true &&
+      contextGlobals?.declared.has(lval.name) !== true;
+    if (undeclared) {
+      return;
+    }
     if (!own || (lval.k !== 'index' && lval.k !== 'field') || t?.kind !== 'int' || t.width !== m.width * 8) {
       refuseFloatBits(m);
     }
