@@ -44,10 +44,13 @@
 //     one local instead — a neighbour handed to a callee nothing bounds, or a compiler whose
 //     placement of such arrays is not known (target.ts `addressTakenArrayOrder`) — the image
 //     fails the size check and is kept as the static its copy reads, into its part of that local;
-//   • the image writes one element width (a struct's mixed widths, or padding alone, has no
-//     element type this pass could declare). An element it relocates holds an address, spelled as
-//     the address constant it is (`u32 a[16] = { (u32)&h1, … }`, which agbcc copies from the same
-//     `.word h1` image as the pointer array the source declared, compiled).
+//   • the image writes one element width — a struct's mixed widths, or padding alone, has no
+//     element type this pass could declare. A struct's is still kept as the static its copy
+//     reads, of its bytes (`SImage.bytesOnly`): the copy reads nothing else, and agbcc compiles
+//     `static const u8` of those bytes to the same .text and .rodata. An element it relocates
+//     holds an address, spelled as the address constant it is (`u32 a[16] = { (u32)&h1, … }`,
+//     which agbcc copies from the same `.word h1` image as the pointer array the source declared,
+//     compiled).
 // The local keeps its own element type where the body reaches it by an offset or a cast — those
 // were spelled against it, so its width must be the image's — and takes the image's where only
 // its whole address and element accesses, which each print their own width, reach it.
@@ -196,9 +199,6 @@ function copySites(body: readonly Stmt[], image: SImage): CopySite[] {
 
 /** Why `image` cannot fold, as the tail of a sentence naming it, or the fold of each copy of it. */
 function planFolds(sfn: SFn, image: SImage, sites: readonly CopySite[]): Fold[] | string {
-  if (image.type.kind !== 'array' || image.type.elem.kind !== 'int') {
-    return 'whose image writes no one element width — a struct, or padding alone';
-  }
   const copies = sites.flatMap((c) => (c.at === null ? [] : [c.at]));
   if (copies.length === 0) {
     return (
@@ -208,6 +208,9 @@ function planFolds(sfn: SFn, image: SImage, sites: readonly CopySite[]): Fold[] 
   }
   if (mentions(sfn.body, image.name) !== copies.length) {
     return 'which the body reads other than as the source of a block copy at the top level';
+  }
+  if (image.bytesOnly === true) {
+    return 'whose image writes no one element width — a struct, or padding alone';
   }
   const folds: Fold[] = [];
   for (const at of copies) {
@@ -369,9 +372,7 @@ function planImage(sfn: SFn, image: SImage): ImagePlan {
   if (typeof plan !== 'string') {
     return { kind: 'fold', folds: plan };
   }
-  return image.type.kind === 'array' && image.type.elem.kind === 'int' && onlyCopied(sfn, image, sites)
-    ? { kind: 'static' }
-    : { kind: 'refused', why: plan };
+  return onlyCopied(sfn, image, sites) ? { kind: 'static' } : { kind: 'refused', why: plan };
 }
 
 /** Whether every mention of `image` is the whole source of a block copy, anywhere in the body, whose

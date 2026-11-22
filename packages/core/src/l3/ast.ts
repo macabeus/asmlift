@@ -641,6 +641,9 @@ export interface SImage {
   init: (number | InitAddress | null)[];
   /** the image was written as a string literal (`.ascii`) */
   string?: true;
+  /** its directives write several widths (a struct's), so `type` is its bytes alone: no local's
+   *  initializer, only the byte static its copies read (l3/constinit.ts) */
+  bytesOnly?: true;
 }
 
 /** A struct declaration surfaced to the backend (name + field list). Mirrors the IR struct

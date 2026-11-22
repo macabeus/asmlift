@@ -13653,6 +13653,21 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { imgnbrhi: { returnsVoid: true }, h: { params: 1, returnsVoid: true } },
   },
   {
+    sym: 'imgstruct',
+    // imgnbr's escaping neighbour under a struct array's image: `u32, u16, u8` and a pad byte per
+    // element, so the image writes three widths and a `.space` and has no element type a local's
+    // initializer could take. The copy reads only its bytes, so it stays a `memcpy` from a
+    // `static const u8` of them (l3/constinit.ts `SImage.bytesOnly`), which agbcc compiles to the
+    // same .text and .rodata. Sixty-four bytes so the copy is a memcpy, not `ldmia`/`stmia`.
+    src:
+      'struct E { u32 a; u16 b; u8 c; };\nextern u32 gOut;\nvoid h(u32 *);\n' +
+      'void imgstruct(u32 i){ struct E s[8] = {{1,2,3},{4,5,6},{7,8,9},{10,11,12},{13,14,15},{16,17,18},{19,20,21},{22,23,24}}; u32 x; h(&x); gOut = s[3].b + s[5].c + x; }',
+    features: ['array'],
+    toolchains: ['agbcc'],
+    ctx: 'struct E { u32 a; u16 b; u8 c; };\nextern u32 gOut;\nvoid h(u32 *);\nvoid imgstruct(u32 i);',
+    proto: { imgstruct: { returnsVoid: true }, h: { params: 1, returnsVoid: true } },
+  },
+  {
     sym: 'cpypair',
     // imgpair's split without images: two arrays two copies fill. Sixty-four bytes for `stkidx`'s
     // reason: the tables are fitted from the asm as words, and gcc open-codes a copy from an

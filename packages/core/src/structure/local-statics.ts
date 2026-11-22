@@ -297,6 +297,29 @@ export function localStaticShapes(
       // since nothing but the copy reads it, and never declared where it sits — l3/constinit.ts
       // folds it into the local the copy fills, which is the declaration that placed it.
       const unit = obj.directives?.unit;
+      if (
+        unit === undefined &&
+        obj.directives !== undefined &&
+        obj.bytes !== undefined &&
+        (obj.relocs?.length ?? 0) === 0
+      ) {
+        // A struct's image writes several widths, so no element type is the source's — but a copy
+        // reads only its bytes, so l3/constinit.ts may still keep it as the byte static that copy
+        // reads (`bytesOnly`), never fold it. Its padding is the zero C supplies. An address is
+        // refused below: no byte holds one. So is an image of no value at all, which a static
+        // without an initializer would not place in .rodata.
+        const init: (number | null)[] = elements(obj, 1, false);
+        for (const [from, n] of obj.directives.gaps ?? []) {
+          init.fill(null, from, from + n);
+        }
+        while (init.length > 0 && init[init.length - 1] === null) {
+          init.pop();
+        }
+        if (init.length > 0) {
+          images.push({ name: obj.symbol, type: T.array(T.int(8, false), obj.size), init, bytesOnly: true });
+          continue;
+        }
+      }
       if (unit === undefined || obj.bytes === undefined) {
         return say('whose image writes no one element width — a struct, or padding alone');
       }

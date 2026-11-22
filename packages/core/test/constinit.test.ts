@@ -347,7 +347,7 @@ test('the static takes a name nothing in the function names, and the image’s o
   expect(out).toContain('    memcpy(sp0, (s8 *)LC0_1, 2);\n    g(LC0);\n');
 });
 
-test('an image that folds still folds where another copy of it would not', () => {
+test('one copy that cannot fold keeps every copy of the image as the static, and alone it folds', () => {
   // one image, two copies: one folds alone, but together the image is kept as the static
   const locals = [...bytes4, { name: 'sp4', type: T.array(T.u(8), 8) }];
   const sfn = fn([copy('sp0', '.LC0', 4), copy('sp4', '.LC0', 4), use(v('sp0')), use(v('sp4'))], locals);
@@ -356,13 +356,31 @@ test('an image that folds still folds where another copy of it would not', () =>
   expect(cBackend.emit(fn([copy('sp0', '.LC0', 4), use(v('sp0'))], bytes4))).not.toContain('static');
 });
 
-test('an image of mixed widths has no element type to declare', () => {
-  const asm =
-    '\t.section .rodata\n\t.align\t2, 0\n.LC0:\n\t.short\t0x1\n\t.byte\t0x2\n\t.byte\t0x3\n.text\n' +
-    '\t.align\t2, 0\n\t.globl\tf\n\t.thumb_func\nf:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr1, .L2\n' +
-    '\tmov\tr0, sp\n\tmov\tr2, #0x4\n\tbl\tmemcpy\n\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n' +
-    '\t.align\t2, 0\n.L2:\n\t.word\t.LC0\n';
-  expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(
+/** agbcc's `f`: `.LC0`'s `image` directives, copied by `memcpy` into the four bytes at `sp` */
+const mixedAsm = (image: string): string =>
+  `\t.section .rodata\n\t.align\t2, 0\n.LC0:\n${image}.text\n` +
+  '\t.align\t2, 0\n\t.globl\tf\n\t.thumb_func\nf:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr1, .L2\n' +
+  '\tmov\tr0, sp\n\tmov\tr2, #0x4\n\tbl\tmemcpy\n\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n' +
+  '\t.align\t2, 0\n.L2:\n\t.word\t.LC0\n';
+
+test('an image of mixed widths is kept as the static of its bytes its copy reads, never folded', () => {
+  // a struct's image has no element type, so no local's initializer — but the copy reads bytes
+  expect(decompile('f', mixedAsm('\t.short\t0x1\n\t.byte\t0x2\n\t.byte\t0x3\n'), ARMV4T_AGBCC).source).toContain(
+    '    static const u8 LC0[4] = { 1, 0, 2, 3 };\n    u8 sp0[4];\n    memcpy(sp0, (u8 *)LC0, 4);\n',
+  );
+  // …and one the copy would fill whole still does not fold: the fold is the element type's
+  const bytesOnly = image([1, 0, 2, 3], 1, false, { bytesOnly: true });
+  expect(cBackend.emit(fn([copy('sp0', '.LC0', 4), use(v('sp0'))], bytes4, bytesOnly))).toContain(
+    '    static const u8 LC0[4] = { 1, 0, 2, 3 };\n',
+  );
+  // a mention other than a copy's source is no static either
+  expect(constantImageRefusal(fn([copy('sp0', '.LC0', 4), use(v('.LC0'))], bytes4, bytesOnly))?.refused).toBe(
+    'which the body reads other than as the source of a block copy at the top level',
+  );
+});
+
+test('an image of mixed widths holding an address has nothing a byte static spells', () => {
+  expect(() => decompile('f', mixedAsm('\t.short\t0x1\n\t.space\t2\n\t.word\tgX\n'), ARMV4T_AGBCC)).toThrow(
     "reads the compiler's anonymous constant ('.LC0') whose image writes no one element width",
   );
 });
