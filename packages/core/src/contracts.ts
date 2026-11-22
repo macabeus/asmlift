@@ -407,22 +407,19 @@ function plainWriteIn(stmts: readonly Stmt[], ctx: TreeContext): Write | undefin
  *  the loop, or never on a run that does not go round, and its read counts are unchanged.
  *
  *  Judged over the tree as the recompile would read it, and REFUSED UNLESS THE TREE PROVES THE
- *  WRITE KEPT: whether an access that may alias the cell keeps it in the loop is the compiler's
- *  decision, made on its RTL's register history, not on the spelling, so the only keeps credited
- *  are the ones its rule makes whatever that history is — a call in the loop; control flow of the
- *  loop's own (a branching statement, or `&&`/`||`), under which no cell that may trap moves; a
- *  read whose bytes provably overlap the write's where one of the two is a byte; the write itself
- *  qualified ({@link plainWrite}). Every other plain write at a fixed address is the one returned.
- *  An address is fixed in the loop when it reads no memory, makes no call and names no local the
- *  loop assigns; a write whose width the tree does not say (a member, or a global assigned by its
- *  name) has no bytes to overlap, so only the other keeps can clear it. Only a loop that renders a
- *  pinned device read is judged: a poll, the family the device pin exists for, whether its
- *  condition reads the register or its own body reads it into a local the condition tests (a
- *  rotated `v0 = REG; while (v0 & M) { …; v0 = REG; }`). A loop whose body only holds a device
- *  read, or a nested poll, is no poll: its writes are not judged here. A plain write at a fixed
- *  address in any other loop is the same hazard where its source was `volatile`, and is not judged
- *  here. */
+ *  WRITE KEPT ({@link movedWrite}). Only a loop that renders a pinned device read is judged: a
+ *  poll, the family the device pin exists for, whether its condition reads the register or its own
+ *  body reads it into a local the condition tests (a rotated `v0 = REG; while (v0 & M) { …; v0 =
+ *  REG; }`). On IDO, whose hoist moves the write whatever the polled read's qualifier, a condition
+ *  that reads a global is a poll too: `while (gF == 0) ((s32 *)B)[5] = a0;` writes once ahead of the
+ *  loop compiled against `extern volatile s32 gF;`, the declaration the lift's bare `gF` is printed
+ *  for. A loop whose body only holds a device read, or a nested poll, is no poll: its writes are
+ *  not judged here. A plain write at a fixed address in any other loop is the same hazard where its
+ *  source was `volatile`, and is not judged here. */
 function sunkPollStore(s: Loop, ctx: TreeContext): Write | undefined {
+  if (ctx.motion === undefined) {
+    return undefined;
+  }
   const stmts = loopStmts(s);
   const polled: EffectCounts = new Map();
   effectsInExpr(s.cond, polled, ctx);
@@ -434,46 +431,89 @@ function sunkPollStore(s: Loop, ctx: TreeContext): Write | undefined {
       e.k === 'var' && ctx.locals.has(e.name) ? [e.name] : [],
     ),
   );
-  const own = (list: readonly Stmt[]): Stmt[] =>
-    list.flatMap((st) =>
-      st.k === 'while' || st.k === 'dowhile' || st.k === 'for' ? [] : [st, ...own(stmtChildren(st))],
-    );
-  for (const st of own(stmts)) {
+  for (const st of ownStmts(stmts)) {
     if (st.k === 'assign' && tested.has(st.name)) {
       effectsInExpr(st.value, polled, ctx);
     }
   }
-  if (deviceReads(polled).size === 0 || ctx.motion === undefined) {
-    return undefined;
+  const global = (k: string) => k.startsWith(DECLARED) && !ctx.locals.has(k.slice(DECLARED.length));
+  const polls = deviceReads(polled).size > 0 || (ctx.motion === 'hoists' && [...polled.keys()].some(global));
+  return polls ? movedWrite(s, ctx.motion, ctx) : undefined;
+}
+
+/** The statements of `stmts` and those nested in them, short of a nested loop's. */
+function ownStmts(stmts: readonly Stmt[]): Stmt[] {
+  return stmts.flatMap((st) =>
+    st.k === 'while' || st.k === 'dowhile' || st.k === 'for' ? [] : [st, ...ownStmts(stmtChildren(st))],
+  );
+}
+
+/** The loops nested in `stmts` that no other loop in them holds. */
+function ownLoops(stmts: readonly Stmt[]): Loop[] {
+  return stmts.flatMap((st) =>
+    st.k === 'while' || st.k === 'dowhile' || st.k === 'for' ? [st] : ownLoops(stmtChildren(st)),
+  );
+}
+
+/** The plain write the loop pass moves out of `s` or out of a loop nested in it, or undefined.
+ *  Each loop is the pass's own unit: `load_mems` and IDO's hoist run on an inner loop as on the
+ *  one around it, so a write in a nested loop is judged by that loop's keeps, not the outer one's.
+ *  `do { v = DMA[2]; for (i = 0; i < n; i++) ((s32 *)0x40000e0)[1] = a0; } while (v & M);` keeps
+ *  nothing of the outer loop's in a register, its `for` being a branch of it, but the `for` itself
+ *  branches nowhere, and agbcc writes the cell once after it.
+ *
+ *  KEPT, by either compiler, whatever the loop's addresses: a call (loop.c:2444-2449; IDO, measured)
+ *  and control flow of the loop's own — a statement that branches (an `if`, a `switch`, a nested
+ *  loop, a `break`, `continue`, `goto` or `return`) or a condition that does (`&&`, `||`). On
+ *  agbcc, a loop left by a `return` or a `goto` has more than one exit target, and `load_mems`
+ *  moves none of its cells (loop.c:2512-2525); any other branch sets `maybe_never` for the whole
+ *  loop (loop.c:8889-8925, a label or a conditional jump with more of the loop after it), and then
+ *  no cell that may trap is moved (8978-8981), which on Thumb is every cell but the frame's: its
+ *  address is a register (rtlanal.c `may_trap_p`). On IDO, measured: the store under an `if` stays.
+ *  Past them, the compiler's own half: {@link sunkStore}, {@link hoistedStore}. */
+function movedWrite(s: Loop, motion: 'sinks' | 'hoists', ctx: TreeContext): Write | undefined {
+  const stmts = loopStmts(s);
+  for (const inner of ownLoops(stmts)) {
+    const w = movedWrite(inner, motion, ctx);
+    if (w !== undefined) {
+      return w;
+    }
   }
   const exprs = [...walkExprs([{ k: 'exprstmt', value: s.cond }, ...stmts])];
-  if (ctx.motion === 'hoists') {
-    return hoistedPollStore(stmts, exprs, ctx);
-  }
-  // KEPT: a call. The loop pass moves no cell of a loop that makes one (loop.c:2444-2449).
-  if (exprs.some((e) => e.k === 'call')) {
-    return undefined;
-  }
-  // KEPT: control flow of the loop's own — a statement that branches (an `if`, a `switch`, a nested
-  // loop, a `break`, `continue`, `goto` or `return`) or a condition that does (`&&`, `||`). A loop
-  // left by a `return` or a `goto` has more than one exit target, and `load_mems` moves none of its
-  // cells (loop.c:2512-2525); any other branch sets `maybe_never` for the whole loop (loop.c:8889-8925, a
-  // label or a conditional jump with more of the loop after it), and then no cell that may trap is
-  // moved (8978-8981), which on Thumb is every cell but the frame's: its address is a register
-  // (rtlanal.c `may_trap_p`).
   const straight = (st: Stmt): boolean => st.k === 'assign' || st.k === 'store' || st.k === 'exprstmt';
-  if (!everyStmt(stmts).every(straight) || exprs.some((e) => e.k === 'bin' && (e.op === '&&' || e.op === '||'))) {
+  if (
+    !everyStmt(stmts).every(straight) ||
+    exprs.some((e) => e.k === 'call' || (e.k === 'bin' && (e.op === '&&' || e.op === '||')))
+  ) {
     return undefined;
   }
-  const assigned = new Set(assignsIn(stmts).map((a) => a.name));
-  const accesses = exprs.filter((e): e is Access => e.k === 'index' || e.k === 'field');
-  const fixed = (e: Expr): boolean =>
+  const assigned = new Set(assignsIn([...stmts]).map((a) => a.name));
+  // An expression the loop does not change: it reads no memory, makes no call and names no local
+  // the loop assigns — nor, for IDO's hoist of a value, a global, whose read the loop makes.
+  const fixed = (e: Expr, globalsMove = false): boolean =>
     e.k !== 'call' &&
     e.k !== 'index' &&
     e.k !== 'field' &&
     e.k !== 'postincr' &&
-    !(e.k === 'var' && assigned.has(e.name)) &&
-    exprChildren(e).every(fixed);
+    !(e.k === 'var' && (assigned.has(e.name) || (globalsMove && !ctx.locals.has(e.name)))) &&
+    exprChildren(e).every((c) => fixed(c, globalsMove));
+  return motion === 'hoists' ? hoistedStore(stmts, fixed, ctx) : sunkStore(stmts, exprs, fixed, ctx);
+}
+
+/** agbcc's half of {@link movedWrite}, in a straight loop: past the call and the control flow,
+ *  the keeps its rule makes whatever the RTL's register history is — a read whose bytes provably
+ *  overlap the write's where one of the two is a byte; the write itself qualified
+ *  ({@link plainWrite}). Every other plain write at a fixed address is the one returned. An address
+ *  is fixed in the loop when it reads no memory, makes no call and names no local the loop assigns;
+ *  a write whose width the tree does not say (a member, or a global assigned by its name) has no
+ *  bytes to overlap, so only the other keeps can clear it. */
+function sunkStore(
+  stmts: readonly Stmt[],
+  exprs: readonly Expr[],
+  fixed: (e: Expr) => boolean,
+  ctx: TreeContext,
+): Write | undefined {
+  const accesses = exprs.filter((e): e is Access => e.k === 'index' || e.k === 'field');
   // The bytes an element at a constant subscript covers: from a constant address — a literal, or a
   // local the function sets once to one — or from a base spelled alike, which the recompile reads as
   // one address register (`base` then the base).
@@ -528,39 +568,33 @@ function sunkPollStore(s: Loop, ctx: TreeContext): Write | undefined {
       return true; // a global's own cell, its width unsaid
     }
     const lval = st.lval;
-    return (lval.k === 'index' || lval.k === 'field') && exprChildren(lval).every(fixed) && !overlapped(lval);
+    return (lval.k === 'index' || lval.k === 'field') && exprChildren(lval).every((c) => fixed(c)) && !overlapped(lval);
   });
 }
 
-/** IDO 7.1's half of {@link sunkPollStore}: the plain write a poll loop makes each time round that
- *  the compiler writes once AHEAD of the loop, or undefined. COMPILED at `-O2`: a lone store of a
- *  value the loop does not change, at an address it does not change, in a loop that makes no call
- *  and branches nowhere of its own, is hoisted to the preheader — `while (*(vu32 *)A & 3) ((s32
- *  *)B)[5] = a0;`, the same with a global `gW = a0;`, and a do-while — so the recompile writes it
- *  once, before the first test. Each of these keeps it in the loop, measured: a value the loop
- *  computes (`x += …; B[5] = x;`), the store under an `if`, a second store beside it, and a call. */
-function hoistedPollStore(stmts: readonly Stmt[], exprs: readonly Expr[], ctx: TreeContext): Write | undefined {
-  const all = everyStmt(stmts);
-  const straight = all.every((st) => st.k === 'assign' || st.k === 'store' || st.k === 'exprstmt');
-  if (!straight || exprs.some((e) => e.k === 'call' || (e.k === 'bin' && (e.op === '&&' || e.op === '||')))) {
-    return undefined;
-  }
-  const writes = all.filter((st) => st.k === 'store' || (st.k === 'assign' && !ctx.locals.has(st.name)));
+/** IDO 7.1's half of {@link movedWrite}, in a straight loop: the plain write it makes each time
+ *  round that the compiler writes once AHEAD of the loop, or undefined. COMPILED at `-O2`: a lone
+ *  store of a value the loop does not change, at an address it does not change, is hoisted to the
+ *  preheader — `while (*(vu32 *)A & 3) ((s32 *)B)[5] = a0;`, the same with a global `gW = a0;`, a
+ *  do-while, and the store of a `for` nested in a poll — so the recompile writes it once, before
+ *  the first test. Each of these keeps it in the loop, measured: a value the loop computes (`x +=
+ *  …; B[5] = x;`) or reads (`B[5] = gV;`), a second store beside it, and the call and the `if`
+ *  {@link movedWrite} keeps. */
+function hoistedStore(
+  stmts: readonly Stmt[],
+  fixed: (e: Expr, globalsMove?: boolean) => boolean,
+  ctx: TreeContext,
+): Write | undefined {
+  const writes = everyStmt(stmts).filter((st) => st.k === 'store' || (st.k === 'assign' && !ctx.locals.has(st.name)));
   const w = writes.length === 1 ? writes[0] : undefined;
   if (w === undefined || !plainWrite(w, ctx)) {
     return undefined;
   }
-  const assigned = new Set(assignsIn([...stmts]).map((a) => a.name));
-  const fixed = (e: Expr): boolean =>
-    e.k !== 'call' &&
-    e.k !== 'index' &&
-    e.k !== 'field' &&
-    e.k !== 'postincr' &&
-    !(e.k === 'var' && (assigned.has(e.name) || !ctx.locals.has(e.name))) &&
-    exprChildren(e).every(fixed);
   const at =
-    w.k === 'store' ? (w.lval.k === 'index' || w.lval.k === 'field') && exprChildren(w.lval).every(fixed) : true;
-  return at && fixed(w.value) ? w : undefined;
+    w.k === 'store'
+      ? (w.lval.k === 'index' || w.lval.k === 'field') && exprChildren(w.lval).every((c) => fixed(c, true))
+      : true;
+  return at && fixed(w.value, true) ? w : undefined;
 }
 
 /** The reads the guard-fused loops in a tree stand for past their conditions' own renders, by key,

@@ -8,19 +8,26 @@
 //     void hr(s32 a0) { while (((volatile s32 *)0x40000d4)[2] & 0x80000000) ((s32 *)0x40000d4)[5] = a0; g(); }
 //     void p04(s32 a0) { while (((volatile s32 *)0x40000d4)[2] & 0x80000000) { if (a0 & 1) ((s32 *)0x40000d4)[5] = a0; } g(); }
 //     s32 t07(void) { while (*(vu16 *)0x4000006 != 160) { if (*(vu16 *)0x4000004 & 1) return 1; } g(); return 0; }
+//     void n06(s32 a0, s32 a1) { s32 v; do { s32 i; v = ((volatile s32 *)0x40000d4)[2];
+//       for (i = 0; i < a1; i++) ((volatile s32 *)0x40000e0)[1] = a0; } while (v & 0x80000000); g(); }
 //   IDO 7.1 cc -O2 -mips2 -32 -non_shared -G 0
 //     void iv(void) { while (*(vu32 *)0xA4600010 & 3) ; }
 //     void v1(s32 a0) { while (((vu32 *)0xA4600010)[0] & 3) { ((vu32 *)0xA4600000)[5] = a0; } }
+//     void i13(s32 a0) { while (*(vs32 *)&gF == 0) { ((vu32 *)0xA4600000)[5] = a0; } g(); }
 //   mwcc 2.4.2 -O4,p
 //     void qw(void) { while (*(vu32 *)0xCC006010 & 3) ; g(); }
 //
 // Recompiled with the read plain, w1, iv and qw are a branch to itself; hr's store and read both
 // leave the loop (agbcc `load_mems`), and v1's store is written once ahead of it (IDO). t07's
 // DISPSTAT read, in a loop that returns from inside, is loaded once ahead of the loop (agbcc
-// `scan_loop`, which does not ask how many places the loop is left for).
+// `scan_loop`, which does not ask how many places the loop is left for). n06's inner `for` writes
+// its cell once, after it (agbcc runs `load_mems` on the inner loop too). i13's store
+// is written once ahead of the loop compiled against `extern volatile s32 gF;`.
 import { describe, expect, test } from 'vitest';
 
+import type { AsmData } from '../src/frontend/asmdata';
 import { decompile } from '../src/pipeline';
+import { globalsFromContext } from '../src/proto-context';
 import { MIPS_IDO, PPC_MWCC, targetFor } from '../src/target';
 
 const W1 = `
@@ -227,6 +234,76 @@ const QW = `
   2c:	blr
 `;
 
+const N06 = `
+n06:
+	push	{r4, r5, r6, lr}
+	add	r4, r0, #0
+	ldr	r6, .L13
+	mov	r5, #0x80
+	lsl	r5, r5, #0x18
+.L3:
+	ldr	r3, [r6]
+	cmp	r1, #0
+	ble	.L5	@cond_branch
+	ldr	r0, .L13+0x4
+	add	r2, r1, #0
+.L9:
+	str	r4, [r0]
+	sub	r2, r2, #0x1
+	cmp	r2, #0
+	bne	.L9	@cond_branch
+.L5:
+	and	r3, r3, r5
+	cmp	r3, #0
+	bne	.L3	@cond_branch
+	bl	g
+	pop	{r4, r5, r6}
+	pop	{r0}
+	bx	r0
+.L14:
+	.align	2, 0
+.L13:
+	.word	0x40000dc
+	.word	0x40000e4
+.Lfe1:
+`;
+const I13 = `
+00000000 <i13>:
+   0:	lui	v1,0x0
+   4:	addiu	v1,v1,0
+   8:	lw	t6,0(v1)
+   c:	addiu	sp,sp,-24
+  10:	sw	ra,20(sp)
+  14:	bnez	t6,30 <i13+0x30>
+  18:	lui	v0,0xa460
+  1c:	ori	v0,v0,0x14
+  20:	sw	a0,0(v0)
+  24:	lw	t7,0(v1)
+  28:	beqzl	t7,24 <i13+0x24>
+  2c:	sw	a0,0(v0)
+  30:	jal	0 <i13>
+  34:	nop
+  38:	lw	ra,20(sp)
+  3c:	addiu	sp,sp,24
+  40:	jr	ra
+  44:	nop
+	...
+`;
+
+/** The relocations the object file gives IDO's text: `gF`'s address and the call to `g`. */
+const relocs = (list: Array<[number, string, string]>): AsmData => ({
+  sections: new Map(),
+  relocs: list.map(([offset, type, sym]) => ({ section: '.text', offset, type, sym, addend: 0 })),
+  symbols: new Map(),
+  symbolCount: 0,
+  bigEndian: true,
+});
+const I13_RELOCS = relocs([
+  [0, 'R_MIPS_HI16', 'gF'],
+  [4, 'R_MIPS_LO16', 'gF'],
+  [0x30, 'R_MIPS_26', 'g'],
+]);
+
 const AGBCC = targetFor('agbcc', ['-mthumb-interwork', '-O2', '-fhex-asm']).target;
 const prototypes = { g: { params: [], returnsVoid: true }, h: { params: ['u32'], returnsVoid: true } };
 const SINKS = 'a loop that polls a device register writes memory plain at an address the loop never changes';
@@ -275,7 +352,16 @@ describe('a poll loop that stores is judged by how the compiler moves the store'
     expect(decompile('p04', P04, AGBCC, { prototypes }).source).toContain('*(s32 *)67109096 = a0;');
   });
 
+  test('agbcc: a store in a straight loop nested in a poll is judged by that loop, and declines', () => {
+    expect(() => decompile('n06', N06, AGBCC, { prototypes })).toThrow(SINKS);
+  });
+
   test('IDO: a lone store of an invariant value in a poll is hoisted, so it declines', () => {
     expect(() => decompile('v1', V1, MIPS_IDO)).toThrow(SINKS);
+  });
+
+  test('IDO: a poll of a global declared volatile hoists the store too', () => {
+    const contextGlobals = globalsFromContext('typedef int s32; extern volatile s32 gF;', 'c');
+    expect(() => decompile('i13', I13, MIPS_IDO, { prototypes, contextGlobals, asmData: I13_RELOCS })).toThrow(SINKS);
   });
 });
