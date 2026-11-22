@@ -644,6 +644,9 @@ export interface SImage {
   /** its directives write several widths (a struct's), so `type` is its bytes alone: no local's
    *  initializer, only the byte static its copies read (l3/constinit.ts) */
   bytesOnly?: true;
+  /** the alignment in bytes the target shows for it where that is wider than `type`'s own, which
+   *  the static it is kept as must state ({@link SStatic.align}) */
+  align?: number;
 }
 
 /** A struct declaration surfaced to the backend (name + field list). Mirrors the IR struct

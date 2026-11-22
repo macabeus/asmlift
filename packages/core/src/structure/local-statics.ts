@@ -295,8 +295,17 @@ export function localStaticShapes(
     if (obj.anonymous) {
       // The compiler's own image of a local aggregate's initializer: typed by its directives alone,
       // since nothing but the copy reads it, and never declared where it sits — l3/constinit.ts
-      // folds it into the local the copy fills, which is the declaration that placed it.
+      // folds it into the local the copy fills, which is the declaration that placed it, or keeps
+      // it as the function-scope static that copy reads. That static is placed by the same rules
+      // as a named one, so the alignment the target shows wider than its type's own is kept for it
+      // to state: an image aligned past an odd-sized object ahead of it in .rodata lands elsewhere
+      // without it.
       const unit = obj.directives?.unit;
+      const widerAlign = (elem: number, string: boolean): { align?: number } => {
+        const shown = obj.directives?.align ?? obj.placement?.align;
+        const own = Math.max(elem, layout.aggregateAlign, string ? layout.stringAlign : 1);
+        return shown !== undefined && shown > own ? { align: shown } : {};
+      };
       if (
         unit === undefined &&
         obj.directives !== undefined &&
@@ -316,7 +325,13 @@ export function localStaticShapes(
           init.pop();
         }
         if (init.length > 0) {
-          images.push({ name: obj.symbol, type: T.array(T.int(8, false), obj.size), init, bytesOnly: true });
+          images.push({
+            name: obj.symbol,
+            type: T.array(T.int(8, false), obj.size),
+            init,
+            bytesOnly: true,
+            ...widerAlign(1, false),
+          });
           continue;
         }
       }
@@ -381,6 +396,7 @@ export function localStaticShapes(
         type: T.array(T.int(unit * 8, signed), count),
         init,
         ...(string ? { string: true as const } : {}),
+        ...widerAlign(unit, string),
       });
       continue;
     }

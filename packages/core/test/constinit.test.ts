@@ -366,7 +366,8 @@ const mixedAsm = (image: string): string =>
 test('an image of mixed widths is kept as the static of its bytes its copy reads, never folded', () => {
   // a struct's image has no element type, so no local's initializer — but the copy reads bytes
   expect(decompile('f', mixedAsm('\t.short\t0x1\n\t.byte\t0x2\n\t.byte\t0x3\n'), ARMV4T_AGBCC).source).toContain(
-    '    static const u8 LC0[4] = { 1, 0, 2, 3 };\n    u8 sp0[4];\n    memcpy(sp0, (u8 *)LC0, 4);\n',
+    '    static const u8 LC0[4] __attribute__((aligned(4))) = { 1, 0, 2, 3 };\n    u8 sp0[4];\n' +
+      '    memcpy(sp0, (u8 *)LC0, 4);\n',
   );
   // …and one the copy would fill whole still does not fold: the fold is the element type's
   const bytesOnly = image([1, 0, 2, 3], 1, false, { bytesOnly: true });
@@ -377,6 +378,22 @@ test('an image of mixed widths is kept as the static of its bytes its copy reads
   expect(constantImageRefusal(fn([copy('sp0', '.LC0', 4), use(v('.LC0'))], bytes4, bytesOnly))?.refused).toBe(
     'which the body reads other than as the source of a block copy at the top level',
   );
+});
+
+test('the static states the alignment the image is shown at past its type’s own, as a named static does', () => {
+  // agbcc places `static const u8 LC0[64]` at 1, so past an odd-sized object ahead of it in .rodata
+  // an image the target aligned to 4 moves without the attribute (compiled)
+  const aligned = image([1, 2, 3, 4], 1, false, { align: 4 });
+  const eight = [{ name: 'sp0', type: T.array(T.u(8), 8) }];
+  expect(cBackend.emit(fn([copy('sp0', '.LC0', 4), use(v('sp0'))], eight, aligned))).toContain(
+    '    static const u8 LC0[4] __attribute__((aligned(4))) = { 1, 2, 3, 4 };\n',
+  );
+  // the directives give it: `.align 2` past a byte image's own 1 is kept (above), `.align 0` is not
+  const unaligned = mixedAsm('\t.short\t0x1\n\t.byte\t0x2\n\t.byte\t0x3\n').replace(
+    '.align\t2, 0\n.LC0',
+    '.align\t0, 0\n.LC0',
+  );
+  expect(decompile('f', unaligned, ARMV4T_AGBCC).source).toContain('    static const u8 LC0[4] = { 1, 0, 2, 3 };\n');
 });
 
 test('an image of mixed widths holding an address has nothing a byte static spells', () => {

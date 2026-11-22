@@ -20,7 +20,9 @@
 //
 // WHERE THE FOLD IS NOT SOUND, THE COPY STAYS and the image becomes what it is in the machine: a
 // read-only object of its own, spelled as a function-scope `static const` of the element its
-// directives wrote, which the kept `memcpy` reads. That is sound whenever every mention of the
+// directives wrote, at the alignment they show where it is wider than that element's own
+// (`SImage.align`, kept by structure/local-statics.ts as for a named static), which the kept
+// `memcpy` reads. That is sound whenever every mention of the
 // image is the whole source of a block copy whose constant count stays inside it, into a
 // non-volatile local with room for that count where the copy starts — the standard fixes that such
 // a copy only reads its source, so nothing writes through the `const`, and a copy that ran past its
@@ -435,13 +437,14 @@ export function constantImageRefusal(sfn: SFn): { image: string; refused: string
 }
 
 /** `image` as a function-scope `static const` named `name`: its element and signedness are the
- *  ones its directives wrote, a hole is the zero C supplies, and a byte image written as a string
- *  stays one. */
+ *  ones its directives wrote, a hole is the zero C supplies, an alignment wider than its type's
+ *  own is stated, as a named static's is, and a byte image written as a string stays one. */
 function asStatic(image: SImage, name: string): SStatic {
   return {
     name,
     type: image.type,
     const: true,
+    ...(image.align !== undefined ? { align: image.align } : {}),
     init: image.init.map((v) => v ?? 0),
     ...(image.string === true &&
     image.type.kind === 'array' &&
