@@ -103,6 +103,37 @@ export function aggregateType(
   return { kind: 'struct', name, fields, size: placed.size, declared: spelling };
 }
 
+/** A declared UNION OF INTEGERS as a local of it is typed: every member a field at offset 0, which
+ *  a read names by its own width (structure.ts `frameStructMember`), at the size this target lays
+ *  the union out at and spelled as the headers spell it, `union Un`. The IR has no named union
+ *  (ir/types.ts's `union` is a cell's views, declared inline), so it is typed as the struct kind
+ *  whose `declared` spelling the declarations block defines by the layout's own kind (declare.ts).
+ *  Undefined unless every member is an integer scalar the IR types — no bitfield, array, nested
+ *  aggregate, pointer or float — so no two fields at one offset share a width, and an access
+ *  names at most one of them. */
+export function integerUnionType(
+  name: string,
+  spelling: string,
+  layout: AggregateLayout,
+  target: TargetDescription,
+): IrType | undefined {
+  // the spelling must name a union too (`union Un`, or a typedef name the block binds to it)
+  const placed = layout.kind === 'union' && !/^struct\s/.test(spelling) ? place(layout, target) : undefined;
+  if (placed === undefined || layout.members!.length === 0) {
+    return undefined;
+  }
+  const fields: StructField[] = [];
+  for (const m of layout.members!) {
+    const scalar =
+      m.bits === undefined && m.dims === undefined && typeof m.type === 'string' ? scalarType(m.type) : undefined;
+    if (scalar?.kind !== 'int' || fields.some((f) => f.type.kind === 'int' && f.type.width === scalar.width)) {
+      return undefined;
+    }
+    fields.push({ off: 0, type: scalar, name: m.name });
+  }
+  return { kind: 'struct', name, fields, size: placed.size, declared: spelling };
+}
+
 /** The tag a struct or union spelling declares it by, with the spelling itself, qualifiers aside:
  *  `struct Tag` and `union Tag` name theirs, and a bare name is a typedef the declarations block
  *  defines under that name. Undefined for any other spelling, which names no type a local or an
