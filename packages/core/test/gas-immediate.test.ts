@@ -366,3 +366,61 @@ describe('a Thumb immediate gas would resolve declines naming the function and t
     );
   });
 });
+
+// SPLAT, THE REST. Each word is mips-linux-gnu-as -march=r4300's encoding of the line, 00000000
+// where gas refuses it.
+describe('a Splat operand holds the value gas gives it, or declines', () => {
+  const splat = (lines: [string, string][]) =>
+    `.set noat\n.set noreorder\n\n.text\nglabel f\n` +
+    lines
+      .map(
+        ([line, word], i) =>
+          `    /* ${(i * 4).toString(16)} ${(0x80000000 + i * 4).toString(16)} ${word} */  ${line}\n`,
+      )
+      .join('');
+  const leaf = (...lines: [string, string][]) =>
+    splat([...lines, ['jr          $ra', '03E00008'], ['nop', '00000000']]);
+  const mips = (text: string) => decompile('f', text, MIPS_GCC).source;
+
+  // gas evaluates in a 64-bit word: wrapped 32-bit arithmetic with shift counts mod 32 lifted these
+  test.each([
+    ['ori         $v0, $zero, (0x1000 >> 32)', '34020000'], // gas 0; was `return 4096;`
+    ['ori         $v0, $zero, ((1 << 36) >> 24)', '34021000'], // gas 0x1000; was `return 0;`
+    ['ori         $v0, $zero, ((0x80000000 << 1) >> 17)', '34028000'], // gas 0x8000; was 0
+    ['ori         $v0, $zero, ((0x10000 * 0x10000) >> 20)', '34021000'], // gas 0x1000; was 0
+    ['addiu       $v0, $a0, (0x1000 >> 32)', '24820000'], // gas 0; was `a0 + 4096`
+    ['lw          $v0, (0x8 >> 32)($a0)', '8C820000'], // gas `0(a0)`; was `a0[2]`
+    ['addiu       $v0, $zero, ((-16 >> 2) >> 28)', '00000000'], // gas: a logical 64-bit shift, out of range
+    ['addiu       $v0, $zero, (0xFFFFFFFF + 1)', '00000000'], // gas: out of range
+    ['lw          $v0, 0x100000004($a0)', '00000000'], // gas: "number larger than 32 bits"
+  ])('`%s` declines', (line, word) => {
+    expect(() => mips(leaf([line, word]))).toThrow(/past a 32-bit word/);
+  });
+  test.each([
+    ['lui         $v0, (0x80001234 >> 16)', '3C028000', 'return -2147483648;'],
+    ['addiu       $v0, $a0, (0x8000ABCD & 0xFFFF)', '2482ABCD', 'return a0 + -21555;'],
+    ['lui         $v0, ((0x7FFF0000 + 0x10000) >> 16)', '3C028000', 'return -2147483648;'],
+  ])('`%s` lifts as gas encodes it', (line, word, want) => {
+    expect(mips(leaf([line, word]))).toContain(want);
+  });
+
+  // "operand N out of range" to gas, and each lifted
+  test.each([
+    ['lui         $v0, 0x10000'], // was `return 0;`
+    ['andi        $v0, $a0, -1'], // was `a0 & -1`
+    ['ori         $v0, $a0, -1'],
+    ['ori         $v0, $a0, 0x10000'], // was `a0 | 65536`
+    ['xori        $v0, $a0, -1'],
+    ['sll         $v0, $a0, 32'], // was `a0 << 32`
+    ['sll         $v0, $a0, -1'],
+    ['sra         $v0, $a0, 33'],
+  ])('`%s` declines', (line) => {
+    expect(() => mips(leaf([line, '00000000']))).toThrow(/does not hold/);
+  });
+  test.each([
+    ['sll         $v0, $a0, 31', '000417C0', 'return a0 << 31;'],
+    ['ori         $v0, $a0, 0xFFFF', '3482FFFF', 'return a0 | 65535;'],
+  ])('`%s` lifts', (line, word, want) => {
+    expect(mips(leaf([line, word]))).toContain(want);
+  });
+});

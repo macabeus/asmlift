@@ -42,7 +42,7 @@
 import { CONTROL_BYTE, asciiTrim, isNonAscii } from './control-byte';
 import type { DisasmInstr, DisasmReloc } from './disasm';
 import { FrontendUnsupportedError } from './errors';
-import { gasIntLiteral } from './gas-int';
+import { GAS_WORD_END, GAS_WORD_MIN, gasIntLiteral } from './gas-int';
 
 // One instruction line: `/* ROM VRAM BYTES */  MNEMONIC  OPS`. Group 1 is the VRAM address word.
 const INSN_LINE =
@@ -589,6 +589,20 @@ export function parseSplatMips(asm: string, name: string, includes?: ReadonlyMap
       }
       ops[2] = String(signExtend16(field));
     }
+    // The other fields an immediate fills hold what gas lets them, and anything else is gas's
+    // "operand N out of range" too (`mips-linux-gnu-as -march=r4300`): `lui $v0, 0x10000` lifted
+    // `return 0;`, `andi $v0, $a0, -1` lifted `a0 & -1`, `sll $v0, $a0, 32` lifted `a0 << 32`. An
+    // input the assembler refuses has no encoding to lift, so it refuses here as well. A `%lo`
+    // operand is the relocation's to fill, and its immediate here is the signed low half.
+    const bounded = relocs.length === 0 ? UNSIGNED_FIELD[mnemonic] : undefined;
+    const at = mnemonic === 'lui' ? 1 : 2;
+    const fieldValue = bounded !== undefined && ops.length === at + 1 ? gasIntLiteral(ops[at]) : null;
+    if (bounded !== undefined && fieldValue !== null && (fieldValue < 0 || fieldValue > bounded)) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${mnemonic}' at 0x${addr.toString(16)} has the immediate '${ops[at]}', ` +
+          `which its field (0..${bounded}) does not hold`,
+      );
+    }
     for (const l of pending) {
       labelAddr.set(l, addr);
     }
@@ -623,6 +637,19 @@ const isBranchMnemonic = (mn: string): boolean => mn === 'j' || (mn[0] === 'b' &
 
 /** The instructions whose 16-bit immediate field the hardware sign-extends. */
 const SIGNED_FIELD = /^(addi|addiu|slti|sltiu)$/;
+
+/** The largest value of the zero-extended immediate fields gas assembles, by mnemonic: the 16-bit
+ *  logical immediates and `lui`'s upper half, and the 5-bit shift amount. Each bound is gas's own,
+ *  `mips-linux-gnu-as -march=r4300` refusing one past it and any negative. */
+const UNSIGNED_FIELD: Readonly<Record<string, number>> = {
+  andi: 0xffff,
+  ori: 0xffff,
+  xori: 0xffff,
+  lui: 0xffff,
+  sll: 31,
+  srl: 31,
+  sra: 31,
+};
 
 // Re-sign a raw 16-bit immediate: a value with bit 15 set becomes negative (two's complement),
 // matching how addi/addiu/slti/sltiu sign-extend the field. A value already ≤ 0x7FFF is unchanged.
@@ -839,9 +866,18 @@ const refuseOctal = (name: string, tok: string, operand: string): never => {
 // `+ - * << >> & | ^ ~` and parentheses). Precedence-climbing on GAS's precedence, which is not C's:
 // three left-associative levels, `* << >>` above `| & ^` above `+ -` (the GNU as manual, "Infix
 // Operators"). C's table lifted `(3 | 1 + 1)` as 3 and `(1 + 2 << 3)` as 24, where
-// `mips-linux-gnu-as -march=r4300` and `arm-none-eabi-as` both encode 4 and 17. A shift `>>` is
-// LOGICAL — Splat's operands are unsigned 32-bit constants. Anything unparsable declines LOUD
-// rather than silently yielding NaN.
+// `mips-linux-gnu-as -march=r4300` and `arm-none-eabi-as` both encode 4 and 17. Anything unparsable
+// declines LOUD rather than silently yielding NaN.
+//
+// THE ARITHMETIC IS EXACT, AND HELD TO A WORD. MIPS gas evaluates in a 64-bit word, and wrapped
+// 32-bit JS arithmetic (with its shift counts taken mod 32) is a different machine: `(0x1000 >> 32)`
+// lifted 4096 where gas encodes 0, `((1 << 36) >> 24)` 0 where gas encodes 0x1000, and
+// `((0x10000 * 0x10000) >> 20)` 0 against 0x1000. So each value is computed exactly (BigInt), and
+// every one — a literal, each operator's result — must lie in `[-2^31, 2^32)`, a shift count in
+// 0..31, and a value shifted right must not be negative: inside those bounds gas's 64-bit word holds
+// the exact value, outside them it does not (`((-16 >> 2) >> 28)` is a logical 64-bit shift to gas,
+// "operand 3 out of range" in an `addiu`), and the expression refuses. Every real Splat expression
+// is `(0xH >> 16)` or `(0xH & 0xFFFF)` on a 32-bit H, well inside them.
 function evalConst(name: string, expr: string): number {
   // Every character is a token or whitespace: a match that skipped the rest read `(0x10 + K1)` as
   // 0x10 + 1 (the `K` dropped, gas 18 against 17) and `K1($a0)` as offset 1.
@@ -855,7 +891,18 @@ function evalConst(name: string, expr: string): number {
   const fail = () => {
     throw new FrontendUnsupportedError(`cannot lift '${name}': unparsable constant expression '${expr}'`);
   };
-  const primary = (): number => {
+  const WORD_MIN = BigInt(GAS_WORD_MIN);
+  const WORD_END = BigInt(GAS_WORD_END);
+  const unbounded = (): never => {
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': constant expression '${expr}' takes a value past a 32-bit word, a shift ` +
+        `count past 31 or a right shift of a negative value, where gas's 64-bit arithmetic and the word ` +
+        `this reader holds it to part`,
+    );
+  };
+  const word = (v: bigint): bigint => (v >= WORD_MIN && v < WORD_END ? v : unbounded());
+  const shiftCount = (v: bigint): bigint => (v >= 0n && v < 32n ? v : unbounded());
+  const primary = (): bigint => {
     const t = toks[p++];
     if (t === undefined) {
       return fail();
@@ -868,22 +915,22 @@ function evalConst(name: string, expr: string): number {
       return v;
     }
     if (t === '-') {
-      return -unary();
+      return word(-unary());
     }
     if (t === '~') {
-      return ~unary();
+      return word(~unary());
     }
     if (/^\d/.test(t)) {
       const v = gasIntLiteral(t);
       if (v === null) {
-        return OCTAL_MAGNITUDE.test(t) ? refuseOctal(name, t, expr) : fail();
+        return OCTAL_MAGNITUDE.test(t) ? refuseOctal(name, t, expr) : unbounded();
       }
-      return v;
+      return BigInt(v);
     }
     return fail();
   };
-  const unary = (): number => primary();
-  const expr2 = (minPrec: number): number => {
+  const unary = (): bigint => primary();
+  const expr2 = (minPrec: number): bigint => {
     let left = unary();
     for (;;) {
       const op = toks[p];
@@ -894,19 +941,19 @@ function evalConst(name: string, expr: string): number {
       const right = expr2(prec[op] + 1);
       switch (op) {
         case '+':
-          left = (left + right) | 0;
+          left = left + right;
           break;
         case '-':
-          left = (left - right) | 0;
+          left = left - right;
           break;
         case '*':
-          left = Math.imul(left, right);
+          left = left * right;
           break;
         case '<<':
-          left = (left << right) >>> 0;
+          left = left << shiftCount(right);
           break;
         case '>>':
-          left = left >>> right;
+          left = left < 0n ? unbounded() : left >> shiftCount(right);
           break;
         case '&':
           left = left & right;
@@ -918,6 +965,7 @@ function evalConst(name: string, expr: string): number {
           left = left ^ right;
           break;
       }
+      left = word(left);
     }
     return left;
   };
@@ -925,5 +973,5 @@ function evalConst(name: string, expr: string): number {
   if (p !== toks.length) {
     return fail();
   }
-  return v;
+  return Number(v);
 }
