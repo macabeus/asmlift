@@ -141,7 +141,7 @@ function zeroInitialized(
 export interface LocalStaticShapes {
   infos: Map<string, SymbolInfo>;
   statics: SStatic[];
-  /** the compiler's anonymous constant images, which no declaration spells (l3/constinit.ts) */
+  /** the compiler's anonymous constant images, which no source declaration names (l3/constinit.ts) */
   images: SImage[];
 }
 
@@ -295,8 +295,46 @@ export function localStaticShapes(
     if (obj.anonymous) {
       // The compiler's own image of a local aggregate's initializer: typed by its directives alone,
       // since nothing but the copy reads it, and never declared where it sits — l3/constinit.ts
-      // folds it into the local the copy fills, which is the declaration that placed it.
+      // folds it into the local the copy fills, which is the declaration that placed it, or keeps
+      // it as the function-scope static that copy reads. That static is placed by the same rules
+      // as a named one, so the alignment the target shows wider than its type's own is kept for it
+      // to state: an image aligned past an odd-sized object ahead of it in .rodata lands elsewhere
+      // without it.
       const unit = obj.directives?.unit;
+      const widerAlign = (elem: number, string: boolean): { align?: number } => {
+        const shown = obj.directives?.align ?? obj.placement?.align;
+        const own = Math.max(elem, layout.aggregateAlign, string ? layout.stringAlign : 1);
+        return shown !== undefined && shown > own ? { align: shown } : {};
+      };
+      if (
+        unit === undefined &&
+        obj.directives !== undefined &&
+        obj.bytes !== undefined &&
+        (obj.relocs?.length ?? 0) === 0
+      ) {
+        // A struct's image writes several widths, so no element type is the source's — but a copy
+        // reads only its bytes, so l3/constinit.ts may still keep it as the byte static that copy
+        // reads (`bytesOnly`), never fold it. Its padding is the zero C supplies. An address is
+        // refused below: no byte holds one. So is an image of no value at all, which a static
+        // without an initializer would not place in .rodata.
+        const init: (number | null)[] = elements(obj, 1, false);
+        for (const [from, n] of obj.directives.gaps ?? []) {
+          init.fill(null, from, from + n);
+        }
+        while (init.length > 0 && init[init.length - 1] === null) {
+          init.pop();
+        }
+        if (init.length > 0) {
+          images.push({
+            name: obj.symbol,
+            type: T.array(T.int(8, false), obj.size),
+            init,
+            bytesOnly: true,
+            ...widerAlign(1, false),
+          });
+          continue;
+        }
+      }
       if (unit === undefined || obj.bytes === undefined) {
         return say('whose image writes no one element width — a struct, or padding alone');
       }
@@ -358,6 +396,7 @@ export function localStaticShapes(
         type: T.array(T.int(unit * 8, signed), count),
         init,
         ...(string ? { string: true as const } : {}),
+        ...widerAlign(unit, string),
       });
       continue;
     }
@@ -476,7 +515,7 @@ export function nameLocalStatics(sfn: SFn, objs: LocalObjects): SFn | { symbol: 
   const bySource = new Map<string, string>();
   for (const obj of objs.values()) {
     if (obj.anonymous) {
-      continue; // no source name: folded into a local's initializer at emission (l3/constinit.ts)
+      continue; // no source name: folded or named at emission (l3/constinit.ts)
     }
     const say = (why: string) => ({ symbol: obj.symbol, refused: `whose source name '${obj.name}' ${why}` });
     const other = bySource.get(obj.name);

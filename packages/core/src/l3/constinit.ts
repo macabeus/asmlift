@@ -15,8 +15,20 @@
 // which is what keeps dead-store elimination and the coalescers off the object. A folded tree
 // would hold a local nothing mentions, which l3/dce.ts deletes — and with it the initializer the
 // compiler keeps (agbcc copies `u8 a[16] = {…}` even when nothing reads `a`). So structure()
-// asks this pass whether the fold is possible and refuses the function loudly where it is not,
-// and the C-family emitter folds (backend/cfamily.ts), the same seam l3/slotorder.ts uses.
+// asks this pass whether the image can be spelled and refuses the function loudly where it cannot,
+// and the C-family emitter spells it (backend/cfamily.ts), the same seam l3/slotorder.ts uses.
+//
+// WHERE THE FOLD IS NOT SOUND, THE COPY STAYS and the image becomes what it is in the machine: a
+// read-only object of its own, spelled as a function-scope `static const` of the element its
+// directives wrote, at the alignment they show where it is wider than that element's own
+// (`SImage.align`, kept by structure/local-statics.ts as for a named static), which the kept
+// `memcpy` reads. That is sound whenever every mention of the image is the whole source of a block
+// copy whose constant count stays inside it, into a non-volatile local with room for that count
+// where the copy starts — the standard fixes that such a copy only reads its source, so nothing
+// writes through the `const`, and a copy that ran past its local would write the saved registers,
+// which no C object spells. It is the fallback, not the
+// reading: an initializer is the source the compiler was given, so the fold is taken wherever it
+// holds, and one copy that cannot fold keeps every copy of that image.
 //
 // THE FOLD IS SOUND exactly when the declaration's initializer and the copy are one program:
 //   • the copy is a block copy the C standard fixes (proto.ts `blockCopyRoles`), a TOP-LEVEL
@@ -30,14 +42,17 @@
 //     count — one image may fill several locals, since the compiler places one per identical
 //     constant (varasm.c `output_constant_def`), each into its own local. Several arrays in one
 //     frame are each their own local where the frame audit proves the boundaries between them
-//     (frontend/frame-objects.ts `provenParts`). KNOWN GAP: where it keeps the frame's
-//     address-taken bytes as one local instead — a neighbour handed to a callee nothing bounds, or
-//     a compiler whose placement of such arrays is not known (target.ts `addressTakenArrayOrder`)
-//     — the image refuses at the size check;
-//   • the image writes one element width (a struct's mixed widths, or padding alone, has no
-//     element type this pass could declare). An element it relocates holds an address, spelled as
-//     the address constant it is (`u32 a[16] = { (u32)&h1, … }`, which agbcc copies from the same
-//     `.word h1` image as the pointer array the source declared, compiled).
+//     (frontend/frame-objects.ts `provenParts`). Where it keeps the frame's address-taken bytes as
+//     one local instead — a neighbour handed to a callee nothing bounds, or a compiler whose
+//     placement of such arrays is not known (target.ts `addressTakenArrayOrder`) — the image
+//     fails the size check and is kept as the static its copy reads, into its part of that local;
+//   • the image writes one element width — a struct's mixed widths, or padding alone, has no
+//     element type this pass could declare. A struct's is still kept as the static its copy
+//     reads, of its bytes (`SImage.bytesOnly`): the copy reads nothing else, and agbcc compiles
+//     `static const u8` of those bytes to the same .text and .rodata. An element it relocates
+//     holds an address, spelled as the address constant it is (`u32 a[16] = { (u32)&h1, … }`,
+//     which agbcc copies from the same `.word h1` image as the pointer array the source declared,
+//     compiled).
 // The local keeps its own element type where the body reaches it by an offset or a cast — those
 // were spelled against it, so its width must be the image's — and takes the image's where only
 // its whole address and element accesses, which each print their own width, reach it.
@@ -55,12 +70,15 @@ import {
   type InitAddress,
   type SFn,
   type SImage,
+  type SStatic,
   type Stmt,
   mapExprChildren,
   mapStmtExprs,
   mentionedName,
+  renameVariables,
   walkExprs,
 } from './ast';
+import { takenNames } from './hoist';
 import { localMentions, mentionsAnyLocal } from './mentions';
 
 /** `e` without the casts around it. */
@@ -143,21 +161,47 @@ interface Fold {
   string: boolean;
 }
 
-/** Why `image` cannot fold, as the tail of a sentence naming it, or the fold of each copy of it. */
-function planFolds(sfn: SFn, image: SImage): Fold[] | string {
-  if (image.type.kind !== 'array' || image.type.elem.kind !== 'int') {
-    return 'whose image writes no one element width — a struct, or padding alone';
-  }
-  const copies: number[] = [];
-  sfn.body.forEach((s, i) => {
-    if (
-      s.k === 'exprstmt' &&
-      s.value.k === 'call' &&
-      wholeObject(s.value.args[blockCopyRoles(s.value.fn)?.src ?? -1] ?? { k: 'const', value: 0 }) === image.name
-    ) {
-      copies.push(i);
+/** One block copy whose source is the whole image: its index in the body where the call is a
+ *  top-level statement of its own (else null), its count where that is a constant, and its
+ *  destination. */
+interface CopySite {
+  at: number | null;
+  n: number | null;
+  dst: Expr | undefined;
+}
+
+/** Every block copy in `body`, at any depth, whose source is the whole `image` — the one census both
+ *  spellings read: the fold takes the top-level ones, the static all of them. */
+function copySites(body: readonly Stmt[], image: SImage): CopySite[] {
+  const top = new Map<Expr, number>();
+  body.forEach((s, i) => {
+    if (s.k === 'exprstmt' && s.value.k === 'call') {
+      top.set(s.value, i);
     }
   });
+  const sites: CopySite[] = [];
+  for (const e of walkExprs(body as Stmt[])) {
+    const roles = e.k === 'call' ? blockCopyRoles(e.fn) : undefined;
+    if (e.k !== 'call' || roles === undefined) {
+      continue;
+    }
+    const src = e.args[roles.src];
+    if (src === undefined || wholeObject(src) !== image.name) {
+      continue;
+    }
+    const count = e.args[roles.n];
+    sites.push({
+      at: top.get(e) ?? null,
+      n: count === undefined ? null : constantValue(count),
+      dst: e.args[roles.dst],
+    });
+  }
+  return sites;
+}
+
+/** Why `image` cannot fold, as the tail of a sentence naming it, or the fold of each copy of it. */
+function planFolds(sfn: SFn, image: SImage, sites: readonly CopySite[]): Fold[] | string {
+  const copies = sites.flatMap((c) => (c.at === null ? [] : [c.at]));
   if (copies.length === 0) {
     return (
       'which no top-level block-copy call (memcpy) takes as its source — the one copy folded into an ' +
@@ -166,6 +210,9 @@ function planFolds(sfn: SFn, image: SImage): Fold[] | string {
   }
   if (mentions(sfn.body, image.name) !== copies.length) {
     return 'which the body reads other than as the source of a block copy at the top level';
+  }
+  if (image.bytesOnly === true) {
+    return 'whose image writes no one element width — a struct, or padding alone';
   }
   const folds: Fold[] = [];
   for (const at of copies) {
@@ -317,16 +364,110 @@ function uses(
   return { indexed, extents, reads, other: total !== accounted };
 }
 
-/** Whether every anonymous image `sfn` holds folds into a local's initializer: null when it does,
- *  else the image's name and the tail of the sentence that refuses it. */
+/** How one image is spelled: folded into the locals its copies fill, kept as the read-only static
+ *  its copies read ({@link asStatic}), or refused with the tail of the sentence that says why. */
+type ImagePlan = { kind: 'fold'; folds: Fold[] } | { kind: 'static' } | { kind: 'refused'; why: string };
+
+function planImage(sfn: SFn, image: SImage): ImagePlan {
+  const sites = copySites(sfn.body, image);
+  const plan = planFolds(sfn, image, sites);
+  if (typeof plan !== 'string') {
+    return { kind: 'fold', folds: plan };
+  }
+  return onlyCopied(sfn, image, sites) ? { kind: 'static' } : { kind: 'refused', why: plan };
+}
+
+/** Whether every mention of `image` is the whole source of a block copy, anywhere in the body, whose
+ *  constant count stays inside the image AND inside the local it fills. The standard fixes that a
+ *  copy only READS its source, so the bytes may be a `static const` object; a mention of any other
+ *  kind may write through it, or read it at a width or an offset the declaration would have to
+ *  answer for. The destination bound is the fold's size check kept: a count past the local's end
+ *  writes the saved registers or the caller's frame, which no C object spells. */
+function onlyCopied(sfn: SFn, image: SImage, sites: readonly CopySite[]): boolean {
+  const size = byteSize(image.type);
+  return (
+    size !== null &&
+    sites.length > 0 &&
+    sites.length === mentions(sfn.body, image.name) &&
+    sites.every((c) => c.n !== null && c.n >= 0 && c.n <= size && fitsLocal(sfn, c.dst, c.n))
+  );
+}
+
+/** Whether `dst` is a non-volatile local of `sfn`, whole or at a constant byte offset, with room for
+ *  `n` bytes from there. A byte offset is read only where the sum's arithmetic is in bytes: the
+ *  local's address cast to an integer or to a byte pointer, plus a constant. */
+function fitsLocal(sfn: SFn, dst: Expr | undefined, n: number): boolean {
+  if (dst === undefined) {
+    return false;
+  }
+  let local = wholeObject(dst);
+  let offset = 0;
+  const b = bare(dst);
+  if (local === null && b.k === 'bin' && b.op === '+') {
+    const k = constantValue(b.r);
+    const bytes =
+      b.l.k === 'cast' &&
+      (b.l.to.kind === 'int' || (b.l.to.kind === 'ptr' && b.l.to.to.kind === 'int' && b.l.to.to.width === 8));
+    local = bytes && k !== null ? wholeObject(b.l) : null;
+    offset = k ?? 0;
+  }
+  const decl = local === null ? undefined : sfn.locals.find((l) => l.name === local);
+  const room = decl === undefined ? null : byteSize(decl.type);
+  return (
+    decl !== undefined &&
+    decl.volatile !== true &&
+    decl.pointeeVolatile !== true &&
+    room !== null &&
+    offset >= 0 &&
+    offset + n <= room
+  );
+}
+
+/** Whether every anonymous image `sfn` holds can be spelled — folded into a local's initializer or
+ *  kept as the static its copies read: null when it can, else the image's name and the tail of the
+ *  sentence that refuses it. */
 export function constantImageRefusal(sfn: SFn): { image: string; refused: string } | null {
   for (const image of sfn.images ?? []) {
-    const plan = planFolds(sfn, image);
-    if (typeof plan === 'string') {
-      return { image: image.name, refused: plan };
+    const plan = planImage(sfn, image);
+    if (plan.kind === 'refused') {
+      return { image: image.name, refused: plan.why };
     }
   }
   return null;
+}
+
+/** `image` as a function-scope `static const` named `name`: its element and signedness are the
+ *  ones its directives wrote, a hole is the zero C supplies, an alignment wider than its type's
+ *  own is stated, as a named static's is, and a byte image written as a string stays one. */
+function asStatic(image: SImage, name: string): SStatic {
+  return {
+    name,
+    type: image.type,
+    const: true,
+    ...(image.align !== undefined ? { align: image.align } : {}),
+    init: image.init.map((v) => v ?? 0),
+    ...(image.string === true &&
+    image.type.kind === 'array' &&
+    image.type.elem.kind === 'int' &&
+    image.type.elem.width === 8
+      ? { string: true as const }
+      : {}),
+  };
+}
+
+/** A C name for the image labelled `label` (`.LC0` → `LC0`) that nothing `sfn` names already. */
+function staticName(sfn: SFn, label: string): string {
+  const taken = new Set([sfn.name, ...takenNames(sfn), ...(sfn.statics ?? []).map((s) => s.name)]);
+  for (const g of sfn.globals ?? []) {
+    taken.add(g.name);
+  }
+  const stem = label.replace(/[^A-Za-z0-9_]/g, '');
+  const base = /^[A-Za-z_]/.test(stem) ? stem : `k${stem}`;
+  let name = base;
+  for (let k = 1; taken.has(name); k++) {
+    name = `${base}_${k}`;
+  }
+  return name;
 }
 
 /** `e` with every access to a folded local that reads one of its elements AS that element spelled
@@ -380,8 +521,9 @@ function elementOf(
 }
 
 /** `sfn` with every anonymous image folded into the initializer of each local its copies fill,
- *  the copies gone and the image with them. Throws where one does not fold: structure() refused
- *  that function already, so a tree that reaches here unfoldable was made so by a later pass. */
+ *  the copies gone and the image with them — or, where the fold is not sound, kept as a `static
+ *  const` its copies read. Throws where neither holds: structure() refused that function already,
+ *  so a tree that reaches here unspellable was made so by a later pass. */
 export function foldConstantImages(sfn: SFn): SFn {
   if (sfn.images === undefined) {
     return sfn;
@@ -389,12 +531,21 @@ export function foldConstantImages(sfn: SFn): SFn {
   let out: SFn = { ...sfn };
   delete out.images;
   for (const image of sfn.images) {
-    const plan = planFolds(out, image);
-    if (typeof plan === 'string') {
-      throw new Error(`cannot spell '${sfn.name}': the compiler's anonymous constant '${image.name}' ${plan}`);
+    const plan = planImage(out, image);
+    if (plan.kind === 'static') {
+      const name = staticName(out, image.name);
+      out = {
+        ...out,
+        statics: [...(out.statics ?? []), asStatic(image, name)],
+        body: renameVariables(out.body, new Map([[image.name, name]])),
+      };
+      continue;
     }
-    const copies = new Set(plan.map((f) => f.at));
-    const by = new Map(plan.map((f) => [f.local, f]));
+    if (plan.kind === 'refused') {
+      throw new Error(`cannot spell '${sfn.name}': the compiler's anonymous constant '${image.name}' ${plan.why}`);
+    }
+    const copies = new Set(plan.folds.map((f) => f.at));
+    const by = new Map(plan.folds.map((f) => [f.local, f]));
     out = {
       ...out,
       body: out.body.filter((_, i) => !copies.has(i)).map((st) => mapStmtExprs(st, (e) => asElement(e, by))),

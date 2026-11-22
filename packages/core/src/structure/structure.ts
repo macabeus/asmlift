@@ -8825,9 +8825,10 @@ function structureRanked(
       `cannot structure '${fn.name}': names a function-scope static ('${named.symbol}') ${named.refused}`,
     );
   }
-  // The compiler's anonymous constant is spelled only as the initializer of the locals its copies
-  // fill, which the emitter folds (l3/constinit.ts says why there). Asked here, so a function
-  // whose image cannot fold declines loudly rather than reaching an emitter that cannot print it.
+  // The compiler's anonymous constant is spelled as the initializer of the locals its copies fill,
+  // or as the read-only static those copies read, which the emitter decides (l3/constinit.ts says
+  // why there). Asked here, so a function whose image has neither spelling declines loudly rather
+  // than reaching an emitter that cannot print it.
   const image = constantImageRefusal(named);
   if (image !== null) {
     throw new StructureError(

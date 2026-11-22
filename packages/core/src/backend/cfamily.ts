@@ -992,7 +992,8 @@ function assembleCFamily(
   // `cBackend.emit` and `cppBackend(...).emit`, so both C-family backends print them and no `.emit(`
   // call site does (l3/slotorder.ts says why `emit` owns it).
   // …and the compiler's anonymous constant images folded into the initializers of the locals
-  // their copies fill (l3/constinit.ts), which the tree keeps as copies until here.
+  // their copies fill, or kept as the statics those copies read (l3/constinit.ts), which the tree
+  // keeps as copies until here.
   const fn = orderSlotLocals(legalizePointerCells(foldConstantImages(fn0)));
   const stray = caseGotoViolation(fn.body);
   if (stray !== null) {

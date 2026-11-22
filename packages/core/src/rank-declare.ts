@@ -321,7 +321,9 @@ export function makeRefCollector(ctx: {
     // A function-scope static is declared in the body beside the locals, so it shares their
     // namespace: one the emitter's own names can reach dies with the spelling, as below.
     const statics = new Set((tree.statics ?? []).map((st) => st.name));
-    // …and the compiler's anonymous images, which reach the C only as a local's initializer
+    // …and the compiler's anonymous images, which reach the C as a local's initializer or as a
+    // static of their own named from the label (l3/constinit.ts `staticName`, which avoids the names
+    // the body uses), so the label is what is filtered here
     const images = new Set((tree.images ?? []).map((im) => im.name));
     for (const st of statics) {
       if (bound.has(st) || EMITTER_NAME.test(st)) {

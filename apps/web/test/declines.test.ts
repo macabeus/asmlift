@@ -917,6 +917,11 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     // `jt_idxreuse:agbcc`'s dispatch, summed into the pointer register, lifts
     // (frontend/thumb.ts `recoverJumpTable`), as `jt_idxreuse_p2:agbcc`'s does.
     'indirect-jump',
+    // the image rows lift: a copy into part of one frame object reads the image as a `static const`
+    // (l3/constinit.ts), a mixed-width one as the bytes it holds. What still declines — a copy past
+    // the local it fills, a mixed-width image that holds an address, any other read of it — is
+    // pinned in packages/core/test/constinit.test.ts.
+    'local-image',
     'loop-exit-values',
     // `cmn_field`/`cmn_eq` MATCH on agbcc, and `cmn_ult` declines under `cmn-carry`. What is left
     // (`tst`, arithmetic flags, a call) is hand-written asm.
