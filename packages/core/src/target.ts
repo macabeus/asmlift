@@ -1315,7 +1315,9 @@ export interface LoadBehaviors {
   // ((*(vu32 *)B & 3) || (*(u32 *)C & 1));`'s C once ahead of the loop; agbcc keeps it
   // (`maybe_never` and Thumb's `may_trap_p`, loop.c), and so do KMC gcc 2.7.2 and mwcc 2.4.2 at
   // `-O4,p`. Read by the poll-read pin (frontend/poll-reads.ts), which then pins a read the loop's
-  // exit tests wherever in the loop it is.
+  // exit tests wherever in the loop it is. KMC is left absent on that probe and on
+  // `synthetic:retpost_tail`'s plain loop bound, though it moves the read of `while (s < 100) {
+  // …; if ((*(u32 *)A & 3) == 0) break; }` (a residue: setting it costs that row its match).
   // ABSENT ⇒ false: past the loop's header, only a rotated poll's read is the pin's.
   movesReadsPastBranches?: boolean;
   // WHERE DOES THIS COMPILER PUT A READ NOBODY USES, at a level that keeps a plain one
