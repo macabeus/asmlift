@@ -185,6 +185,10 @@ const isModeledBranch = (ins: Instr) => isXfer(ins) || ins.mnemonic === 'bl';
 
 const isReg = (s: string | undefined): s is string => /^r\d+$/.test(s ?? '');
 
+/** Every register name the decode reads or writes a value under: the GPRs, the FPRs, the condition
+ *  fields and the special registers. Anything else a `read` or a `write` is handed is not one. */
+const PPC_REG_NAME = /^(?:[rf](?:[0-9]|[12][0-9]|3[01])|cr[0-7]|lr|ctr|xer)$/;
+
 /** The FPU arithmetic this frontend lifts, onto the float opcodes, with the precision each computes
  *  in; `fmr` is a copy and has no opcode. `fneg` and `fmr` carry no precision at all — an FPR holds a
  *  double either way — so they take the function's (`frontend/fpu.ts` `fpPrecision`); in a function
@@ -2076,10 +2080,23 @@ function liftOnce(
     let lastDef: Value | null = null;
     // r1 read as data fails LOUD (`r1AsData`). Frame bookkeeping never reaches here: stwu / addi r1
     // / mflr / mtlr / r1-relative spills / the save routines' frame address are handled before `read`.
+    // ONLY A REGISTER NAME IS A REGISTER, as on MIPS (`read` there): anything else in a register slot
+    // is an operand objdump never prints and the lift has no reading of — a `.set` symbol (`mr
+    // r3,K`, `add r3,r3,K`, `stw K,8(r3)`) or a bare number — and reading it as a register invented a
+    // parameter for it (`return a0;`, `a0 + a1`, `a0[2] = a1`). It refuses at every source and every
+    // destination (`write`).
+    const refuseNonRegister = (r: string, how: 'read' | 'written') => {
+      if (!PPC_REG_NAME.test(r)) {
+        throw new PpcUnsupportedError(
+          `cannot lift '${name}': operand '${r}' ${how} as a register — it names no PowerPC register`,
+        );
+      }
+    };
     const read = (r: string): Value => {
       if (r === 'r1') {
         r1AsData();
       }
+      refuseNonRegister(r, 'read');
       return readReg(r, bi);
     };
     // Ordinary memory must be based on a real register that is not the frame pointer. A non-register
@@ -2251,6 +2268,7 @@ function liftOnce(
             `off its relocation, not off the register, so a moved base is not one this lift tracks`,
         );
       }
+      refuseNonRegister(r, 'written');
       writeVar(r, bi, v);
       lastDef = v;
       if (discardReg !== undefined && r !== discardReg) {

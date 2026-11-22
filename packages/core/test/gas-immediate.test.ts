@@ -452,3 +452,21 @@ describe('a Splat operand holds the value gas gives it, or declines', () => {
     expect(mips(leaf([line, word]))).toContain(want);
   });
 });
+
+// PPC reads a register slot by the same rule MIPS does: only a register name is one.
+describe('a PPC register slot holding no register declines', () => {
+  const obj = (lines: string[]) =>
+    `00000000 <f>:\n${lines.map((l, i) => `   ${(i * 4).toString(16)}:\t${l}`).join('\n')}\n`;
+  const ppc = (text: string) => decompile('f', text, PPC_MWCC).source;
+  test.each([
+    ['mr      r3,K'], // was `return a0;`
+    ['add     r3,r3,K'], // was `return a0 + a1;`
+    ['stw     K,8(r3)'], // was `a0[2] = a1; return a0;`
+    ['mr      r3,4'],
+    ['add     r3,r3,8'],
+    ['stw     5,8(r3)'],
+    ['li      K,5'], // a destination: was `return;`
+  ])('`%s` declines', (line) => {
+    expect(() => ppc(obj([line, 'blr']))).toThrow(/as a register — it names no PowerPC register/);
+  });
+});
