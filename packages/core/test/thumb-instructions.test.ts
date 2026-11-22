@@ -42,11 +42,19 @@ describe('an immediate idiom is keyed on the VALUE, not the spelling', () => {
   });
 
   // REFUSALS at the `rsb` site, where a non-match declines. `parseInt` reads every one of these as
-  // zero; the shape test is the only thing between them and a confident negate.
-  test.each(['#0X10', '#0b1', '#0.5', '#0e5', '#0*4'])('`rsb rD, rS, %s` is not a negate', (n) => {
+  // zero; the shape test is the only thing between them and a confident negate. A spelling that is
+  // no literal never reaches the site: every immediate of the function is read before any lowering
+  // (`refuseUnreadableImmediates`), and it refuses there, naming the instruction.
+  test.each([
+    ['#0X10', /unmodelled instruction 'rsb'/],
+    ['#0b1', /'rsb r0, r1, #0b1' — immediate '#0b1' is not an integer literal/],
+    ['#0.5', /'rsb r0, r1, #0.5' — immediate '#0.5' is not an integer literal/],
+    ['#0e5', /'rsb r0, r1, #0e5' — immediate '#0e5' is not an integer literal/],
+    ['#0*4', /'rsb r0, r1, #0\*4' — immediate '#0\*4' is not an integer literal/],
+  ])('`rsb rD, rS, %s` is not a negate', (n, refusal) => {
     const rsb = (imm: string) => `\tpush\t{r4, lr}\n\trsb\tr0, r1, ${imm}\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`;
     expect(() => dc('f', rsb('#0'))).not.toThrow(); // control
-    expect(() => dc('f', rsb(n))).toThrow(/unmodelled instruction 'rsb'/);
+    expect(() => dc('f', rsb(n))).toThrow(refusal);
   });
 
   // At the `add` site a non-match falls through to `constVal(imm(…))`, and `imm` reads only a

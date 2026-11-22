@@ -1458,10 +1458,11 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(decompile('f', frame(oneInsn), ARMV4T_AGBCC).source).toBe(twoInsn);
     }
     // An immediate the constant form cannot evaluate is not the runtime form's register: read as
-    // one, `#(4)` is an entry parameter and the load `sp0[a0]`.
+    // one, `#(4)` is an entry parameter and the load `sp0[a0]`. It refuses before any lowering, where
+    // every immediate of the function is read.
     for (const imm of ['#(4)', '#OFF']) {
       expect(() => decompile('f', `\t.set\tOFF, 4\n${frame(`\tadd\tr4, sp, ${imm}\n`)}`, ARMV4T_AGBCC)).toThrow(
-        `operand '${imm}' read as a register`,
+        `'add r4, sp, ${imm}' — immediate '${imm}' is not an integer literal`,
       );
     }
   });

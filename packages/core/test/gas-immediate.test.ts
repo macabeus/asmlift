@@ -321,3 +321,48 @@ describe('a Splat operand is read in the slot gas reads it in', () => {
     expect(mips(framed('0x18'))).toContain('return g();');
   });
 });
+
+// A LITERAL PAST A 32-BIT WORD has no gas value that is the number it spells: arm-none-eabi-as
+// truncates it without a word (`mov r0, #0x100000008` assembles `movs r0, #8`) and mips-linux-gnu-as
+// refuses it ("number larger than 32 bits"). Read as the number, each lifted the wider constant, and
+// `add sp, #-0x100000000` ran the lift out of memory.
+describe('a literal reads only inside a 32-bit word', () => {
+  test.each([
+    ['0xFFFFFFFF', 0xffffffff],
+    ['4294967295', 0xffffffff],
+    ['-0x80000000', -0x80000000],
+  ])('%j is %d', (text, want) => {
+    expect(gasIntLiteral(text)).toBe(want);
+  });
+  test.each([['0x100000000'], ['4294967296'], ['-0x80000001'], ['-4294967295']])('%j is null', (text) => {
+    expect(gasIntLiteral(text)).toBeNull();
+  });
+
+  const thumb = (body: string) =>
+    decompile('f', `\t.text\n\t.code 16\n\t.thumb_func\n\t.global f\nf:\n${body}\tbx\tlr\n`, ARMV4T_AGBCC).source;
+  test.each([
+    ['\tmov\tr0, #0x100000008\n'], // gas `movs r0, #8`; was `return 4294967304;`
+    ['\tldr\tr0, [r0, #0x100000004]\n'], // gas `#4`; was `a0[1073741825]`
+    ['\tcmp\tr0, #0x100000000\n\tbeq\t.L1\n\tmov\tr0, #1\n.L1:\n'], // gas `#0`
+    ['\tmov\tr0, #-4294967295\n'], // gas 1
+    ['\tadd\tr0, r0, #0x100000003\n'], // gas 3
+    ['\tadd\tsp, #-0x100000000\n'], // gas `add sp, #0`; was a heap exhaustion
+  ])('Thumb %j declines', (body) => {
+    expect(() => thumb(body)).toThrow(/is not an integer literal/);
+  });
+});
+
+// EVERY THUMB IMMEDIATE is read once per instruction before any lowering (frontend/thumb.ts
+// `refuseUnreadableImmediates`), so a refusal names the function and the instruction.
+describe('a Thumb immediate gas would resolve declines naming the function and the instruction', () => {
+  const thumb = (body: string, pre = '') =>
+    decompile('f', `${pre}\t.text\n\t.code 16\n\t.thumb_func\n\t.global f\nf:\n${body}\tbx\tlr\n`, ARMV4T_AGBCC).source;
+  test.each([
+    ['\tldrb\tr0, [r0, #K]\n', "'ldrb r0, [r0, #K]'"],
+    ['\tsub\tsp, #K\n\tadd\tsp, #K\n', "'sub sp, #K'"],
+  ])('%j', (body, instr) => {
+    expect(() => thumb(body, '\t.set K, 2\n')).toThrow(
+      `cannot lift 'f': ${instr} — immediate '#K' is not an integer literal`,
+    );
+  });
+});

@@ -343,16 +343,47 @@ function classifyXfer(ins: Instr): XferKind | null {
 // first two (rendered as the text `NaN`) and the digit prefix for the rest (`#010` as 10 where gas
 // encodes 8). Only a literal whose gas value is certain is read (frontend/gas-int.ts); every caller
 // reaches here with an operand it has already seen start with `#`.
-const imm = (s: string): number => {
+// Every instruction of the lifted function has its immediates read once, up front, by
+// `refuseUnreadableImmediates`, which names the function and the instruction; a refusal here is
+// the backstop for a reader that runs before it.
+const imm = (s: string, where = ''): number => {
   const v = s.startsWith('#') ? gasIntLiteral(s.slice(1)) : null;
   if (v === null) {
     throw new FrontendUnsupportedError(
-      `immediate '${s}' is not an integer literal — a symbol, a character constant or an expression ` +
-        `is gas's to resolve, and this frontend will not read it as a number`,
+      `${where}immediate '${s}' is not an integer literal — a symbol, a character constant or an expression ` +
+        `is gas's to resolve, and a literal past a 32-bit word is gas's to truncate; this frontend will not ` +
+        `read either as a number`,
     );
   }
   return v;
 };
+
+/** The instruction as a refusal names it: the spelling the input used. */
+const sayInstr = (ins: Instr): string => `'${ins.asWritten ?? ins.mnemonic} ${ins.ops.join(', ')}'`;
+
+/** EVERY `#k` OF THE LIFTED FUNCTION IS READ HERE ONCE, before any lowering, so an immediate
+ *  gas would resolve (a symbol, a character, an expression, a literal past a word) refuses naming
+ *  the function and the instruction: `imm` is reached from some twenty lowering and predicate
+ *  sites, and its own refusal named neither. Read are a bare `#k` operand and the displacement of
+ *  `[rB, #k]`.
+ *
+ *  Whether the value FITS the instruction's field is not asked. gas refuses `mov r0, #256`,
+ *  `lsl r0, r0, #32` and `ldr r0, [r0, #128]`, so only a hand-typed input carries one, and the
+ *  frontend's own tests lean on exactly such text to reach the refusals downstream of the decode (a
+ *  struct member at `[r1, #0x4E]` through `ldrb`, an unaligned `[sp, #2]` slot, `add r2, r1, #8`):
+ *  27 tests over 10 files failed under a check of each field against gas's bounds. Valid input is
+ *  not affected either way. */
+function refuseUnreadableImmediates(name: string, instrs: readonly Instr[]): void {
+  for (const ins of instrs) {
+    const where = `cannot lift '${name}': ${sayInstr(ins)} — `;
+    for (const o of ins.ops) {
+      const k = o.startsWith('#') ? o : o.match(/^\[[^,\]]*,\s*(#[^,\]]*)\]$/)?.[1].trim();
+      if (k !== undefined) {
+        imm(k, where);
+      }
+    }
+  }
+}
 
 // AN IMMEDIATE IS A NUMBER, NOT A SPELLING, and which spelling appears is the producer's choice
 // rather than the machine's. Counting the gated shapes (`add`/`rsb rD, rS, #0`) over the vendored
@@ -2528,7 +2559,10 @@ function decode(
               `cannot lift '${name}': pc-relative literal load with no literal pool in the function to resolve into`,
             );
           }
-          const wordOff = ((basePar + itemOff[i] + 4) & ~3) - basePar + imm(f.instr!.ops[1].match(/#[^\]]*/)![0]);
+          const wordOff =
+            ((basePar + itemOff[i] + 4) & ~3) -
+            basePar +
+            imm(f.instr!.ops[1].match(/#[^\]]*/)![0], `cannot lift '${name}': ${sayInstr(f.instr!)} — `);
           // locate the word: a 4-byte data item covering [wordOff, wordOff+4)
           let value: string | undefined;
           items.forEach((g, j) => {
@@ -3909,6 +3943,10 @@ function readThumbText(
   // Before anything below reads a `b`: the jump-table recovery counts branch references, and a
   // relay is one.
   const relayed = lowerFarJumpRelays(name, rawBlocks, funcLabels);
+  refuseUnreadableImmediates(
+    name,
+    rawBlocks.flatMap((b) => b.instrs),
+  );
 
   // Regime B: recover agbcc jump tables. A dispatch block (`mov pc, rN`) plus its bounds
   // predecessor (`cmp; bhi DEF`) collapse into a `switch_br` emitted from the BOUNDS block; the

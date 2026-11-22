@@ -21,7 +21,8 @@
 // So this is an ALLOWLIST of the spellings whose value is certain, and every other spelling is
 // null for the caller to refuse: an optional sign, then a decimal without a leading zero, a `0x`/`0X`
 // hex, or a run of zeros with at most one octal digit after it (`0`, `00`, `04`, `007`: octal to
-// gas, and a single octal digit is the same value under any radix). Whitespace
+// gas, and a single octal digit is the same value under any radix), whose value lies in a 32-bit
+// word read either way (`GAS_WORD_MIN` below). Whitespace
 // around the sign and the digits is gas's too (`# 7`, `#- 8`, `+ 8(a0)`).
 // Each accepted spelling is pinned against the encoding `arm-none-eabi-as -mcpu=arm7tdmi` and
 // `mips-linux-gnu-as -march=r4300` give it (test/gas-immediate.test.ts); objdump, the other
@@ -43,8 +44,16 @@ export function gasIntLiteral(text: string): number | null {
     return null;
   }
   const v = /^0[xX]/.test(m[2]) ? parseInt(m[2].slice(2), 16) : Number(m[2]);
-  if (!Number.isSafeInteger(v)) {
-    return null;
-  }
-  return m[1] === '-' ? 0 - v : v; // `0 - v`, not `-v`: `#-0` is 0, not -0
+  const signed = m[1] === '-' ? 0 - v : v; // `0 - v`, not `-v`: `#-0` is 0, not -0
+  return Number.isSafeInteger(signed) && signed >= GAS_WORD_MIN && signed < GAS_WORD_END ? signed : null;
 }
+
+/** The values a 32-bit word holds read either way, `[-2^31, 2^32)`: the range in which a literal's
+ *  gas value is the number it spells. Past it the two assemblers part, and neither gives the number:
+ *  `arm-none-eabi-as -mcpu=arm7tdmi` truncates the expression to 32 bits without a word (`mov r0,
+ *  #0x100000008` assembles `movs r0, #8`, `#-4294967295` assembles 1), and `mips-linux-gnu-as
+ *  -march=r4300` refuses it ("number larger than 32 bits"). Read as the number, `#0x100000008`
+ *  lifted `return 4294967304;` and `add sp, #-0x100000000` ran the lift out of memory. Splat's
+ *  constant expressions hold every intermediate value to the same range (`evalConst`). */
+export const GAS_WORD_MIN = -0x80000000;
+export const GAS_WORD_END = 0x100000000;
