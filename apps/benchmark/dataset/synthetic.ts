@@ -11431,8 +11431,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //      (`return sg(1);`), and
   //      sretname the same through a named local, which mwcc gives a home the bare call has not;
   //      sret2fwd the {u16} forwarded the same way, and sret2mod a {u16} modified before it is
-  //      returned, which declines where it comes back in a register (agbcc keeps the pad's bits,
-  //      no member copy says so); sretfl a {float}, whose member is read as its bits, `gF =
+  //      returned: on agbcc, which keeps the pad's bits, the call's local with its member written,
+  //      `sm_ret.h = …; return sm_ret;` (frontend/own-struct-return.ts `liftModifiedCallImage`);
+  //      on mwcc, whose r3 below the {u16} is no object, it still declines; sretfl a {float}, whose member is read as its bits, `gF =
   //      *(s32 *)&s;`, only because nothing declares gF and the lift's own declaration types it as
   //      that word (structure.ts `floatBitsStoreTarget`), on agbcc's r0 and gcc's memory return
   //      alike, and declining on mwcc's lfs and ido's lwc1; sretfld the same against a context that

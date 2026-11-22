@@ -370,14 +370,23 @@ describe("a function returning what a call returned returns the call's struct", 
     expect(renderDeclarations(c.symbolRefs ?? [])).toContain('struct T mk(s32);');
   });
 
-  test('a word computed from the struct and returned as the own `{u16}` declines, as it did', () => {
-    // `struct T s = mk(x); s.a += 1; return s;`: agbcc keeps the pad's bits, which no member copy says
+  test("agbcc: the call's own `{u16}` with its member written is the call's local, returned whole", () => {
+    // `struct T s = mk(x); s.a += 1; return s;`: agbcc keeps the pad's bits, the image's
     const mod =
       'f:\n\tpush\t{lr}\n\tbl\tmk\n\tadd\tr2, r0, #0\n\tadd\tr0, r2, #0x1\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n' +
       '\tldr\tr1, .L3\n\tand\tr1, r1, r2\n\torr\tr0, r0, r1\n\tpop\t{r1}\n\tbx\tr1\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t-0x10000\n';
-    expect(() => decompile('f', mod, ARMV4T_AGBCC, { prototypes: { ...ownT('f'), mk: T16 } })).toThrow(
-      /it is declared to return struct T by value, which comes back in r0 — it is not one word that is all one integer member, and it reads a struct a call returned there/,
+    expect(decompile('f', mod, ARMV4T_AGBCC, { prototypes: { ...ownT('f'), mk: T16 } }).source).toMatch(
+      /mk_ret = mk\(a0\);\s+mk_ret\.a = \(u16\)\(\*\(s32 \*\)&mk_ret \+ 1\);\s+return mk_ret;/,
     );
+    // hand-edited: a mask that keeps a bit of the member, or a value wider than the member, is no
+    // image with only the member replaced
+    const T =
+      /it is declared to return struct T by value, which comes back in r0 — it is not one word that is all one integer member, or a call's struct of its type with that member written, and it reads a struct a call returned there/;
+    const wrongMask = mod.replace('.word\t-0x10000', '.word\t-0x8000');
+    const wide = mod.replace('\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n', '');
+    for (const asm of [wrongMask, wide]) {
+      expect(() => decompile('f', asm, ARMV4T_AGBCC, { prototypes: { ...ownT('f'), mk: T16 } })).toThrow(T);
+    }
   });
 
   test('so does one whose struct reaches the return through a frame slot', () => {

@@ -829,7 +829,8 @@ function spelledDeclaration(name: string, p: FnProto): string {
  *     a signature the header contradicts, which the compiler rejects.
  *  A struct the rule hands back in one register (agbcc's and mwcc's one-word struct in r0/r3) is
  *  that register's word: the plan says so (`register`), and a struct that is all one word-wide
- *  integer member is spelled as that member (frontend/own-struct-return.ts
+ *  integer member is spelled as that member, and a call's struct of the same type returned with
+ *  its member written as that call's local (frontend/own-struct-return.ts
  *  `liftOwnRegisterStruct`), where any other one stays the word the lift returns, with a note in
  *  `notes` saying why (`returnOwnStruct`). */
 function ownStructReturnThroughMemory(
@@ -923,7 +924,7 @@ function returnOwnStruct(
   if (own.register) {
     // a word the struct may not be all of stays the lift's own return, as the machine has it, and
     // the note says why the declared struct is not what it returns
-    const kept = liftOwnRegisterStruct(fn, own.type);
+    const kept = liftOwnRegisterStruct(fn, own.type, target);
     // … save in a function that reads a struct a call returned (frontend/register-struct-call.ts):
     // the word it returns may be computed from that struct — through a frame slot as well as an
     // op — and the word return would print it as the scalar the declaration contradicts
