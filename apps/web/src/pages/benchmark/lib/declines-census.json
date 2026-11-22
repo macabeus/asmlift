@@ -1,7 +1,7 @@
 {
   "generatedBy": "pnpm regen:declines-census (scripts/regen-decline-census.ts) — do not hand-edit",
-  "distinctMessages": 343,
-  "residueTotal": 147,
+  "distinctMessages": 344,
+  "residueTotal": 148,
   "residueByFile": [
     {
       "file": "frontend/thumb.ts",
@@ -114,7 +114,7 @@
     },
     {
       "file": "frontend/ppc.ts",
-      "count": 16,
+      "count": 15,
       "messages": [
         "X X",
         "X carries a relocation ('X') on a stack-pointer adjust — an address built in r1 is not a shape this frontend models",
@@ -130,8 +130,7 @@
         "cannot lift 'X': control falls off the end (the block at 0xX has no terminator and no successorX)",
         "cannot lift 'X': the 'X' at 0xX leaves the function for 'X' — a tail call is not modelled",
         "cannot lift 'X': the X reads the link register the X overwrote on some path, with no 'mtlr' since — the return address is lost there",
-        "cannot lift 'X': the store to 'X' at 0xX is not the link register's save — X",
-        "immediate 'X' is not an integer literal — this frontend will not read it as one"
+        "cannot lift 'X': the store to 'X' at 0xX is not the link register's save — X"
       ]
     },
     {
@@ -154,9 +153,11 @@
     },
     {
       "file": "frontend/disasm.ts",
-      "count": 8,
+      "count": 10,
       "messages": [
+        "immediate 'X' is not an integer literal — this frontend will not read it as one",
         "memory operand 'X' has the displacement 'X', which is not an integer literal — this frontend will not read it as one",
+        "memory operand 'X' is not a displacement and a base register — this frontend will not read it as offset 0",
         "objdump elided a run of zero words ('...') at X, but a zero word is not a decodable instruction on this architecture",
         "objdump elided a run of zero words ('...') before the first instruction of the listing, ending at X: where the run begins is unknown",
         "objdump elided a run of zero words ('...') between X and X, which is not a whole number of instruction words",
