@@ -177,7 +177,8 @@ export function collectSymbolRefs(
   tree.body.forEach(visitStmt);
   // A function-scope static's initializer names the globals whose addresses it holds
   // (`(u32)&MetatileBehavior_IsTallGrass`), which the candidate must declare as much as the body's —
-  // and so does an anonymous image, which the emitter folds into a local's initializer.
+  // and so does an anonymous image, which the emitter folds into a local's initializer or keeps as
+  // the static its copy reads.
   const initAddresses = new Set<string>();
   for (const st of [...(tree.statics ?? []), ...(tree.images ?? [])]) {
     for (const v of st.init ?? []) {

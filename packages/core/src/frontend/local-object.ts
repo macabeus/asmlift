@@ -268,8 +268,9 @@ export function readGasLocalObject(asm: string, symbol: string): LocalObjectRead
  *  label (agbcc's `.LC0`), which is how agbcc 2.9 places the image a local aggregate's constant
  *  initializer is copied from (`u8 a[16] = {…}` is `ldr r1,=.LC0; mov r0,sp; mov r2,#16; bl memcpy`,
  *  varasm.c `output_constant_def`). Nothing in the source names it, so no declaration can spell it:
- *  the object is carried {@link LocalObject.anonymous} and spelled only as the initializer of the
- *  local it is copied into (l3/constinit.ts), or refused there.
+ *  the object is carried {@link LocalObject.anonymous} and spelled as the initializer of the local
+ *  it is copied into, or else as a function-scope `static const` named from its label that the kept
+ *  copy reads (l3/constinit.ts), or refused there.
  *
  *  Read-only data only, with the same refusals as a static's definition: a `.L` label anywhere else
  *  is code, or data this reader has no reason to believe is a constant image. That gate is agbcc's
