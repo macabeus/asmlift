@@ -8230,6 +8230,77 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void g(void);\nvoid pollstep(s32 *p);',
     proto: { pollstep: { params: ['s32 *'], returnsVoid: true }, g: { params: [], returnsVoid: true } },
   },
+  // The poll-store rule and the poll-read pin by each compiler's own rule. `pollkmc` is KMC gcc
+  // 2.7.2's hoist: a lone store of a value the loop does not change, beside a read through a stepped
+  // pointer, is written once ahead of the loop when plain, so it is refused, and the poll read
+  // beside that moving read is pinned. `pollbranch` is IDO's hoist past an unrelated `if` of the
+  // loop, which keeps nothing there: refused. `pollcell`'s loop writes its poll's own `u16` cell
+  // beside an `s32` store through a stepped pointer, which agbcc's alias sets tell apart, so the read
+  // and the write leave the loop together when plain: refused. `pollover`'s two plain stores overlap,
+  // one a byte, which keeps both in agbcc's loop. `pollrot`'s read past the loop's first branch is
+  // the guard's again, which agbcc deletes when plain, so it is printed volatile; `pollor`'s second
+  // read, past the first one's branch, IDO loads once ahead of the loop when plain.
+  {
+    sym: 'pollkmc',
+    src:
+      'void g(void);\ns32 pollkmc(s32 *q)\n{\n    s32 s = 0;\n    while (*(volatile u32 *)0xA4000010 & 3) {\n' +
+      '        ((volatile s32 *)0xA0001000)[1] = 5;\n        s += *q++;\n    }\n    g();\n    return s;\n}',
+    features: ['device-access', 'pointer'],
+    toolchains: ['gcc2.7.2kmc'],
+    ctx: 'void g(void);\ns32 pollkmc(s32 *q);',
+    proto: { pollkmc: { params: ['s32 *'], returns: 's32' }, g: { params: [], returnsVoid: true } },
+  },
+  {
+    sym: 'pollbranch',
+    src:
+      'void g(void);\ns32 pollbranch(s32 a0, s32 a1)\n{\n    s32 n = 0;\n' +
+      '    while (*(volatile u32 *)0xA4600010 & 3) {\n        ((volatile s32 *)0xA4600000)[5] = a0;\n' +
+      '        if (a1 & 1)\n            n++;\n    }\n    g();\n    return n;\n}',
+    features: ['device-access', 'branch'],
+    toolchains: ['ido7.1'],
+    ctx: 'void g(void);\ns32 pollbranch(s32 a0, s32 a1);',
+    proto: { pollbranch: { params: ['s32', 's32'], returns: 's32' }, g: { params: [], returnsVoid: true } },
+  },
+  {
+    sym: 'pollcell',
+    src:
+      'void g(void);\nvoid pollcell(s32 *q)\n{\n    while (*(volatile u16 *)0x3000100 != 50) {\n' +
+      '        *(volatile u16 *)0x3000100 = 7;\n        *q++ = 0;\n    }\n    g();\n}',
+    features: ['device-access', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void g(void);\nvoid pollcell(s32 *q);',
+    proto: { pollcell: { params: ['s32 *'], returnsVoid: true }, g: { params: [], returnsVoid: true } },
+  },
+  {
+    sym: 'pollover',
+    src:
+      'void g(void);\nvoid pollover(s32 a0)\n{\n    while (*(volatile u8 *)0x4000108 & 1) {\n' +
+      '        *(u16 *)0x4000104 = a0;\n        *(u8 *)0x4000105 = a0;\n    }\n    g();\n}',
+    features: ['device-access'],
+    toolchains: ['agbcc'],
+    ctx: 'void g(void);\nvoid pollover(s32 a0);',
+    proto: { pollover: { params: ['s32'], returnsVoid: true }, g: { params: [], returnsVoid: true } },
+  },
+  {
+    sym: 'pollrot',
+    src:
+      'void g(void);\nvoid pollrot(void)\n{\n    s32 s = 0;\n' +
+      '    while (s < 100 && (*(volatile u32 *)0x4000104 & 3))\n        s++;\n    g();\n}',
+    features: ['device-access', 'branch'],
+    toolchains: ['agbcc'],
+    ctx: 'void g(void);\nvoid pollrot(void);',
+    proto: { pollrot: { params: [], returnsVoid: true }, g: { params: [], returnsVoid: true } },
+  },
+  {
+    sym: 'pollor',
+    src:
+      'void g(void);\nvoid pollor(s32 a0)\n{\n    do {\n        ((s32 *)0xA4000000)[5] = a0;\n' +
+      '    } while ((*(volatile u32 *)0xA4600010 & 3) || (*(volatile u32 *)0xA4600014 & 1));\n    g();\n}',
+    features: ['device-access', 'branch'],
+    toolchains: ['ido7.1'],
+    ctx: 'void g(void);\nvoid pollor(s32 a0);',
+    proto: { pollor: { params: ['s32'], returnsVoid: true }, g: { params: [], returnsVoid: true } },
+  },
   // What the discard register does NOT say. `dvnarrow` is the control for a load that leaves it:
   // CodeWarrior at -O0,p reads the plain `s8 x; x = p[5];` as `lwz r0` + `extsb r31,r0`, a home,
   // which stays unstamped (the volatile twin is the same code). `dvdword` is IDO's doubleword
