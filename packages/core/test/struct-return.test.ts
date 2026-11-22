@@ -902,7 +902,8 @@ describe('a function that itself returns a struct', () => {
     ] as const) {
       expect(decompile('rmk2', rmk2, ARMV4T_AGBCC, opts).ownArityNotes).toEqual([
         `[own-return] rmk2: its ${which} \`struct S2 rmk2(s32)\` returns struct S2 by value in r0, and it is not one ` +
-          'word that is all one integer member — lifted as the word the machine code returns, which the header contradicts',
+          "word that is all one integer member, or a call's struct of its type with that member written — lifted as " +
+          'the word the machine code returns, which the header contradicts',
       ]);
     }
     // the bound reads the target's rule: a struct in r0 puts no pointer ahead of the one parameter
@@ -915,8 +916,8 @@ describe('a function that itself returns a struct', () => {
 
 // `struct V3 { float a; float b; s32 c; }; extern struct V3 gV3; void f(s32 x){ struct V3 s = mkv3(x);
 //  gV3 = s; }` — the copy is `ldmia`/`stmia` words, so each floating member's bits are read as an
-// integer and stored through an integer cell this lift spells, which converts nothing. The kmc row
-// `sretfl`'s `gF = s.f;`, read into a bare global, still declines (mips-struct-return.test.ts).
+// integer and stored through an integer cell this lift spells, which converts nothing, as the kmc
+// row `sretfl`'s `gF = s.f;` is into a global nothing declares (mips-struct-return.test.ts).
 test('a struct with floating members copied whole as words reads those members as their bits', () => {
   const CPV3 =
     'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0xc\n\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tbl\tmkv3\n\tldr\tr1, .L3\n' +
