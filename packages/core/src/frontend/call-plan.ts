@@ -1516,9 +1516,9 @@ export function structLocalType(
 //   - one, two or four bytes, the widths one load reads whole — three bytes, or the second
 //     register of an eight-byte struct, is an image no load here builds;
 //   - printed beside its callee's prototype, which the declarations block defines it by;
-//   - all integers: a floating member has no spelling here that reads its bits as the float they
-//     are (structure.ts `frameStructMember` spells an integer field), and `*(s32 *)&s` stored to a
-//     `float` converts the value (agbcc: `bl __floatsisf`).
+//   - a floating member is read as its bits, `*(s32 *)&s`, which structure.ts spells only where
+//     every reader stores them into an integer lvalue the lift types (`floatBitsStoreTarget`): a
+//     float reader would convert them (agbcc: `bl __floatsisf`), so that declines there.
 // Otherwise the register still holds nothing the caller may read. The ONE derivation of that type:
 // the call plan marks the call by it, and `liftRegisterStructCalls` declares the local by it.
 export function registerStructLocal(
@@ -1529,25 +1529,10 @@ export function registerStructLocal(
     return undefined;
   }
   const type = structLocalType(own, target);
-  if ('refused' in type || ![1, 2, 4].includes(type.size ?? 0) || hasFloatingMember(type)) {
+  if ('refused' in type || ![1, 2, 4].includes(type.size ?? 0)) {
     return undefined;
   }
   return spellableProto(own, target, type) === undefined ? undefined : type;
-}
-
-function hasFloatingMember(t: IrType): boolean {
-  switch (t.kind) {
-    case 'float':
-      return true;
-    case 'struct':
-      return t.fields.some((f) => hasFloatingMember(f.type));
-    case 'union':
-      return t.members.some((f) => hasFloatingMember(f.type));
-    case 'array':
-      return hasFloatingMember(t.elem);
-    default:
-      return false;
-  }
 }
 
 /** A STRUCT PASSED BY VALUE IS THE ONE OBJECT ITS ARGUMENT WORDS HOLD AT THE CALL. The lowering

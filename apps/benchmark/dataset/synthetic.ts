@@ -11627,9 +11627,12 @@ export const SYNTHETIC: SynthSpec[] = [
   //      sretname the same through a named local, which mwcc gives a home the bare call has not;
   //      sret2fwd the {u16} forwarded the same way, and sret2mod a {u16} modified before it is
   //      returned, which declines where it comes back in a register (agbcc keeps the pad's bits,
-  //      no member copy says so); sretfl a {float}, which has no local here and declines on agbcc
-  //      (r0 read as `*(s32 *)&s` would convert the bits), on mwcc's lfs and ido's lwc1, and where
-  //      gcc reads the member back through memory as a word (the same cast). A callee declared
+  //      no member copy says so); sretfl a {float}, whose member is read as its bits, `gF =
+  //      *(s32 *)&s;`, only because nothing declares gF and the lift's own declaration types it as
+  //      that word (structure.ts `floatBitsStoreTarget`), on agbcc's r0 and gcc's memory return
+  //      alike, and declining on mwcc's lfs and ido's lwc1; sretfld the same against a context that
+  //      declares the global `float`, stored through an integer cell, `*(s32 *)&gFd = …`, since the
+  //      bare name would convert the bits. A callee declared
   //      without its struct return stays a scalar call, as the same bytes from a scalar callee do;
   //      that control is a core test
   //      (packages/core/test/register-struct-call.test.ts), since as a row it would be sret1w
@@ -12141,6 +12144,21 @@ export const SYNTHETIC: SynthSpec[] = [
             },
           },
           sretunw: { returnsVoid: true },
+        },
+      },
+      // sretfl with the float global DECLARED: its bits stored bare would convert, so the lift must
+      // spell the store through an integer cell or decline
+      {
+        sym: 'sretfld',
+        src:
+          'struct Fd { float f; };\nextern struct Fd mkfd(s32 x);\nextern float gFd;\n' +
+          'void sretfld(s32 x)\n{\n    struct Fd s = mkfd(x);\n    gFd = s.f;\n}',
+        features: ['struct-return', 'float'],
+        ...at,
+        ctx: 'struct Fd { float f; };\nextern float gFd;\nstruct Fd mkfd(s32 x);\nvoid sretfld(s32 x);',
+        proto: {
+          mkfd: { params: ['s32'], returns: 'struct Fd', returnLayout: one('f', 'float') },
+          sretfld: { returnsVoid: true },
         },
       },
       // a member stored through a POINTER global's value: the element is the pointee's, never the

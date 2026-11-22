@@ -8,6 +8,7 @@ import { describe, expect, test } from 'vitest';
 import { renderDeclarations } from '../src/declare';
 import { decompile } from '../src/pipeline';
 import type { FnProto } from '../src/proto';
+import { globalsFromContext } from '../src/proto-context';
 import { enumerateCandidates } from '../src/rank';
 import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '../src/target';
@@ -321,14 +322,31 @@ describe("mwcc: the struct's frame home is the local the call assigns", () => {
   });
 });
 
-describe('a struct with a floating member has no local here', () => {
-  test('agbcc: `struct T { float a; }` comes back in r0, and r0 still holds nothing the caller may read', () => {
-    // `struct T s = mk(x); gF = s.a;` against `extern float gF;`: read as `*(s32 *)&s`, the store
-    // would convert the bits to a float (`bl __floatsisf`)
-    const fl = agbcc('c_f', 'str');
-    expect(() =>
-      decompile('c_f', fl, ARMV4T_AGBCC, { prototypes: { mk: mk([{ name: 'a', type: 'float' }]) } }),
-    ).toThrow(/r0 is read on a path where a call has destroyed it/);
+describe('a struct with a floating member is read as its bits, only where they are stored as bits', () => {
+  const fl = mk([{ name: 'a', type: 'float' }]);
+  test('agbcc: `struct T { float a; }` in r0 stored to a global nothing declares copies the word', () => {
+    // `struct T s = mk(x); gV = s.a;`: the lift declares `gV` itself, as the word its access is
+    expect(decompile('c_f', agbcc('c_f', 'str'), ARMV4T_AGBCC, { prototypes: { mk: fl } }).source).toMatch(
+      /struct T mk_ret;\s+mk_ret = mk\(a0\);\s+gV = \*\(s32 \*\)&mk_ret;/,
+    );
+  });
+
+  test('a global a context declares is stored through an integer cell, never bare', () => {
+    // against `extern float gV;`, `gV = *(s32 *)&s;` would convert the bits (`bl __floatsisf`)
+    const contextGlobals = globalsFromContext('extern float gV;', 'c');
+    expect(
+      decompile('c_f', agbcc('c_f', 'str'), ARMV4T_AGBCC, { prototypes: { mk: fl }, contextGlobals }).source,
+    ).toMatch(/mk_ret = mk\(a0\);\s+\*\(s32 \*\)&gV = \*\(s32 \*\)&mk_ret;/);
+  });
+
+  test('a reader that takes a float declines: the bits would be converted', () => {
+    // `float c_f(s32 x) { return mk(x).a; }`: r0 is returned as the float it is, which the word read
+    // of the local would convert
+    const ret = 'c_f:\n\tpush\t{lr}\n\tbl\tmk\n\tpop\t{r1}\n\tbx\tr1\n';
+    const own = { params: ['s32'], returns: 'float' };
+    expect(() => decompile('c_f', ret, ARMV4T_AGBCC, { prototypes: { mk: fl, c_f: own } })).toThrow(
+      /a 4-byte read of the floating member 'a' of a struct local is an integer here/,
+    );
   });
 });
 
