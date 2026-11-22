@@ -11497,10 +11497,12 @@ export const SYNTHETIC: SynthSpec[] = [
   //      the frame, and mwcc_242_81 refuses the by-value parameter itself (it passes a copy's
   //      address, `tbval`).
   //  11. bvwg, bvqg, bvtg, bvqp, bvcg: a struct passed by value straight from a global (one, two and
-  //      three words), through a pointer, and a `u8[4]` struct. O32 passes the words in argument
+  //      three words), through a pointer, and a `u8[4]` struct; bvqpo through a pointer past its
+  //      byte 0, a member of an enclosing struct, which declines. O32 passes the words in argument
   //      registers (kmc through one `lui`/`lw` pair per word, IDO storing each into its home slot),
-  //      which the call plan folds into the global passed whole. Through a pointer declines on every
-  //      toolchain, and the `u8[4]` struct on both MIPS ones (IDO copies it with `lwl`/`swl`, gcc
+  //      which the call plan folds into the global passed whole. Through a pointer it is the
+  //      pointer's pointee, `takeQ(k, *p)`, on agbcc and both MIPS ones, and the `u8[4]` struct
+  //      declines on both MIPS ones (IDO copies it with `lwl`/`swl`, gcc
   //      packs its bytes into a register). mwcc_242_81 passes a copy's address and declines; agbcc
   //      is the control. One statement per line: IDO schedules by source line. gcc2.7.2 is pinned
   //      in packages/cli/test/matching/mips-calls.test.ts.
@@ -12739,6 +12741,33 @@ export const SYNTHETIC: SynthSpec[] = [
         returnsVoid: true,
       },
       bvqp: { returnsVoid: true },
+    },
+  },
+  // bvqp's struct one word into an enclosing one, `takeQ(k, o->q)`: the words start past the
+  // pointer's byte 0, which no spelling here states, so it declines
+  {
+    sym: 'bvqpo',
+    src:
+      'struct Q { u32 a, b; };\nstruct O { u32 t; struct Q q; };\nvoid takeQ(s32 k, struct Q q);\n' +
+      'void bvqpo(s32 k, struct O *o)\n{\n    takeQ(k, o->q);\n}',
+    features: ['pointer', 'multi-arg'],
+    toolchains: ALL,
+    ctx: 'struct Q { u32 a, b; };\nstruct O { u32 t; struct Q q; };\nvoid takeQ(s32 k, struct Q q);\nvoid bvqpo(s32 k, struct O *o);',
+    proto: {
+      takeQ: {
+        params: ['s32', 'struct Q'],
+        byValueLayouts: {
+          1: {
+            kind: 'struct',
+            members: [
+              { name: 'a', type: 'u32' },
+              { name: 'b', type: 'u32' },
+            ],
+          },
+        },
+        returnsVoid: true,
+      },
+      bvqpo: { returnsVoid: true },
     },
   },
   {
