@@ -382,16 +382,6 @@ const plainWrite = (s: Stmt, ctx: TreeContext): s is Write =>
     ? !qualifiedAccessChain(s.lval)
     : s.k === 'assign' && !ctx.locals.has(s.name) && !ctx.written.has(s.name);
 
-/** A plain write in `stmts` ({@link plainWrite}), or undefined. A guard-fused loop holding one is
- *  credited nothing. The credit is for loops the plain count refused, and such a loop's plain write
- *  is one agbcc may move out of it on recompile ({@link sunkPollStore}), where the machine made it
- *  every time round: a lift the credit let through would then write less often than the machine.
- *  Withholding the credit leaves the loop refused as the count refused it, whatever it writes, the
- *  safe side of the judgement `sunkPollStore` makes more narrowly. */
-function plainWriteIn(stmts: readonly Stmt[], ctx: TreeContext): Write | undefined {
-  return everyStmt(stmts).find((s): s is Write => plainWrite(s, ctx));
-}
-
 /** The plain write ({@link plainWrite}) in a loop that polls a pinned read which a compiler may
  *  keep in a register for the whole loop and write once after it, where the machine wrote it each
  *  time round; undefined when the loop holds none.
@@ -663,10 +653,11 @@ function countEffects(
       const test: EffectCounts = new Map();
       effectsInExpr(s.fusedGuard.test, test, ctx);
       const cond = deviceReads(own);
-      // A loop that writes memory plain is credited nothing ({@link plainWriteIn}).
-      const credit = plainWriteIn(loopStmts(s), ctx)
-        ? new Map<string, number>()
-        : new Map([...deviceReads(test)].map(([k, n]) => [k, Math.min(n, cond.get(k) ?? 0)] as const));
+      // A plain write in the loop is no reason to withhold it: the loop's condition renders the
+      // credited read, so the loop is a poll, and {@link sunkPollStore} has just refused every write
+      // in it the compiler's loop pass moves (none, at flags with no `motion`). What it lets through
+      // is kept in the loop, as IDO keeps `while (REG & 3) { B[5] = a0; C[2] = a1; }`'s two stores.
+      const credit = new Map([...deviceReads(test)].map(([k, n]) => [k, Math.min(n, cond.get(k) ?? 0)] as const));
       const copies = ctx.fusedCopies.get(s.fusedGuard.site) ?? [];
       ctx.fusedCopies.set(s.fusedGuard.site, [...copies, { credit, cond }]);
     }
