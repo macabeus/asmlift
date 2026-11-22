@@ -15,11 +15,16 @@
  *  So a lift that left such a read plain would recompile to a loop that never reads the register
  *  again: kl2dct's DMA waits (`do {} while (((s32 *)0x40000d4)[2] & 0x80 << 24)`) and VCOUNT waits.
  *
- *  ONLY THE READS THE COMPILER WOULD HAVE MOVED ARE PINNED, so a read pinned here is one the source
- *  made `volatile`, and none is pinned that a plain source would have kept in place:
- *   • the loop is left for one place only, and makes no call and holds no unmodelled instruction (`opaque`), in any of its blocks,
+ *  THE READS THE COMPILER MAY HAVE MOVED ARE PINNED. Whether it did is decided on more than the
+ *  asm shows — the alias analysis's register history, and `move_movables`' cost model, which leaves
+ *  a read of a long loop in place (loop.c:1826-1830, `threshold * savings * lifetime` against the
+ *  loop's insns) — so a read pinned here may be one a plain source kept. That over-reach costs a
+ *  spelling, and in a loop that stores it can cost the store's judgement too (below). The bounds:
+ *   • the loop makes no call and holds no unmodelled instruction (`opaque`), in any of its blocks,
  *     nested loops included: the compiler moves nothing out of a loop that calls, and an
- *     unmodelled instruction may be one;
+ *     unmodelled instruction may be one. A loop left for several places is pinned like any other:
+ *     the exit-target gate (loop.c:2512-2525) stops only `load_mems`, and `scan_loop`'s movables
+ *     (871-887) do not look at exit targets;
  *   • where the loop stores, only where every access is at a fixed address, and only a read a branch
  *     that leaves the loop or goes round it again decides on (`testedReads`): a poll's. A store
  *     through a stepped pointer may be any cell, and a copy loop's bound read beside it is kept
@@ -30,7 +35,15 @@
  *     the plain spelling of it, and IDO 7.1 keeps `while (*(s32 *)A & 3) ((s32 *)B)[1] = a0;`'s read
  *     while moving `while (gF == 0) gW = a0;`'s — so the read is pinned, which is right whichever
  *     the compiler decided, and the store is the poll-store rule's (contracts.ts `sunkPollStore`).
- *     Not on a compiler that keeps the read beside any store (target.ts
+ *     A pinned read the loop's condition renders makes the loop a poll to that rule, which refuses
+ *     a plain store no rule proves kept: a counted loop's `u8` bound beside DMA stores (sa3's
+ *     `ProcessOamBuffers`) declines though agbcc kept its stores, since a byte read keeps no store
+ *     its addresses prove apart from (`for (;;) { DMA[5] = a0; if (++i >= *(volatile u8 *)&gIdx)
+ *     break; }` sinks it), and leaving the bound plain lets `do { …; i++; } while (i < gIdx);` load it
+ *     once. A header read no exit tests is left as it was, though `scan_loop` moves it whatever
+ *     tests it (`do { if (VCOUNT == 3) DMA[6] = a0; } while (DMA[2] & M);` loads VCOUNT once when
+ *     plain): pinning it forecloses the base-pointer spelling three matched rows need
+ *     (`synthetic:fieldbase`, `dmafield`, `dmaflat`), whose constant-address plain read agbcc moves. Not on a compiler that keeps the read beside any store (target.ts
  *     `keepsInvariantReadsBesideStores`: mwcc, in every probe);
  *   • the read is in the loop's header, the block every time round starts with, ahead of every
  *     branch the loop takes. A read past one is `maybe_never` to agbcc (loop.c, under a label or a
@@ -47,8 +60,8 @@
  *  is pinned with it (`sameRead`): it is the source's one condition, and only two reads alike let
  *  the structurer fuse the guard back into the loop. Without it, a `/volatile` pointer spelling
  *  that matched before (`synthetic:onepoll`) lost its `while`.
- *  Over-reach costs a spelling and never an access, as the device pin's does: a `volatile` read is
- *  made where the machine made it. */
+ *  Over-reach never costs an access, as the device pin's does not: a `volatile` read is made where
+ *  the machine made it. */
 import { type Block, type Op, type Value, dominators, predecessors, reachableBlocks, terminator } from '../ir/core';
 import { effectful } from '../ir/discipline';
 import { type NaturalLoop, analyzeLoops } from '../ir/loops';
@@ -106,12 +119,10 @@ export function pinPollReads(irBlocks: readonly Block[], target: TargetDescripti
     }
   }
   for (const loop of loops.byHeader.values()) {
-    // A loop left for more than one place — an early `return`, a `break` past a tail — is one
-    // agbcc's loop pass does not optimize (loop.c:2512-2525), and a plain read stays in it
-    // (`synthetic:sretloop1ret` re-reads `gSegTab->segs` in a loop that returns from inside).
-    if (new Set(loop.exitEdges.map((e) => e.to)).size > 1) {
-      continue;
-    }
+    // A loop left for more than one place — an early `return`, a `break` past a tail — is no
+    // exception: the exit-target gate (loop.c:2512-2525) stops only `load_mems`, and `scan_loop`'s
+    // movables (871-887) do not look at exit targets, so `while (VCOUNT != 160) { if (DISPSTAT &
+    // 1) return 1; }` loads DISPSTAT once, ahead of the loop, when it is plain.
     const ops = [...loop.body].flatMap((b) => b.ops);
     if (ops.some((op) => op.opcode === 'call' || op.opcode === 'opaque')) {
       continue;

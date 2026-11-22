@@ -7,6 +7,7 @@
 //     void w7(u32 a) { do { if (a & 1) a = a * 3; else a >>= 1; } while (*(vu16 *)0x4000006 != 3); h(a); }
 //     void hr(s32 a0) { while (((volatile s32 *)0x40000d4)[2] & 0x80000000) ((s32 *)0x40000d4)[5] = a0; g(); }
 //     void p04(s32 a0) { while (((volatile s32 *)0x40000d4)[2] & 0x80000000) { if (a0 & 1) ((s32 *)0x40000d4)[5] = a0; } g(); }
+//     s32 t07(void) { while (*(vu16 *)0x4000006 != 160) { if (*(vu16 *)0x4000004 & 1) return 1; } g(); return 0; }
 //   IDO 7.1 cc -O2 -mips2 -32 -non_shared -G 0
 //     void iv(void) { while (*(vu32 *)0xA4600010 & 3) ; }
 //     void v1(s32 a0) { while (((vu32 *)0xA4600010)[0] & 3) { ((vu32 *)0xA4600000)[5] = a0; } }
@@ -14,7 +15,9 @@
 //     void qw(void) { while (*(vu32 *)0xCC006010 & 3) ; g(); }
 //
 // Recompiled with the read plain, w1, iv and qw are a branch to itself; hr's store and read both
-// leave the loop (agbcc `load_mems`), and v1's store is written once ahead of it (IDO).
+// leave the loop (agbcc `load_mems`), and v1's store is written once ahead of it (IDO). t07's
+// DISPSTAT read, in a loop that returns from inside, is loaded once ahead of the loop (agbcc
+// `scan_loop`, which does not ask how many places the loop is left for).
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
@@ -137,6 +140,42 @@ p04:
 	.word	0x40000e8
 .Lfe1:
 `;
+const T07 = `
+t07:
+	push	{r4, lr}
+	ldr	r1, .L9
+	ldrh	r0, [r1]
+	cmp	r0, #0xa0
+	beq	.L4	@cond_branch
+	ldr	r3, .L9+0x4
+	mov	r4, #0x1
+	add	r2, r1, #0
+.L5:
+	ldrh	r1, [r3]
+	add	r0, r4, #0
+	and	r0, r0, r1
+	cmp	r0, #0
+	beq	.L3	@cond_branch
+	mov	r0, #0x1
+	b	.L8
+.L10:
+	.align	2, 0
+.L9:
+	.word	0x4000006
+	.word	0x4000004
+.L3:
+	ldrh	r0, [r2]
+	cmp	r0, #0xa0
+	bne	.L5	@cond_branch
+.L4:
+	bl	g
+	mov	r0, #0x0
+.L8:
+	pop	{r4}
+	pop	{r1}
+	bx	r1
+.Lfe1:
+`;
 const IV = `
 00000000 <iv>:
    0:	lui	v0,0xa460
@@ -206,6 +245,12 @@ describe('a poll read the compiler would move out of its loop is pinned volatile
 
   test('agbcc: a read past a branch of the loop stays plain (maybe_never keeps it)', () => {
     expect(decompile('w7', W7, AGBCC, { prototypes }).source).toContain('} while (*(u16 *)67108870 != 3);');
+  });
+
+  test('agbcc: a header read of a loop left for two places is pinned', () => {
+    expect(decompile('t07', T07, AGBCC, { prototypes }).source).toContain(
+      'if ((1 & *(volatile u16 *)67108868) != 0) return 1;',
+    );
   });
 
   test('IDO 7.1 at -O2 pins it; at -O1 it does not', () => {
