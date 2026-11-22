@@ -21,10 +21,12 @@
 // WHERE THE FOLD IS NOT SOUND, THE COPY STAYS and the image becomes what it is in the machine: a
 // read-only object of its own, spelled as a function-scope `static const` of the element its
 // directives wrote, which the kept `memcpy` reads. That is sound whenever every mention of the
-// image is the whole source of a block copy whose constant count stays inside it — the standard
-// fixes that such a copy only reads its source, so nothing writes through the `const`. It is the
-// fallback, not the reading: an initializer is the source the compiler was given, so the fold is
-// taken wherever it holds, and one copy that cannot fold keeps every copy of that image.
+// image is the whole source of a block copy whose constant count stays inside it, into a
+// non-volatile local with room for that count where the copy starts — the standard fixes that such
+// a copy only reads its source, so nothing writes through the `const`, and a copy that ran past its
+// local would write the saved registers, which no C object spells. It is the fallback, not the
+// reading: an initializer is the source the compiler was given, so the fold is taken wherever it
+// holds, and one copy that cannot fold keeps every copy of that image.
 //
 // THE FOLD IS SOUND exactly when the declaration's initializer and the copy are one program:
 //   • the copy is a block copy the C standard fixes (proto.ts `blockCopyRoles`), a TOP-LEVEL
@@ -68,6 +70,7 @@ import {
   mapExprChildren,
   mapStmtExprs,
   mentionedName,
+  renameVariables,
   walkExprs,
 } from './ast';
 import { takenNames } from './hoist';
@@ -153,21 +156,50 @@ interface Fold {
   string: boolean;
 }
 
+/** One block copy whose source is the whole image: its index in the body where the call is a
+ *  top-level statement of its own (else null), its count where that is a constant, and its
+ *  destination. */
+interface CopySite {
+  at: number | null;
+  n: number | null;
+  dst: Expr | undefined;
+}
+
+/** Every block copy in `body`, at any depth, whose source is the whole `image` — the one census both
+ *  spellings read: the fold takes the top-level ones, the static all of them. */
+function copySites(body: readonly Stmt[], image: SImage): CopySite[] {
+  const top = new Map<Expr, number>();
+  body.forEach((s, i) => {
+    if (s.k === 'exprstmt' && s.value.k === 'call') {
+      top.set(s.value, i);
+    }
+  });
+  const sites: CopySite[] = [];
+  for (const e of walkExprs(body as Stmt[])) {
+    const roles = e.k === 'call' ? blockCopyRoles(e.fn) : undefined;
+    if (e.k !== 'call' || roles === undefined) {
+      continue;
+    }
+    const src = e.args[roles.src];
+    if (src === undefined || wholeObject(src) !== image.name) {
+      continue;
+    }
+    const count = e.args[roles.n];
+    sites.push({
+      at: top.get(e) ?? null,
+      n: count === undefined ? null : constantValue(count),
+      dst: e.args[roles.dst],
+    });
+  }
+  return sites;
+}
+
 /** Why `image` cannot fold, as the tail of a sentence naming it, or the fold of each copy of it. */
-function planFolds(sfn: SFn, image: SImage): Fold[] | string {
+function planFolds(sfn: SFn, image: SImage, sites: readonly CopySite[]): Fold[] | string {
   if (image.type.kind !== 'array' || image.type.elem.kind !== 'int') {
     return 'whose image writes no one element width — a struct, or padding alone';
   }
-  const copies: number[] = [];
-  sfn.body.forEach((s, i) => {
-    if (
-      s.k === 'exprstmt' &&
-      s.value.k === 'call' &&
-      wholeObject(s.value.args[blockCopyRoles(s.value.fn)?.src ?? -1] ?? { k: 'const', value: 0 }) === image.name
-    ) {
-      copies.push(i);
-    }
-  });
+  const copies = sites.flatMap((c) => (c.at === null ? [] : [c.at]));
   if (copies.length === 0) {
     return (
       'which no top-level block-copy call (memcpy) takes as its source — the one copy folded into an ' +
@@ -329,33 +361,63 @@ function uses(
 
 /** How one image is spelled: folded into the locals its copies fill, kept as the read-only static
  *  its copies read ({@link asStatic}), or refused with the tail of the sentence that says why. */
-function planImage(sfn: SFn, image: SImage): Fold[] | 'static' | string {
-  const plan = planFolds(sfn, image);
-  if (typeof plan !== 'string' || image.type.kind !== 'array' || image.type.elem.kind !== 'int') {
-    return plan;
+type ImagePlan = { kind: 'fold'; folds: Fold[] } | { kind: 'static' } | { kind: 'refused'; why: string };
+
+function planImage(sfn: SFn, image: SImage): ImagePlan {
+  const sites = copySites(sfn.body, image);
+  const plan = planFolds(sfn, image, sites);
+  if (typeof plan !== 'string') {
+    return { kind: 'fold', folds: plan };
   }
-  return onlyCopied(sfn.body, image) ? 'static' : plan;
+  return image.type.kind === 'array' && image.type.elem.kind === 'int' && onlyCopied(sfn, image, sites)
+    ? { kind: 'static' }
+    : { kind: 'refused', why: plan };
 }
 
-/** Whether every mention of `image` in `body` is the whole source of a block copy whose constant
- *  count stays inside it — anywhere in the body. The standard fixes that a copy only READS its
- *  source, so the bytes may be a `static const` object; a mention of any other kind may write
- *  through it, or read it at a width or an offset the declaration would have to answer for. */
-function onlyCopied(body: readonly Stmt[], image: SImage): boolean {
+/** Whether every mention of `image` is the whole source of a block copy, anywhere in the body, whose
+ *  constant count stays inside the image AND inside the local it fills. The standard fixes that a
+ *  copy only READS its source, so the bytes may be a `static const` object; a mention of any other
+ *  kind may write through it, or read it at a width or an offset the declaration would have to
+ *  answer for. The destination bound is the fold's size check kept: a count past the local's end
+ *  writes the saved registers or the caller's frame, which no C object spells. */
+function onlyCopied(sfn: SFn, image: SImage, sites: readonly CopySite[]): boolean {
   const size = byteSize(image.type);
-  let copies = 0;
-  for (const e of walkExprs(body as Stmt[])) {
-    const roles = e.k === 'call' ? blockCopyRoles(e.fn) : undefined;
-    if (e.k !== 'call' || roles === undefined) {
-      continue;
-    }
-    const src = e.args[roles.src];
-    const n = constantValue(e.args[roles.n] ?? { k: 'var', name: '' });
-    if (src !== undefined && wholeObject(src) === image.name && n !== null && n >= 0 && size !== null && n <= size) {
-      copies++;
-    }
+  return (
+    size !== null &&
+    sites.length > 0 &&
+    sites.length === mentions(sfn.body, image.name) &&
+    sites.every((c) => c.n !== null && c.n >= 0 && c.n <= size && fitsLocal(sfn, c.dst, c.n))
+  );
+}
+
+/** Whether `dst` is a non-volatile local of `sfn`, whole or at a constant byte offset, with room for
+ *  `n` bytes from there. A byte offset is read only where the sum's arithmetic is in bytes: the
+ *  local's address cast to an integer or to a byte pointer, plus a constant. */
+function fitsLocal(sfn: SFn, dst: Expr | undefined, n: number): boolean {
+  if (dst === undefined) {
+    return false;
   }
-  return copies > 0 && copies === mentions(body, image.name);
+  let local = wholeObject(dst);
+  let offset = 0;
+  const b = bare(dst);
+  if (local === null && b.k === 'bin' && b.op === '+') {
+    const k = constantValue(b.r);
+    const bytes =
+      b.l.k === 'cast' &&
+      (b.l.to.kind === 'int' || (b.l.to.kind === 'ptr' && b.l.to.to.kind === 'int' && b.l.to.to.width === 8));
+    local = bytes && k !== null ? wholeObject(b.l) : null;
+    offset = k ?? 0;
+  }
+  const decl = local === null ? undefined : sfn.locals.find((l) => l.name === local);
+  const room = decl === undefined ? null : byteSize(decl.type);
+  return (
+    decl !== undefined &&
+    decl.volatile !== true &&
+    decl.pointeeVolatile !== true &&
+    room !== null &&
+    offset >= 0 &&
+    offset + n <= room
+  );
 }
 
 /** Whether every anonymous image `sfn` holds can be spelled — folded into a local's initializer or
@@ -364,8 +426,8 @@ function onlyCopied(body: readonly Stmt[], image: SImage): boolean {
 export function constantImageRefusal(sfn: SFn): { image: string; refused: string } | null {
   for (const image of sfn.images ?? []) {
     const plan = planImage(sfn, image);
-    if (typeof plan === 'string' && plan !== 'static') {
-      return { image: image.name, refused: plan };
+    if (plan.kind === 'refused') {
+      return { image: image.name, refused: plan.why };
     }
   }
   return null;
@@ -402,12 +464,6 @@ function staticName(sfn: SFn, label: string): string {
     name = `${base}_${k}`;
   }
   return name;
-}
-
-/** `e` with every mention of `from` renamed `to`. */
-function renamed(e: Expr, from: string, to: string): Expr {
-  const r = mapExprChildren(e, (c) => renamed(c, from, to));
-  return (r.k === 'var' || r.k === 'addr' || r.k === 'postincr') && mentionedName(r) === from ? { ...r, name: to } : r;
 }
 
 /** `e` with every access to a folded local that reads one of its elements AS that element spelled
@@ -472,20 +528,20 @@ export function foldConstantImages(sfn: SFn): SFn {
   delete out.images;
   for (const image of sfn.images) {
     const plan = planImage(out, image);
-    if (plan === 'static') {
+    if (plan.kind === 'static') {
       const name = staticName(out, image.name);
       out = {
         ...out,
         statics: [...(out.statics ?? []), asStatic(image, name)],
-        body: out.body.map((st) => mapStmtExprs(st, (e) => renamed(e, image.name, name))),
+        body: renameVariables(out.body, new Map([[image.name, name]])),
       };
       continue;
     }
-    if (typeof plan === 'string') {
-      throw new Error(`cannot spell '${sfn.name}': the compiler's anonymous constant '${image.name}' ${plan}`);
+    if (plan.kind === 'refused') {
+      throw new Error(`cannot spell '${sfn.name}': the compiler's anonymous constant '${image.name}' ${plan.why}`);
     }
-    const copies = new Set(plan.map((f) => f.at));
-    const by = new Map(plan.map((f) => [f.local, f]));
+    const copies = new Set(plan.folds.map((f) => f.at));
+    const by = new Map(plan.folds.map((f) => [f.local, f]));
     out = {
       ...out,
       body: out.body.filter((_, i) => !copies.has(i)).map((st) => mapStmtExprs(st, (e) => asElement(e, by))),

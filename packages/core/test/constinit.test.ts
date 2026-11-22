@@ -35,6 +35,18 @@ const fn = (body: Stmt[], locals: SFn['locals'], img: SImage = image([1, 2, 3, 4
 });
 const bytes4 = [{ name: 'sp0', type: T.array(T.u(8), 4) }];
 const use = (e: Expr): Stmt => ({ k: 'exprstmt', value: { k: 'call', fn: 'g', args: [e] } });
+/** `memcpy(dst, .LC0, n)` */
+const into = (dst: Expr, n: number): Stmt => ({
+  k: 'exprstmt',
+  value: { k: 'call', fn: 'memcpy', args: [dst, { k: 'addr', name: '.LC0' }, c(n)] },
+});
+/** `(u32)sp0 + offset`: the address of `sp0`'s byte `offset` */
+const byteOf = (offset: number): Expr => ({
+  k: 'bin',
+  op: '+',
+  l: { k: 'cast', to: T.u(32), e: v('sp0') },
+  r: c(offset),
+});
 
 test('the copy folds into the declaration, and the image and the copy are gone', () => {
   const sfn = fn([copy('sp0', '.LC0', 4), use(v('sp0'))], bytes4);
@@ -226,6 +238,35 @@ test.each<[string, SFn, string]>([
     fn([copy('sp0', '.LC0', 8)], [{ name: 'sp0', type: T.array(T.u(8), 8) }]),
     'does not move its whole 4 bytes',
   ],
+  // the copy writes past the local it fills — the saved registers, the caller's frame — which no C
+  // object spells: the fold's size check refuses it, and the static keeps that bound
+  [
+    'copied past the local it fills',
+    fn([copy('sp0', '.LC0', 4)], [{ name: 'sp0', type: T.array(T.u(8), 2) }]),
+    'a u8[2], which is not an integer array of its 4 bytes',
+  ],
+  [
+    'copied in part past the local it fills',
+    fn([copy('sp0', '.LC0', 3)], [{ name: 'sp0', type: T.array(T.u(8), 2) }]),
+    'does not move its whole 4 bytes',
+  ],
+  [
+    'copied at an offset past the local it fills',
+    fn([into(byteOf(6), 4)], [{ name: 'sp0', type: T.array(T.u(8), 8) }]),
+    'does not fill a local of this function',
+  ],
+  [
+    'copied at an offset whose arithmetic is not in bytes',
+    // `sp0 + 1` on a u32 array steps a whole element: the bound reads bytes only
+    fn([into({ k: 'bin', op: '+', l: v('sp0'), r: c(1) }, 4)], [{ name: 'sp0', type: T.array(T.u(32), 2) }]),
+    'does not fill a local of this function',
+  ],
+  ['into a global', fn([copy('gBuf', '.LC0', 4)], bytes4), 'does not fill a local'],
+  [
+    'into a volatile local',
+    fn([copy('sp0', '.LC0', 4)], [{ name: 'sp0', type: T.array(T.u(8), 4), volatile: true }]),
+    'which is volatile',
+  ],
 ])('%s: refuses, and the emitter will not print it', (_, sfn, why) => {
   expect(constantImageRefusal(sfn)?.refused).toContain(why);
   expect(() => cBackend.emit(sfn)).toThrow(why);
@@ -247,11 +288,11 @@ test.each<[string, SFn, string]>([
     'memcpy(sp0, (u8 *)LC0, 4);',
   ],
   ['copied in part', fn([copy('sp0', '.LC0', 2)], bytes4), '    memcpy(sp0, (u8 *)LC0, 2);\n'],
-  ['into a global', fn([copy('gBuf', '.LC0', 4)], bytes4), '    memcpy(gBuf, (u8 *)LC0, 4);\n'],
   [
-    'into a volatile local',
-    fn([copy('sp0', '.LC0', 4)], [{ name: 'sp0', type: T.array(T.u(8), 4), volatile: true }]),
-    '    volatile u8 sp0[4];\n    memcpy(sp0, (u8 *)LC0, 4);\n',
+    // imgidx: the second image fills the tail of the one object, at a byte offset that fits it
+    'into the tail of a wider local',
+    fn([into(byteOf(4), 4)], [{ name: 'sp0', type: T.array(T.u(8), 8) }]),
+    '    u8 sp0[8];\n    memcpy((u32)sp0 + 4, (u8 *)LC0, 4);\n',
   ],
   [
     // imgnbr: the image fills the head of one frame object that also holds an escaping word
