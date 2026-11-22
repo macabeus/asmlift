@@ -10,6 +10,8 @@
 //     s32 t07(void) { while (*(vu16 *)0x4000006 != 160) { if (*(vu16 *)0x4000004 & 1) return 1; } g(); return 0; }
 //     void n06(s32 a0, s32 a1) { s32 v; do { s32 i; v = ((volatile s32 *)0x40000d4)[2];
 //       for (i = 0; i < a1; i++) ((volatile s32 *)0x40000e0)[1] = a0; } while (v & 0x80000000); g(); }
+//     void st1(s32 *p) { while (*(vu16 *)0x4000006 != 160) *p++ = 0; g(); }
+//     void se(s32 *p) { while (*(u8 *)0x4000006 != 160) *p++ = 0; g(); }
 //   IDO 7.1 cc -O2 -mips2 -32 -non_shared -G 0
 //     void iv(void) { while (*(vu32 *)0xA4600010 & 3) ; }
 //     void v1(s32 a0) { while (((vu32 *)0xA4600010)[0] & 3) { ((vu32 *)0xA4600000)[5] = a0; } }
@@ -23,7 +25,8 @@
 // leave the loop (agbcc `load_mems`), and v1's store is written once ahead of it (IDO). t07's
 // DISPSTAT read, in a loop that returns from inside, is loaded once ahead of the loop (agbcc
 // `scan_loop`, which does not ask how many places the loop is left for). n06's inner `for` writes
-// its cell once, after it (agbcc runs `load_mems` on the inner loop too). i13's store
+// its cell once, after it (agbcc runs `load_mems` on the inner loop too); st1's `u16` read is
+// loaded once ahead of the loop beside the `s32` store, and se's `u8` read stays in it. i13's store
 // is written once ahead of the loop compiled against `extern volatile s32 gF;`, and h1, recompiled
 // plain, is the original.
 import { describe, expect, test } from 'vitest';
@@ -270,6 +273,54 @@ n06:
 	.word	0x40000e4
 .Lfe1:
 `;
+const ST1 = `
+st1:
+	push	{lr}
+	add	r2, r0, #0
+	ldr	r1, .L7
+	ldrh	r0, [r1]
+	cmp	r0, #0xa0
+	beq	.L4	@cond_branch
+	mov	r3, #0x0
+.L5:
+	stmia	r2!, {r3}
+	ldrh	r0, [r1]
+	cmp	r0, #0xa0
+	bne	.L5	@cond_branch
+.L4:
+	bl	g
+	pop	{r0}
+	bx	r0
+.L8:
+	.align	2, 0
+.L7:
+	.word	0x4000006
+.Lfe1:
+`;
+const SE = `
+se:
+	push	{lr}
+	add	r2, r0, #0
+	ldr	r1, .L7
+	ldrb	r0, [r1]
+	cmp	r0, #0xa0
+	beq	.L4	@cond_branch
+	mov	r3, #0x0
+.L5:
+	stmia	r2!, {r3}
+	ldrb	r0, [r1]
+	cmp	r0, #0xa0
+	bne	.L5	@cond_branch
+.L4:
+	bl	g
+	pop	{r0}
+	bx	r0
+.L8:
+	.align	2, 0
+.L7:
+	.word	0x4000006
+.Lfe1:
+`;
 const I13 = `
 00000000 <i13>:
    0:	lui	v1,0x0
@@ -353,6 +404,11 @@ describe('a poll read the compiler would move out of its loop is pinned volatile
 
   test('agbcc: a read past a branch of the loop stays plain (maybe_never keeps it)', () => {
     expect(decompile('w7', W7, AGBCC, { prototypes }).source).toContain('} while (*(u16 *)67108870 != 3);');
+  });
+
+  test('agbcc: a read beside a store through a stepped pointer is pinned unless a byte keeps it', () => {
+    expect(decompile('st1', ST1, AGBCC, { prototypes }).source).toContain('while (*(volatile u16 *)67108870 != 160) {');
+    expect(decompile('se', SE, AGBCC, { prototypes }).source).toContain('while (*(u8 *)67108870 != 160) {');
   });
 
   test('agbcc: a header read of a loop left for two places is pinned', () => {

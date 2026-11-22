@@ -25,11 +25,13 @@
  *     unmodelled instruction may be one. A loop left for several places is pinned like any other:
  *     the exit-target gate (loop.c:2512-2525) stops only `load_mems`, and `scan_loop`'s movables
  *     (871-887) do not look at exit targets;
- *   • where the loop stores, only where every access is at a fixed address, and only a read a branch
- *     that leaves the loop or goes round it again decides on (`testedReads`): a poll's. A store
- *     through a stepped pointer may be any cell, and a copy loop's bound read beside it is kept
- *     plain by the compiler's alias analysis (kl2dct's `AgbMain`, a `u8` count beside an `s32`
- *     copy), so such a loop's reads stay as they were. Whether a store keeps a plain read in the loop is the
+ *   • where the loop stores, only a read a branch that leaves the loop or goes round it again
+ *     decides on (`testedReads`): a poll's. Where an access's address moves, not a read the
+ *     compiler provably keeps beside it (`keptBesideMoving`): a store through a stepped pointer keeps
+ *     a read at a fixed address only where one of the two is a byte, so a copy loop's `u8` bound
+ *     beside an `s32` copy stays plain (kl2dct's `AgbMain`), and `while (*(u16 *)0x4000006 != 160)
+ *     *p++ = 0;` with `s32 *p`, which agbcc loads once ahead of the loop, is pinned. Where every
+ *     access is at a fixed address, whether a store keeps a plain read in the loop is the
  *     compiler's alias analysis, decided on register history the lift cannot see — agbcc keeps
  *     `while (((volatile s32 *)0x40000d4)[2] & M) ((s32 *)0x40000d4)[5] = a0;`'s read but moves
  *     the plain spelling of it, and IDO 7.1 keeps `while (*(s32 *)A & 3) ((s32 *)B)[1] = a0;`'s read
@@ -109,6 +111,17 @@ export function pinPollReads(irBlocks: readonly Block[], target: TargetDescripti
   }
   const defOf = new Map<Value, Op>();
   const defBlock = new Map<Value, Block>();
+  const incoming = new Map<Value, Value[]>();
+  for (const b of blocks) {
+    for (const edge of terminator(b)?.successors ?? []) {
+      edge.block.params.forEach((p, i) => {
+        const a = edge.args[i];
+        if (a !== undefined) {
+          incoming.set(p, [...(incoming.get(p) ?? []), a]);
+        }
+      });
+    }
+  }
   for (const b of blocks) {
     b.params.forEach((p) => defBlock.set(p, b));
     for (const op of b.ops) {
@@ -145,18 +158,10 @@ export function pinPollReads(irBlocks: readonly Block[], target: TargetDescripti
         d.operands.every((o) => invariant(o, depth + 1))
       );
     };
-    // An access whose address moves may be any cell, and the cells beside it are kept as the
-    // compiler's alias analysis pleases: a byte read beside a store through a stepped pointer stays
-    // plain (kl2dct's `AgbMain`), and so do a struct's sum and counter beside a read through its
-    // data pointer (sa3's `Sio32MultiLoadMain`, `checkSumTmp += datap[checkSumCounter++]`). So in a
-    // loop that stores, only one whose every access is at a fixed address is a poll whose read was
-    // qualified.
     const moves = (op: Op): boolean =>
       MEM_BASE_OPS.has(op.opcode) &&
       !op.operands.slice(0, op.opcode === 'aload' || op.opcode === 'astore' ? 2 : 1).every((o) => invariant(o));
-    if (stores && ops.some(moves)) {
-      continue;
-    }
+    const kept = stores && ops.some(moves) ? keptBesideMoving(ops, moves, defOf, incoming) : undefined;
     const tested = stores ? testedReads(loop, defOf) : undefined;
     const fromFrame = (v: Value, depth = 0): boolean => {
       const d = defOf.get(v);
@@ -173,6 +178,7 @@ export function pinPollReads(irBlocks: readonly Block[], target: TargetDescripti
         (op.opcode === 'load' || op.opcode === 'aload') &&
         op.attrs.volatile !== true &&
         (tested === undefined || tested.has(op)) &&
+        !(kept?.(op) ?? false) &&
         op.operands.every((o) => invariant(o)) &&
         !fromFrame(op.operands[0]) &&
         readCouldBeVolatile(target.compilerBehaviors, op)
@@ -209,31 +215,110 @@ export function pinPollReads(irBlocks: readonly Block[], target: TargetDescripti
 /** Do two reads read one cell: one opcode, width and displacement, through addresses that are one
  *  value or one constant computed alike. */
 function sameRead(a: Op, b: Op, defOf: ReadonlyMap<Value, Op>): boolean {
-  const sameValue = (x: Value, y: Value, depth = 0): boolean => {
-    if (x === y) {
-      return true;
-    }
-    const dx = defOf.get(x);
-    const dy = defOf.get(y);
-    if (dx === undefined || dy === undefined || depth > 8 || dx.opcode !== dy.opcode) {
-      return false;
-    }
-    if (dx.opcode === 'const' || dx.opcode === 'gaddr') {
-      return dx.attrs.value === dy.attrs.value && dx.attrs.sym === dy.attrs.sym;
-    }
-    return (
-      (dx.opcode === 'add' || dx.opcode === 'sub' || dx.opcode === 'shl') &&
-      dx.operands.length === dy.operands.length &&
-      JSON.stringify(dx.attrs) === JSON.stringify(dy.attrs) &&
-      dx.operands.every((o, i) => sameValue(o, dy.operands[i], depth + 1))
-    );
-  };
   return (
     a.opcode === b.opcode &&
     JSON.stringify(a.attrs) === JSON.stringify({ ...b.attrs, volatile: true }) &&
     a.operands.length === b.operands.length &&
-    a.operands.every((o, i) => sameValue(o, b.operands[i]))
+    a.operands.every((o, i) => sameValue(o, b.operands[i], defOf))
   );
+}
+
+/** Are two values one value, or one constant computed alike. */
+function sameValue(x: Value, y: Value, defOf: ReadonlyMap<Value, Op>, depth = 0): boolean {
+  if (x === y) {
+    return true;
+  }
+  const dx = defOf.get(x);
+  const dy = defOf.get(y);
+  if (dx === undefined || dy === undefined || depth > 8 || dx.opcode !== dy.opcode) {
+    return false;
+  }
+  if (dx.opcode === 'const' || dx.opcode === 'gaddr') {
+    return dx.attrs.value === dy.attrs.value && dx.attrs.sym === dy.attrs.sym;
+  }
+  return (
+    (dx.opcode === 'add' || dx.opcode === 'sub' || dx.opcode === 'shl') &&
+    dx.operands.length === dy.operands.length &&
+    JSON.stringify(dx.attrs) === JSON.stringify(dy.attrs) &&
+    dx.operands.every((o, i) => sameValue(o, dy.operands[i], defOf, depth + 1))
+  );
+}
+
+const widthOf = (op: Op): number =>
+  (op.opcode === 'aload' || op.opcode === 'astore' ? op.attrs.elemSize : op.attrs.width) as number;
+
+/** What an address is computed from, through pure arithmetic and the values a block argument is
+ *  passed: the symbols (`gaddr`), whether the frame (`laddr`), and whether anything else. */
+function addressRoots(
+  v: Value,
+  defOf: ReadonlyMap<Value, Op>,
+  incoming: ReadonlyMap<Value, readonly Value[]>,
+): { syms: Set<string>; frame: boolean } {
+  const out = { syms: new Set<string>(), frame: false };
+  const seen = new Set<Value>();
+  const walk = (x: Value): void => {
+    if (seen.has(x) || seen.size > 64) {
+      return;
+    }
+    seen.add(x);
+    const d = defOf.get(x);
+    if (d === undefined) {
+      (incoming.get(x) ?? []).forEach(walk);
+    } else if (d.opcode === 'gaddr') {
+      out.syms.add(String(d.attrs.sym));
+    } else if (d.opcode === 'laddr') {
+      out.frame = true;
+    } else if (PURE_ADDRESS_OPS.has(d.opcode)) {
+      d.operands.forEach(walk);
+    }
+  };
+  walk(v);
+  return out;
+}
+
+/** In a loop that stores, where an access's address moves: the header reads the compiler provably
+ *  keeps in the loop, which stay as they were. A read at an invariant address is loop-invariant to
+ *  agbcc only when no store in the loop may alias it (loop.c `invariant_p` over `loop_store_mems`,
+ *  alias.c `true_dependence`), so a store whose address moves keeps it where their alias sets
+ *  conflict — and under `-O2`'s strict aliasing (toplev.c:3616) they conflict, whatever the store's
+ *  address, only where one of the two is a byte (c-common.c:1969-1974, the character types' set 0):
+ *  `while (*(u8 *)0x4000006 != 160) *p++ = 0;` keeps its read, `while (*(u16 *)0x4000006 != 160)
+ *  *p++ = 0;` with `s32 *p` loads it once ahead of the loop, and so does a 2-byte store beside a
+ *  4-byte read. Two accesses of one width are no proof: `int`, `long`, a pointer and an enum are
+ *  sets of their own. Nor is a store into the frame (alias.c:814-820), nor one a read of a symbol
+ *  may be told apart from by its base, another symbol's (alias.c:798-811). A read of a cell the loop
+ *  also writes at a fixed address is no `invariant_p` read at all but `load_mems`' (sa3's
+ *  `Sio32MultiLoadMain`, `while (counter < n) sum += datap[counter++];`, keeps the struct's
+ *  counter by its conflict with the data read), and is left as it was. */
+function keptBesideMoving(
+  ops: readonly Op[],
+  moves: (op: Op) => boolean,
+  defOf: ReadonlyMap<Value, Op>,
+  incoming: ReadonlyMap<Value, readonly Value[]>,
+): (read: Op) => boolean {
+  const stores = ops.filter((op) => op.opcode === 'store' || op.opcode === 'astore');
+  return (read) => {
+    const bytes = widthOf(read);
+    const sym = addressRoots(read.operands[0], defOf, incoming).syms;
+    return stores.some((st) => {
+      if (!moves(st)) {
+        const off = (op: Op) => (op.opcode === 'load' || op.opcode === 'store' ? (op.attrs.off as number) : 0);
+        return (
+          read.opcode === 'load' &&
+          st.opcode === 'store' &&
+          sameValue(st.operands[0], read.operands[0], defOf) &&
+          off(st) < off(read) + bytes &&
+          off(read) < off(st) + widthOf(st)
+        );
+      }
+      const roots = addressRoots(st.operands[0], defOf, incoming);
+      return (
+        (bytes === 1 || widthOf(st) === 1) &&
+        !roots.frame &&
+        (sym.size === 0 || [...roots.syms].every((s) => sym.has(s)))
+      );
+    });
+  };
 }
 
 /** The header's reads a branch that leaves the loop, or goes round it again, decides on: the ops

@@ -35,7 +35,8 @@
  *  of the first kind (`overwritten`). A read is pinned because a plain one is lost either way:
  *  nothing uses the `dmaRegs[2];` that ends a DMA macro, so the lift would drop it outright (the
  *  dead-read pin, frontend/dead-reads.ts, keeps such a read in every function), and a poll is
- *  hoisted as above, which only this pin prevents. Its other device stores stay plain, their
+ *  hoisted as above, which this pin prevents wherever its loop's address is a device register's,
+ *  and the poll-read pin (frontend/poll-reads.ts) in a call-free loop at any address. Its other device stores stay plain, their
  *  qualified spelling left to `/vol-store`'s candidate (l3/volstore.ts): pinned in the structured tree they are pinned in every
  *  variation, and the ones that home the base or un-reduce a loop refuse a qualified base, which
  *  costs `synthetic:dmastride` and `synthetic:dmaptrsrc` their matches. That is also why the two
