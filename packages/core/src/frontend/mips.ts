@@ -2203,10 +2203,20 @@ function liftOnce(
     // which matters, because `write` is NOT the only path that redefines a register (`lui
     // rD,%hi(SYM)` deliberately reassigns rD's meaning without it).
     const cmpDef = new Map<Value, { opcode: string; lhs: Value; rhs: Value }>();
+    // A WRITE NAMES A REGISTER BY THE SAME LIST A READ DOES. A numbered register keeps its sigil
+    // (splat.ts `registerToken`), so in a destination slot `$2` became a variable of its own beside
+    // v0 and the write was lost: `addiu $v0, $zero, 5; addiu $2, $zero, 7` lifted `return 5;` where
+    // gas encodes `li v0,7` last. Refused at every destination, as `read` refuses at every source.
     const write = (r: string, v: Value) => {
-      if (!isZero(r)) {
-        writeVar(r, bi, v);
+      if (isZero(r)) {
+        return;
       }
+      if (!O32_GPR_NAME.test(r) && !MIPS_FP_REG.test(r)) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': operand '${r}' written as a register — it names no O32 register`,
+        );
+      }
+      writeVar(r, bi, v);
     };
     // Shared emitter kit (frontend/emit.ts) — the ISA-specific readers/guards stay above.
     const kit = mkEmitKit(ops, write);

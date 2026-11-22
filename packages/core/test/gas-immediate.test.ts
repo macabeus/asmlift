@@ -404,6 +404,34 @@ describe('a Splat operand holds the value gas gives it, or declines', () => {
     expect(mips(leaf([line, word]))).toContain(want);
   });
 
+  // a numbered register in a DESTINATION slot became a variable of its own beside the named one
+  test.each([
+    [
+      [
+        ['addiu       $v0, $zero, 5', '24020005'],
+        ['addiu       $2, $zero, 7', '24020007'],
+      ],
+    ], // was `return 5;`
+    [
+      [
+        ['addiu       $v0, $a0, 1', '24820001'],
+        ['move        $2, $a1', '00A01025'],
+      ],
+    ], // was `return a0 + 1;`
+    [[['addiu       $2, $zero, 5', '24020005']]], // was `return;`
+    [[['lw          $2, 4($a0)', '8C820004']]], // was a discarded volatile read
+  ] as [string, string][][][])('%j declines', (lines) => {
+    expect(() => mips(leaf(...lines))).toThrow(/written as a register/);
+  });
+  test('a numbered register written in a delay slot declines (was `return a0 + 1;`, gas 9)', () => {
+    const text = splat([
+      ['addiu       $v0, $a0, 1', '24820001'],
+      ['jr          $ra', '03E00008'],
+      ['addiu       $2, $zero, 9', '24020009'],
+    ]);
+    expect(() => mips(text)).toThrow(/written as a register/);
+  });
+
   // "operand N out of range" to gas, and each lifted
   test.each([
     ['lui         $v0, 0x10000'], // was `return 0;`
