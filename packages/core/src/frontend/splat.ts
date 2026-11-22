@@ -784,10 +784,14 @@ function normalizeOperand(name: string, op: string): { op: string; reloc?: Disas
   }
   const plain = (v: string) => ({ op: v });
   // Memory operand `DISP(base)` — base is a register (letter-first), DISP a constant/expression.
+  // The displacement is an address addend, and gas adds it in a 32-bit address: `evalConst` gives a
+  // value in [2^31, 2^32) as that positive number, and gas encodes `lw $v0, 0xFFFFFFFC($a0)` and
+  // `lh $v0, (0xFFFFFFFE | 0)($a0)` as `-4(a0)` and `-2(a0)` (mips-linux-gnu-as -march=r4300
+  // -mabi=32), so it is re-signed to the word here, where read unsigned it lifted `a0[1073741823]`.
   const mem = op.match(/^(.*)\([ \t\r]*(\$?[A-Za-z]\w*)[ \t\r]*\)$/);
   if (mem) {
     const disp = asciiTrim(mem[1]);
-    const off = disp === '' ? '0' : String(evalConst(name, disp));
+    const off = disp === '' ? '0' : String(evalConst(name, disp) | 0);
     return plain(`${off}(${registerToken(name, mem[2], op)})`);
   }
   // A bare constant expression (`(0x660104 >> 16)`) — the assembler's hi/lo literal split.

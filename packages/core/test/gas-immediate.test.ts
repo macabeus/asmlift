@@ -398,6 +398,11 @@ describe('a Splat operand holds the value gas gives it, or declines', () => {
     ['lui         $v0, (0x80001234 >> 16)', '3C028000', 'return -2147483648;'],
     ['addiu       $v0, $a0, (0x8000ABCD & 0xFFFF)', '2482ABCD', 'return a0 + -21555;'],
     ['lui         $v0, ((0x7FFF0000 + 0x10000) >> 16)', '3C028000', 'return -2147483648;'],
+    // a displacement in [2^31, 2^32) is a 32-bit address addend to gas, re-signed to the word
+    ['lh          $v0, (0xFFFFFFFE | 0)($a0)', '8482FFFE', 'return a0[-1];'], // was a0[2147483647]
+    ['sw          $a1, (0xFFFFFFF8 & 0xFFFFFFFF)($a0)', 'AC85FFF8', 'a0[-2] = a1;'],
+    ['lw          $v0, (0x7FFFFFFC + 0x80000000)($a0)', '8C82FFFC', 'return a0[-1];'],
+    ['lw          $v0, 0xFFFFFFFC($a0)', '8C82FFFC', 'return a0[-1];'], // was a0[1073741823]
   ])('`%s` lifts as gas encodes it', (line, word, want) => {
     expect(mips(leaf([line, word]))).toContain(want);
   });
