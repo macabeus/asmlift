@@ -85,7 +85,7 @@ import {
   scaledIndexIn,
 } from './jump-table';
 import { opaqueDest } from './opaque';
-import { MIPS_FP_REG, isSplatMips, mipsEvenFpKey, parseSplatMips } from './splat';
+import { MIPS_FP_REG, O32_GPR_NAME, isSplatMips, mipsEvenFpKey, parseSplatMips } from './splat';
 import { type ArgSlots, incomingStackArgKey, mintArgSlotHoles, stackArgSlots, stackSlotKey } from './ssa';
 import {
   makeSsaBuilder,
@@ -2115,6 +2115,16 @@ function liftOnce(
           `cannot lift '${name}': stack pointer used as data (address-taken local / frame arithmetic) — local stack frames not supported`,
         );
       }
+      // ONLY A REGISTER NAME IS A REGISTER. Anything else in a register slot is an operand the
+      // assembler reads otherwise — a literal (`addu $v0, $a0, 8` is gas's `addiu v0,a0,8`), a
+      // memory operand with no base (`lw $v0, 0x8` is `lw v0,8(zero)`), a numbered register — and
+      // reading it as one invented a parameter for it: both lifted `a0 + a1` and `*a0`. Thumb
+      // refuses the same shape. An FPU register passes, for the float paths' own refusals to name.
+      if (!O32_GPR_NAME.test(r) && !MIPS_FP_REG.test(r)) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': operand '${r}' read as a register — it names no O32 register`,
+        );
+      }
       // A KERNEL REGISTER (`target.kernelRegs`) holds nothing this function wrote: an exception
       // handler may overwrite it between any two instructions.
       if (isKernelReg(target.kernelRegs ?? [], r)) {
@@ -2325,7 +2335,18 @@ function liftOnce(
           // `addiu sp,sp,±N` is frame setup/teardown — transparent to dataflow (the stack-slot model
           // keys slots by literal sp-offset, so the frame base never needs a value). Skip it,
           // mirroring PPC's `addi r1`. Any OTHER read of sp falls through to `read`, which loud-fails.
+          // Skipping is sound only for the frame every compiler builds, so the write is READ first:
+          // from sp itself, by a literal (`addiu $sp, $sp, FS` or `0x18 + 0x8` refuses in `imm`),
+          // and a release only of the bytes the one push took. A release of another size leaves sp
+          // where no compiler leaves it, and lifted `return g();` as if balanced.
           if (isStackPtr(d)) {
+            const by = imm(ins, t);
+            if (!isStackPtr(s ?? '') || (by > 0 && pushes.length < 2 && by !== frameSize)) {
+              throw new FrontendUnsupportedError(
+                `${site(ins)} moves sp ${isStackPtr(s ?? '') ? `by ${by}` : `from ${s ?? ''}`}, which ` +
+                  `releases no frame this function pushed — no compiler emits it`,
+              );
+            }
             break;
           }
           if (frame !== null && ins.reloc === undefined) {

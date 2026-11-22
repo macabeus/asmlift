@@ -575,8 +575,18 @@ export function parseSplatMips(asm: string, name: string, includes?: ReadonlyMap
     // (ori/andi/xori) and lui keep the unsigned value, so they are deliberately excluded.
     // Every literal spelling is re-signed, `0XFFFF` too (gas reads it as 0xFFFF, and a lowercase-only
     // test left it 65535, so `addiu $v0, $a0, 0XFFFF` lifted `a0 + 65535` against the hardware's -1).
-    const field = (mnemonic === 'addiu' || mnemonic === 'addi') && ops.length === 3 ? gasIntLiteral(ops[2]) : null;
+    // `slti`/`sltiu` sign-extend the same field (`sltiu` then compares unsigned against the extended
+    // word): `slti $v0, $a0, 0xFFFF` encodes `slti v0,a0,-1` and lifted `a0 < 65535`. A value no
+    // 16-bit field holds is gas's "operand 3 out of range" on all four, and refuses rather than
+    // being masked (`addiu $v0, $a0, 0x10000` lifted `a0 + 0`).
+    const field = SIGNED_FIELD.test(mnemonic) && ops.length === 3 ? gasIntLiteral(ops[2]) : null;
     if (field !== null) {
+      if (field < -0x8000 || field > 0xffff) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': '${mnemonic}' at 0x${addr.toString(16)} has the immediate '${ops[2]}', ` +
+            `which its 16-bit field does not hold`,
+        );
+      }
       ops[2] = String(signExtend16(field));
     }
     for (const l of pending) {
@@ -611,8 +621,11 @@ export function parseSplatMips(asm: string, name: string, includes?: ReadonlyMap
 // owns those declines; `break` is a trap, not a branch.
 const isBranchMnemonic = (mn: string): boolean => mn === 'j' || (mn[0] === 'b' && mn !== 'break');
 
+/** The instructions whose 16-bit immediate field the hardware sign-extends. */
+const SIGNED_FIELD = /^(addi|addiu|slti|sltiu)$/;
+
 // Re-sign a raw 16-bit immediate: a value with bit 15 set becomes negative (two's complement),
-// matching how addi/addiu sign-extend the field. A value already ≤ 0x7FFF is unchanged.
+// matching how addi/addiu/slti/sltiu sign-extend the field. A value already ≤ 0x7FFF is unchanged.
 function signExtend16(n: number): number {
   const v = n & 0xffff;
   return v & 0x8000 ? v - 0x10000 : v;
@@ -724,7 +737,7 @@ function normalizeOperand(name: string, op: string): { op: string; reloc?: Disas
     const addend = hilo[4] ? evalConst(name, hilo[4]) * (hilo[3] === '-' ? -1 : 1) : 0;
     const imm = hilo[1] === 'hi' ? ((addend + 0x8000) >> 16) & 0xffff : (addend << 16) >> 16;
     const reloc: DisasmReloc = { type: hilo[1] === 'hi' ? 'R_MIPS_HI16' : 'R_MIPS_LO16', sym: hilo[2], addend: 0 };
-    return { op: hilo[5] ? `${imm}(${hilo[5].replace(/^\$/, '')})` : String(imm), reloc };
+    return { op: hilo[5] ? `${imm}(${registerToken(name, hilo[5], op)})` : String(imm), reloc };
   }
   // A `%hi`/`%lo` the pattern above did NOT convert is still a relocation operand, and the paths
   // below it read an operand as arithmetic: `%lo(0x800A1234)($v0)` matches the memory-operand shape
@@ -750,7 +763,7 @@ function normalizeOperand(name: string, op: string): { op: string; reloc?: Disas
   if (mem) {
     const disp = asciiTrim(mem[1]);
     const off = disp === '' ? '0' : String(evalConst(name, disp));
-    return plain(`${off}(${mem[2].replace(/^\$/, '')})`);
+    return plain(`${off}(${registerToken(name, mem[2], op)})`);
   }
   // A bare constant expression (`(0x660104 >> 16)`) — the assembler's hi/lo literal split.
   if (op.startsWith('(')) {
@@ -763,7 +776,34 @@ function normalizeOperand(name: string, op: string): { op: string; reloc?: Disas
   if (OCTAL_MAGNITUDE.test(op) && gasIntLiteral(op) === null) {
     refuseOctal(name, op, op);
   }
-  return plain(MIPS_FP_REG.test(op) ? op : op.replace(/^\$/, ''));
+  return plain(MIPS_FP_REG.test(op) ? op : registerToken(name, op, op));
+}
+
+/** The O32 general registers by ABI name — the one spelling of a GPR the MIPS frontend reads, and
+ *  the names objdump prints (`s8` and `fp` are both `$30`). Exported so `frontend/mips.ts` refuses
+ *  every other token it is asked to read as a register by the same list. */
+export const O32_GPR_NAME = /^(zero|at|v[01]|a[0-3]|t[0-9]|s[0-8]|k[01]|gp|sp|fp|ra)$/;
+
+/** A GPR token as the frontend reads it: `$a0` becomes `a0`, objdump's spelling. ONLY a named
+ *  register loses its sigil. To gas a register is `$name` or `$N` and a bare word is a symbol or a
+ *  literal, so stripping every `$` made two different operands one text: `sll $v0, $a0, $2` (gas
+ *  `sllv v0,a0,v0`) lifted `a0 << 2`, the numbered register read as the shift amount. A numbered
+ *  register keeps its sigil, which no immediate reader and no register name accepts, so it
+ *  refuses where it is used (0 numbered GPR operands over the three Splat trees outside `cfc1`/`ctc1`'s
+ *  `$31`, which is filed by its mnemonic). A register NAME written bare is refused here: gas reads
+ *  `a0` as a symbol (`addu $v0, a0, $a1` is "operand 2 must be constant", `lw $v0, 4(a0)` "invalid
+ *  operands" under `mips-linux-gnu-as -march=r4300`), and this reader would hand it on as `$a0`. */
+function registerToken(name: string, tok: string, operand: string): string {
+  if (tok.startsWith('$') && O32_GPR_NAME.test(tok.slice(1))) {
+    return tok.slice(1);
+  }
+  if (O32_GPR_NAME.test(tok) || (tok !== operand && !tok.startsWith('$'))) {
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': operand '${operand}' spells '${tok}' without the '$' the assembler ` +
+        `reads a register by`,
+    );
+  }
+  return tok;
 }
 
 /** A magnitude with a LEADING ZERO is octal to the assembler and decimal to every `parseInt(…, 10)`
@@ -796,7 +836,10 @@ const refuseOctal = (name: string, tok: string, operand: string): never => {
 };
 
 // Evaluate a constant integer expression (the assembler's hi/lo split: hex/dec literals with
-// `+ - * << >> & | ^ ~` and parentheses). Precedence-climbing; C-like precedence. A shift `>>` is
+// `+ - * << >> & | ^ ~` and parentheses). Precedence-climbing on GAS's precedence, which is not C's:
+// three left-associative levels, `* << >>` above `| & ^` above `+ -` (the GNU as manual, "Infix
+// Operators"). C's table lifted `(3 | 1 + 1)` as 3 and `(1 + 2 << 3)` as 24, where
+// `mips-linux-gnu-as -march=r4300` and `arm-none-eabi-as` both encode 4 and 17. A shift `>>` is
 // LOGICAL — Splat's operands are unsigned 32-bit constants. Anything unparsable declines LOUD
 // rather than silently yielding NaN.
 function evalConst(name: string, expr: string): number {
@@ -807,7 +850,7 @@ function evalConst(name: string, expr: string): number {
   if (!toks || asciiTrim(expr.replace(TOKEN, ' ')) !== '') {
     throw new FrontendUnsupportedError(`cannot lift '${name}': unparsable constant expression '${expr}'`);
   }
-  const prec: Record<string, number> = { '|': 1, '^': 2, '&': 3, '<<': 4, '>>': 4, '+': 5, '-': 5, '*': 6 };
+  const prec: Record<string, number> = { '+': 1, '-': 1, '|': 2, '&': 2, '^': 2, '*': 3, '<<': 3, '>>': 3 };
   let p = 0;
   const fail = () => {
     throw new FrontendUnsupportedError(`cannot lift '${name}': unparsable constant expression '${expr}'`);

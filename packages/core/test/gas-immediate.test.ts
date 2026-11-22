@@ -242,3 +242,82 @@ describe('a MIPS or PPC immediate that is not an integer literal declines', () =
     expect(ppc(obj([line, 'blr']))).toContain(want);
   });
 });
+
+describe('a Splat operand is read in the slot gas reads it in', () => {
+  const splat = (lines: [string, string][]) =>
+    `.set noat\n.set noreorder\n.set FS, 0x18\n\n.text\nglabel f\n` +
+    lines
+      .map(
+        ([line, word], i) =>
+          `    /* ${(i * 4).toString(16)} ${(0x80000000 + i * 4).toString(16)} ${word} */  ${line}\n`,
+      )
+      .join('');
+  const leaf = (line: string, word: string) =>
+    splat([
+      [line, word],
+      ['jr          $ra', '03E00008'],
+      ['nop', '00000000'],
+    ]);
+  const mips = (text: string) => decompile('f', text, MIPS_GCC).source;
+
+  // each word is mips-linux-gnu-as -march=r4300's encoding of the line, and each lifted the C after it
+  test.each([
+    ['lw          $v0, 0x8', '8C020008'], // gas `lw v0,8(zero)`; was `return *a0;`
+    ['lbu         $v0, 0x8', '90020008'], // gas `lbu v0,8(zero)`; was `return *a0;` (u8)
+    ['sw          $a1, 0x10', 'AC050010'], // gas `sw a1,16(zero)`; was `*a2 = a1;`
+    ['addu        $v0, $a0, 8', '24820008'], // gas `addiu v0,a0,8`; was `return a0 + a1;`
+    ['and         $v0, $a0, 0xFF', '308200FF'], // gas `andi`; was `return a0 & a1;`
+    ['or          $v0, $a0, 1', '34820001'], // gas `ori`; was `return a0 | a1;`
+    ['sltu        $v0, $a0, 5', '2C820005'], // gas `sltiu`; was `return a0 < a1;`
+    ['sll         $v0, $a0, $2', '00441004'], // gas `sllv v0,a0,v0`; was `return a0 << 2;`
+    ['addu        $v0, $4, $5', '00851021'], // a numbered register is no name this frontend reads
+    ['addiu       $v0, a0, 1', '00000000'], // gas: "operand 2 must be constant" (a0 is a symbol)
+    ['lw          $v0, 4(a0)', '00000000'], // gas: "invalid operands"
+    ['addiu       $v0, $a0, 0x10000', '00000000'], // gas: "operand 3 out of range"; was `a0 + 0`
+    ['slti        $v0, $a0, 0x10000', '00000000'], // gas: "operand 3 out of range"
+  ])('`%s` declines', (line, word) => {
+    expect(() => mips(leaf(line, word))).toThrow(
+      /read as a register|non-numeric immediate|without the '\$'|16-bit field/,
+    );
+  });
+
+  test.each([
+    ['slti        $v0, $a0, 0xFFFF', '2882FFFF', 'return a0 < -1;'], // gas -1; was `a0 < 65535`
+    ['slti        $v0, $a0, 0x8000', '28828000', 'return a0 < -32768;'], // was `a0 < 32768`
+    ['sltiu       $v0, $a0, 0xFFFF', '2C82FFFF', 'return a0 < -1;'], // u32 a0 against 0xFFFFFFFF
+    ['slti        $v0, $a0, -1', '2882FFFF', 'return a0 < -1;'],
+    ['sll         $v0, $a0, 2', '00041080', 'return a0 << 2;'],
+    // gas's precedence, not C's: three left-associative levels, `* << >>` over `| & ^` over `+ -`
+    ['addiu       $v0, $a0, (3 | 1 + 1)', '24820004', 'return a0 + 4;'], // was `a0 + 3`
+    ['addiu       $v0, $a0, (1 + 2 << 3)', '24820011', 'return a0 + 17;'], // was `a0 + 24`
+    ['addiu       $v0, $a0, (4 | 1 & 2)', '24820000', 'return a0 + 0;'], // was `a0 + 4`
+    ['addiu       $v0, $a0, (2 << 1 * 3)', '2482000C', 'return a0 + 12;'], // was `a0 + 16`
+    ['addiu       $v0, $a0, (1 - 2 - 3)', '2482FFFC', 'return a0 + -4;'],
+    ['addiu       $v0, $a0, (~1 + 3)', '24820001', 'return a0 + 1;'],
+    ['lw          $v0, (4 | 4 + 4)($a0)', '8C820008', 'return a0[2];'], // was `a0[3]`
+    ['lw          $v0, (0x12345678 >> 16)($a0)', '8C821234', 'return a0[1165];'],
+  ])('`%s` lifts as gas encodes it', (line, word, want) => {
+    expect(mips(leaf(line, word))).toContain(want);
+  });
+  test('`sw $a1, (4 | 4 + 4)($a0)` stores where gas encodes it', () => {
+    expect(mips(leaf('sw          $a1, (4 | 4 + 4)($a0)', 'AC850008'))).toContain('a0[2] = a1;'); // was a0[3]
+  });
+
+  // the epilogue's release is read: a symbol, an expression or another size than the push declines
+  const framed = (release: string) =>
+    splat([
+      ['addiu       $sp, $sp, -0x18', '27BDFFE8'],
+      ['sw          $ra, 0x14($sp)', 'AFBF0014'],
+      ['jal         g', '0C000000'],
+      ['nop', '00000000'],
+      ['lw          $ra, 0x14($sp)', '8FBF0014'],
+      ['jr          $ra', '03E00008'],
+      [`addiu       $sp, $sp, ${release}`, '27BD0018'],
+    ]);
+  test.each([['FS'], ['0x18 + 0x8'], ['0x10']])('a release by `%s` declines (each lifted `return g();`)', (r) => {
+    expect(() => mips(framed(r))).toThrow(/non-numeric immediate|releases no frame/);
+  });
+  test('the release of the bytes pushed lifts', () => {
+    expect(mips(framed('0x18'))).toContain('return g();');
+  });
+});

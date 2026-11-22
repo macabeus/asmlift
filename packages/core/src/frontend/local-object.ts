@@ -85,7 +85,9 @@ const GAS_SECTIONS: Readonly<Record<string, LocalObject['section']>> = {
   '.bss': 'bss',
 };
 
-/** A GNU as integer literal: decimal, `0x` hex or `0` octal, optionally negated. */
+/** A GNU as integer literal: decimal, `0x` hex or `0` octal, optionally negated. Wider than the
+ *  immediate reader `gasIntLiteral` (frontend/gas-int.ts, whose header lists every reader of a gas
+ *  integer) by the multi-digit octal a data directive may carry, narrower by `+` and inner spaces. */
 function gasInteger(s: string): number | null {
   const m = s.trim().match(/^(-?)(0x[0-9a-f]+|0[0-7]*|[1-9]\d*)$/i);
   if (!m) {

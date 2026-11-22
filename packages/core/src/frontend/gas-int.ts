@@ -1,9 +1,14 @@
 // asmlift — the reader of an integer LITERAL as GNU as reads it, for an immediate, a displacement or
 // a shift amount in every frontend (Thumb's `#k`, the objdump `parseImm`/`parseMem` MIPS and PPC
-// share, and each literal inside a Splat constant expression). Two grammars stay their own and
-// narrower, and both fail closed where they differ from this one: the Thumb pool word
-// (`POOL_MAGNITUDE`, a `.word` operand's addend, no leading zero at all) and the Thumb `.2byte`
-// encoding (`halfwordLiteral`, four hex digits).
+// share, and each literal inside a Splat constant expression). Three other readers of a gas integer
+// keep their own grammar, and each fails closed where it differs from this one. Two are narrower:
+// the Thumb pool word (`POOL_MAGNITUDE`, a `.word` operand's addend, no leading zero at all) and the
+// Thumb `.2byte` encoding (`halfwordLiteral`, four hex digits). One is WIDER, on purpose:
+// `gasInteger` in frontend/local-object.ts reads the `.byte`/`.space`/`.word` operands of a local
+// object's image and reads a multi-digit octal (`.byte 010` is 8, as `arm-none-eabi-as` assembles
+// it), since a data directive has no instruction to refuse in its place; it refuses `+8` and inner
+// whitespace, which this reader accepts. So `#010` refuses here and `.byte 010` reads 8 there, and
+// both are gas's value or nothing.
 //
 // An immediate, a displacement or a shift amount in assembly text is an EXPRESSION to gas: `#K`
 // after `.set K, 2`, `#'a'`, `#2*2`, `#(3)`, and the radix prefixes `0b11` and `010` (octal) are
