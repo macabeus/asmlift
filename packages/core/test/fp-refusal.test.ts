@@ -144,10 +144,11 @@ describe('…on BOTH MIPS dialects, which spell the same register two ways', () 
   //
   // Every one sits on a control transfer that refuses a guard earlier, so the input below is the
   // shape rather than a listing anyone has: an unmodelled non-branch instruction with a bare `f4`
-  // where the predicate can reach it.
+  // where the predicate can reach it. It is no register of either file, so the MIPS read refuses
+  // it as one (frontend/mips.ts `read`) before the opaque is built.
   test('a bare lower-case hex token is an ADDRESS, not a register', () => {
     const run = liftMips('teqi\tv0,f4');
-    expect(run).toThrow(/unmodelled instruction 'teqi'/);
+    expect(run).toThrow(/operand 'f4' read as a register — it names no O32 register/);
     expect(run).not.toThrow(/floating-point/);
   });
 

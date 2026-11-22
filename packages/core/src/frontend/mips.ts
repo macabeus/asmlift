@@ -65,6 +65,7 @@ import {
   liftWithRelift,
 } from './frame-objects';
 import { type Frontend, type LiftOptions, ownDeclarationOf } from './frontend';
+import { gasIntLiteral } from './gas-int';
 import { makeHighHalves } from './high-half';
 import {
   type HoistedDispatch,
@@ -84,7 +85,7 @@ import {
   scaledIndexIn,
 } from './jump-table';
 import { opaqueDest } from './opaque';
-import { MIPS_FP_REG, isSplatMips, mipsEvenFpKey, parseSplatMips } from './splat';
+import { MIPS_FP_REG, O32_GPR_NAME, isSplatMips, mipsEvenFpKey, parseSplatMips } from './splat';
 import { type ArgSlots, incomingStackArgKey, mintArgSlotHoles, stackArgSlots, stackSlotKey } from './ssa';
 import {
   makeSsaBuilder,
@@ -449,8 +450,8 @@ function mipsBounds(
   const bound = (c: Instr, entry: number | null) => {
     // `sltiu tmp, scrut, N` bounds `scrut < N`: the immediate IS the case count (PPC's `cmplwi`
     // states the max index).
-    const n = parseImm(c.ops[2]);
-    return n < 2 ? null : { at: k, addr: beqz.addr, n, def: beqz.target!, entry };
+    const n = gasIntLiteral(c.ops[2] ?? '');
+    return n === null || n < 2 ? null : { at: k, addr: beqz.addr, n, def: beqz.target!, entry };
   };
   const isTarget = (addr: number) => instrs.some((x) => x.target === addr);
   // The beqz's block: back to a branch target, or to the word after a transfer's delay slot.
@@ -1019,7 +1020,10 @@ function v1MayHoldLowWord(blocks: readonly MipsBlock[], preds: readonly (readonl
     const carries = (r: Instr) =>
       r.ops[1] === 'v1' &&
       ((ins.mnemonic === 'addu' && r.mnemonic === 'sltu' && r.ops[2] !== 'v1' && [x, y].includes(r.ops[2])) ||
-        (ins.mnemonic === 'addiu' && r.mnemonic === 'sltiu' && parseImm(r.ops[2] ?? '') === parseImm(y ?? '')));
+        (ins.mnemonic === 'addiu' &&
+          r.mnemonic === 'sltiu' &&
+          gasIntLiteral(r.ops[2] ?? '') !== null &&
+          gasIntLiteral(r.ops[2] ?? '') === gasIntLiteral(y ?? '')));
     // A copy is judged only where its every read follows it in its own block: a read past a join
     // is where a compiler coalesces each arm's value into one register (`addu v1,a1,zero` on one
     // arm, `ori v1,a1,0xe000` on the other), which is scratch.
@@ -1060,8 +1064,8 @@ function frameDepths(blocks: readonly MipsBlock[], entryReentered: boolean): Rea
     if (!isStackPtr(writtenReg(ins) ?? '')) {
       return undefined; // leaves sp alone
     }
-    const by = parseImm(ins.ops[2] ?? '');
-    return (ins.mnemonic === 'addiu' || ins.mnemonic === 'addi') && isStackPtr(ins.ops[1] ?? '') && Number.isFinite(by)
+    const by = gasIntLiteral(ins.ops[2] ?? '');
+    return (ins.mnemonic === 'addiu' || ins.mnemonic === 'addi') && isStackPtr(ins.ops[1] ?? '') && by !== null
       ? by
       : null;
   };
@@ -1228,8 +1232,8 @@ function refuseReturnsNotThroughCallersRa(
           depth !== null &&
           /^addiu?$/.test(mn) &&
           isStackPtr(ins.ops[1] ?? '') &&
-          /^-?(0x)?[0-9a-f]+$/i.test(ins.ops[2] ?? '')
-            ? depth + parseImm(ins.ops[2])
+          gasIntLiteral(ins.ops[2] ?? '') !== null
+            ? depth + gasIntLiteral(ins.ops[2] ?? '')!
             : null;
       }
       if (holds) {
@@ -1771,7 +1775,7 @@ function liftOnce(
       (ins.mnemonic === 'addiu' || ins.mnemonic === 'addi') &&
       isStackPtr(ins.ops[0]) &&
       isStackPtr(ins.ops[1] ?? '') &&
-      parseImm(ins.ops[2] ?? '') < 0,
+      (gasIntLiteral(ins.ops[2] ?? '') ?? 0) < 0,
   );
   const frameSize = pushes.length === 1 ? -parseImm(pushes[0].ops[2]) : undefined;
   const depthAt = frameDepths(blocks, entryReentered);
@@ -2111,6 +2115,16 @@ function liftOnce(
           `cannot lift '${name}': stack pointer used as data (address-taken local / frame arithmetic) — local stack frames not supported`,
         );
       }
+      // ONLY A REGISTER NAME IS A REGISTER. Anything else in a register slot is an operand the
+      // assembler reads otherwise — a literal (`addu $v0, $a0, 8` is gas's `addiu v0,a0,8`), a
+      // memory operand with no base (`lw $v0, 0x8` is `lw v0,8(zero)`), a numbered register — and
+      // reading it as one would invent a parameter for it. Thumb refuses the same shape. An FPU
+      // register passes, for the float paths' own refusals to name.
+      if (!O32_GPR_NAME.test(r) && !MIPS_FP_REG.test(r)) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': operand '${r}' read as a register — it names no O32 register`,
+        );
+      }
       // A KERNEL REGISTER (`target.kernelRegs`) holds nothing this function wrote: an exception
       // handler may overwrite it between any two instructions.
       if (isKernelReg(target.kernelRegs ?? [], r)) {
@@ -2189,10 +2203,20 @@ function liftOnce(
     // which matters, because `write` is NOT the only path that redefines a register (`lui
     // rD,%hi(SYM)` deliberately reassigns rD's meaning without it).
     const cmpDef = new Map<Value, { opcode: string; lhs: Value; rhs: Value }>();
+    // A WRITE NAMES A REGISTER BY THE SAME LIST A READ DOES. A numbered register keeps its sigil
+    // (splat.ts `registerToken`), so in a destination slot `$2` would be a variable of its own
+    // beside v0 and the write to v0 lost (`addiu $v0, $zero, 5; addiu $2, $zero, 7` as `return 5;`).
+    // Refused at every destination, as `read` refuses at every source.
     const write = (r: string, v: Value) => {
-      if (!isZero(r)) {
-        writeVar(r, bi, v);
+      if (isZero(r)) {
+        return;
       }
+      if (!O32_GPR_NAME.test(r) && !MIPS_FP_REG.test(r)) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': operand '${r}' written as a register — it names no O32 register`,
+        );
+      }
+      writeVar(r, bi, v);
     };
     // Shared emitter kit (frontend/emit.ts) — the ISA-specific readers/guards stay above.
     const kit = mkEmitKit(ops, write);
@@ -2234,12 +2258,11 @@ function liftOnce(
     let firstWords: { reg: string | undefined; sym: string | undefined; off: number }[] = [];
     // EVERY immediate this frontend turns into a value goes through here. objdump prints them as
     // numbers, so a non-numeric one means the operand is not an immediate at all — a relocation
-    // spelling the reader failed to resolve, a label — and bare `parseImm` answers NaN, which
-    // `constVal` renders as the literal 0. That is the relocation fold's own failure one level
-    // down, so it refuses instead.
+    // spelling the reader failed to resolve, a label — and this refuses it naming the instruction,
+    // rather than as the bare operand the shared `parseImm` would name.
     const imm = (ins: Instr, text: string | undefined): number => {
-      const v = parseImm(text ?? '');
-      if (!Number.isFinite(v)) {
+      const v = gasIntLiteral(text ?? '');
+      if (v === null) {
         throw new FrontendUnsupportedError(
           `${site(ins)} has the non-numeric ` +
             `immediate '${text ?? ''}' where a number belongs — this frontend will not read it as one`,
@@ -2322,7 +2345,18 @@ function liftOnce(
           // `addiu sp,sp,±N` is frame setup/teardown — transparent to dataflow (the stack-slot model
           // keys slots by literal sp-offset, so the frame base never needs a value). Skip it,
           // mirroring PPC's `addi r1`. Any OTHER read of sp falls through to `read`, which loud-fails.
+          // Skipping is sound only for the frame every compiler builds, so the write is READ first:
+          // from sp itself, by a literal (`addiu $sp, $sp, FS` or `0x18 + 0x8` refuses in `imm`),
+          // and, in a function with one push, a release only of the bytes it took. A release of
+          // another size leaves sp where no compiler leaves it, and skipped it reads as balanced.
           if (isStackPtr(d)) {
+            const by = imm(ins, t);
+            if (!isStackPtr(s ?? '') || (by > 0 && pushes.length < 2 && by !== frameSize)) {
+              throw new FrontendUnsupportedError(
+                `${site(ins)} moves sp ${isStackPtr(s ?? '') ? `by ${by}` : `from ${s ?? ''}`}, which ` +
+                  `releases no frame this function pushed — no compiler emits it`,
+              );
+            }
             break;
           }
           if (frame !== null && ins.reloc === undefined) {
