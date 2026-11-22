@@ -42,7 +42,7 @@ describe('agbcc: a struct of one member comes back in r0', () => {
     expect(w1).toMatch(/mk_ret = mk\(a0\);\s+gV = \*\(s32 \*\)&mk_ret;/);
   });
 
-  test('a bitfield is extracted from the local, and a union has no local and still declines', () => {
+  test('a bitfield is extracted from the local', () => {
     const bf = agbcc('c_bf', 'str', '\tlsl\tr0, r0, #0x18\n\tlsr\tr0, r0, #0x1c\n');
     const members = [
       { name: 'a', type: 'u32', bits: 4 },
@@ -51,16 +51,46 @@ describe('agbcc: a struct of one member comes back in r0', () => {
     expect(decompile('c_bf', bf, ARMV4T_AGBCC, { prototypes: { mk: mk(members) } }).source).toMatch(
       /mk_ret = mk\(a0\);\s+gV = \(u32\)\(\*\(s32 \*\)&mk_ret << 24\) >> 28;/,
     );
-    const un = mk(
+  });
+
+  // `union T { u32 w; u16 h; }; union T s = mk(x); gV = s.h;`: thumb.c returns a union of integers
+  // in r0, and the local is declared as the union the declarations block defines
+  test('a union of integers is read off a local of it, each read naming the member of its width', () => {
+    const un = (members: { name: string; type: string }[]): FnProto => ({
+      ...mk(members, 'union'),
+      returns: 'union T',
+    });
+    const wh = un([
+      { name: 'w', type: 'u32' },
+      { name: 'h', type: 'u16' },
+    ]);
+    // r0 whole (the strh truncates the word the union's four bytes fill)
+    expect(decompile('c_un', agbcc('c_un', 'strh'), ARMV4T_AGBCC, { prototypes: { mk: wh } }).source).toMatch(
+      /union T mk_ret;\s+mk_ret = mk\(a0\);\s+gV = \*\(s32 \*\)&mk_ret;/,
+    );
+    const [c] = enumerateCandidates('c_un', agbcc('c_un', 'strh'), ARMV4T_AGBCC, { prototypes: { mk: wh } });
+    expect(renderDeclarations(c.symbolRefs ?? [])).toContain('union T { u32 w; u16 h; };');
+    // mwcc 2.3.3: a 2-byte read of the home names `h`, not the first member
+    const mw = mwcc233('c_un', 'lhz     r0,12(r1)', 'sth');
+    expect(
+      decompile('c_un', mw, TOOLCHAIN_TARGETS.mwcc_233_163n.description, { prototypes: { ...own('c_un'), mk: wh } })
+        .source,
+    ).toMatch(/union T mk_ret;\s+mk_ret = mk\(a0\);\s+gV = mk_ret\.h;/);
+    // a member that is no integer, or two of one width, names no single member: no local, as before
+    for (const members of [
       [
         { name: 'w', type: 'u32' },
-        { name: 'h', type: 'u16' },
+        { name: 'f', type: 'float' },
       ],
-      'union',
-    );
-    expect(() => decompile('c_un', agbcc('c_un', 'strh'), ARMV4T_AGBCC, { prototypes: { mk: un } })).toThrow(
-      /r0 is read on a path where a call has destroyed it/,
-    );
+      [
+        { name: 'w', type: 'u32' },
+        { name: 'v', type: 's32' },
+      ],
+    ]) {
+      expect(() => decompile('c_un', agbcc('c_un', 'strh'), ARMV4T_AGBCC, { prototypes: { mk: un(members) } })).toThrow(
+        /r0 is read on a path where a call has destroyed it/,
+      );
+    }
   });
 
   test("each call's struct is its own local, so a read of the first after the second reads the first", () => {

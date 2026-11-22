@@ -11423,9 +11423,12 @@ export const SYNTHETIC: SynthSpec[] = [
   //      r3/r3:r4, reads up to four the same way, folds the frame home it stores r3 to into that
   //      local, declines on the pair r3:r4 (sret8), and lowers no hidden pointer for 12.
   //      sret1b and sret2b add {u8} (r0/r3 on both) and {u8, u8} (memory on agbcc, r3 on mwcc,
-  //      read back off its home); sretun a union and sretbf a bitfield, which have no local type
-  //      and decline wherever they come back in a register; sretfwd a function returning such a
-  //      struct straight from such a callee, which returns the call (`return sg(1);`), and
+  //      read back off its home); sretun a union of integers, read off a local of it on every
+  //      toolchain, each read naming the member of its own width (aggregate.ts `integerUnionType`),
+  //      and sretunw the same union read by its wider member; sretbf a bitfield, read off the local
+  //      on agbcc (a shift of its word) and declining on every other toolchain; sretfwd a function
+  //      returning such a struct straight from such a callee, which returns the call
+  //      (`return sg(1);`), and
   //      sretname the same through a named local, which mwcc gives a home the bare call has not;
   //      sret2fwd the {u16} forwarded the same way, and sret2mod a {u16} modified before it is
   //      returned, which declines where it comes back in a register (agbcc keeps the pad's bits,
@@ -11919,6 +11922,30 @@ export const SYNTHETIC: SynthSpec[] = [
         proto: {
           mkfl: { params: ['s32'], returns: 'struct Fl', returnLayout: one('f', 'float') },
           sretfl: { returnsVoid: true },
+        },
+      },
+      // the union read by its wider member, which a read must name by its width, not by its place
+      {
+        sym: 'sretunw',
+        src:
+          'union Uw { u16 h; u32 w; };\nextern union Uw mkuw(s32 x);\nextern u32 gW;\n' +
+          'void sretunw(s32 x)\n{\n    union Uw u = mkuw(x);\n    gW = u.w;\n}',
+        features: ['struct-return', 'union'],
+        ...at,
+        ctx: 'union Uw { u16 h; u32 w; };\nunion Uw mkuw(s32 x);\nvoid sretunw(s32 x);',
+        proto: {
+          mkuw: {
+            params: ['s32'],
+            returns: 'union Uw',
+            returnLayout: {
+              kind: 'union',
+              members: [
+                { name: 'h', type: 'u16' },
+                { name: 'w', type: 'u32' },
+              ],
+            },
+          },
+          sretunw: { returnsVoid: true },
         },
       },
       // a member stored through a POINTER global's value: the element is the pointee's, never the

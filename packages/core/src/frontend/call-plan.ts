@@ -19,6 +19,7 @@ import {
   aggregateType,
   byValueCallArgs,
   byValueRefusal,
+  integerUnionType,
   ownArgumentWordsOn,
   ownLeadingWordParamsOn,
   returnedAggregate,
@@ -1483,12 +1484,20 @@ export function structLocalType(
   if (named === undefined) {
     return { refused: 'it names no type a local of it could be declared with' };
   }
-  const type = aggregateType(named.tag, named.spelling, returnedAggregate(own), target);
+  // a union of integers is typed as its members at offset 0 (aggregate.ts `integerUnionType`)
+  const layout = returnedAggregate(own);
+  const type =
+    layout.kind === 'union'
+      ? integerUnionType(named.tag, named.spelling, layout, target)
+      : aggregateType(named.tag, named.spelling, layout, target);
   if (type?.kind !== 'struct') {
     return {
       refused:
-        'it is a union, or its members are not all known or this target does not say how it lays one of them out ' +
-        '(an enum, a bitfield) — the local it lands in has no type here',
+        layout.kind === 'union'
+          ? 'it is a union whose members are not all integers of distinct widths, or that is spelled as a struct, or ' +
+            'whose members are not all known or this target does not lay out — the local it lands in has no type here'
+          : 'its members are not all known or this target does not say how it lays one of them out ' +
+            '(an enum, a bitfield) — the local it lands in has no type here',
     };
   }
   return type;

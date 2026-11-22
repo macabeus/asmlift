@@ -189,13 +189,30 @@ describe('callDeclarations.plan for a lowering with no pair, no memory return an
       returns: { kind: 'register-struct', image: true },
       clobbers: calls.callClobbers,
     });
-    // a union has no local type here, eight bytes come back in two registers, and a float member
-    // has no spelling that reads its bits: each leaves the return register holding nothing
+    // …and a union of integers is a local of it too (aggregate.ts `integerUnionType`)
     const UN = { kind: 'union' as const, members: [{ name: 'a', type: 's32' }] };
+    expect(
+      ppcCalls({ mv: { params: ['s32'], returns: 'union One', returnLayout: UN } }).plan('mv').returns,
+    ).toMatchObject({ kind: 'register-struct', image: true });
+    // a union spelled as a struct, or holding a float, has no local type here, eight bytes come
+    // back in two registers, and a float member has no spelling that reads its bits: each leaves
+    // the return register holding nothing
+    const UNF = {
+      kind: 'union' as const,
+      members: [
+        { name: 'a', type: 's32' },
+        { name: 'f', type: 'float' },
+      ],
+    };
     const TWO = { kind: 'struct' as const, members: ['a', 'b'].map((name) => ({ name, type: 's32' })) };
     const FL = { kind: 'struct' as const, members: [{ name: 'a', type: 'float' }] };
-    for (const returnLayout of [UN, TWO, FL]) {
-      const other = ppcCalls({ mv: { params: ['s32'], returns: 'struct One', returnLayout } });
+    for (const [returns, returnLayout] of [
+      ['struct One', UN],
+      ['union One', UNF],
+      ['struct One', TWO],
+      ['struct One', FL],
+    ] as const) {
+      const other = ppcCalls({ mv: { params: ['s32'], returns, returnLayout } });
       expect(other.plan('mv')).toMatchObject({
         returns: { kind: 'register-struct', image: false },
         clobbers: [...other.callClobbers, 'r3'],
