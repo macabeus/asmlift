@@ -12,7 +12,7 @@ import { type Block, type Fn, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { decompile } from '../src/pipeline';
-import { PPC_MWCC } from '../src/target';
+import { PPC_MWCC, structureOptionsFor, targetFor } from '../src/target';
 
 /** an IR fn whose (reachable) entry block calls each name in `calls`, plus an optional
  *  UNREACHABLE block calling `unreachable` */
@@ -688,6 +688,18 @@ describe('assertEffectsPreserved — a pinned device access', () => {
     expect(() => checkReads(fn, [pollWhile([assign])])).not.toThrow();
     // another global, whose writes the IR did not place by a declaration, is still refused
     expect(() => checkReads(fn, [pollWhile([{ ...assign, name: 'gFlag' }])])).toThrow(/writes memory plain/);
+  });
+
+  // gcc's loop pass, `load_mems` with it, runs from `-O1`: compiled, agbcc `-O0` keeps
+  // `while (((volatile u16 *)0x4000006)[0]) ((s32 *)0x3000000)[1] = 1;`'s store in the loop.
+  test('agbcc at -O0, which runs no loop pass, judges no poll store', () => {
+    const at = (level: string) => structureOptionsFor(targetFor('agbcc', ['-mthumb-interwork', level]).target, true);
+    expect(() =>
+      assertEffectsPreserved(irReading([REG]), sfnWith([pollWhile([plainWord()])]), at('-O0')),
+    ).not.toThrow();
+    expect(() => assertEffectsPreserved(irReading([REG]), sfnWith([pollWhile([plainWord()])]), at('-O2'))).toThrow(
+      /writes memory plain/,
+    );
   });
 
   test('a plain store a poll may keep in the loop is not refused', () => {

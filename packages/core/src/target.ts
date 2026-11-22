@@ -1289,8 +1289,9 @@ export interface LoadBehaviors {
   //   'hoists' — IDO 7.1 at `-O2`: a lone store of a value the loop does not change is written
   //              once ahead of the loop (`while (*(vu32 *)A & 3) ((s32 *)B)[5] = a0;`, a global
   //              store, a do-while); a value the loop computes, a store under an `if`, and two
-  //              stores stay in it. Only where the level moves loop-invariant code
-  //              (`keepsLoopInvariantReads` absent).
+  //              stores stay in it.
+  //   Either only where the level moves loop-invariant code (`keepsLoopInvariantReads` absent):
+  //   gcc's loop pass runs from `-O1`, and agbcc `-O0` keeps the store in the loop.
   // ABSENT ⇒ the store stays in the loop: KMC gcc 2.7.2 and mwcc kept it in every probe.
   pollStoreMotion?: 'sinks' | 'hoists';
   // WHERE DOES THIS COMPILER PUT A READ NOBODY USES, at a level that keeps a plain one

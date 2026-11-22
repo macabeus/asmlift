@@ -456,8 +456,8 @@ function sunkPollStore(s: Loop, ctx: TreeContext): Write | undefined {
   }
   // KEPT: control flow of the loop's own — a statement that branches (an `if`, a `switch`, a nested
   // loop, a `break`, `continue`, `goto` or `return`) or a condition that does (`&&`, `||`). A loop
-  // left by a `return` or a `goto` has more than one exit target and is not optimized at all
-  // (loop.c:2512-2525); any other branch sets `maybe_never` for the whole loop (loop.c:8889-8925, a
+  // left by a `return` or a `goto` has more than one exit target, and `load_mems` moves none of its
+  // cells (loop.c:2512-2525); any other branch sets `maybe_never` for the whole loop (loop.c:8889-8925, a
   // label or a conditional jump with more of the loop after it), and then no cell that may trap is
   // moved (8978-8981), which on Thumb is every cell but the frame's: its address is a register
   // (rtlanal.c `may_trap_p`).
@@ -896,11 +896,10 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn, behaviors: EffectBehavi
     ]),
     fusedCopies: new Map(),
     literalLocals: literalLocalsOf(sfn),
-    // IDO's hoist is loop-invariant motion, which a level that keeps loop-invariant code does not run.
-    motion:
-      behaviors.pollStoreMotion === 'hoists' && behaviors.keepsLoopInvariantReads === true
-        ? undefined
-        : behaviors.pollStoreMotion,
+    // Both motions are the loop pass's, which a level that keeps loop-invariant code does not run:
+    // IDO's hoist is loop-invariant motion, and agbcc's sink is `load_mems`, which gcc's loop pass
+    // runs from `-O1` (target.ts `keepsLoopInvariantReadsAt`; `-O0` keeps the store in the loop).
+    motion: behaviors.keepsLoopInvariantReads === true ? undefined : behaviors.pollStoreMotion,
   };
   const counted = countEffects(sfn.body, ctx, unreached);
   const paths = counted.paths;
