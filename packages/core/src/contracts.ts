@@ -400,10 +400,10 @@ const plainWrite = (s: Stmt, ctx: TreeContext): s is Write =>
  *  WRITE KEPT ({@link movedWrite}). Only a loop that renders a pinned device read is judged: a
  *  poll, the family the device pin exists for, whether its condition reads the register or its own
  *  body reads it into a local the condition tests (a rotated `v0 = REG; while (v0 & M) { …; v0 =
- *  REG; }`). On IDO, whose hoist moves the write whatever the polled read's qualifier, a condition
- *  that reads a global is a poll too: `while (gF == 0) ((s32 *)B)[5] = a0;` writes once ahead of the
- *  loop compiled against `extern volatile s32 gF;`, the declaration the lift's bare `gF` is printed
- *  for. A loop whose body only holds a device read, or a nested poll, is no poll: its writes are
+ *  REG; }`). Where the compiler hoists (`'hoists'`), which moves the write whatever the polled
+ *  read's qualifier, a condition that reads a global is a poll too: IDO's `while (gF == 0) ((s32
+ *  *)B)[5] = a0;` writes once ahead of the loop compiled against `extern volatile s32 gF;`, the
+ *  declaration the lift's bare `gF` is printed for. A loop whose body only holds a device read, or a nested poll, is no poll: its writes are
  *  not judged here. A plain write at a fixed address in any other loop is the same hazard where its
  *  source was `volatile`, and is not judged here. */
 function sunkPollStore(s: Loop, ctx: TreeContext): Write | undefined {
@@ -452,15 +452,9 @@ function ownLoops(stmts: readonly Stmt[]): Loop[] {
  *  nothing of the outer loop's in a register, its `for` being a branch of it, but the `for` itself
  *  branches nowhere, and agbcc writes the cell once after it.
  *
- *  KEPT, by either compiler, whatever the loop's addresses: a call (loop.c:2444-2449; IDO, measured)
- *  and control flow of the loop's own — a statement that branches (an `if`, a `switch`, a nested
- *  loop, a `break`, `continue`, `goto` or `return`) or a condition that does (`&&`, `||`). On
- *  agbcc, a loop left by a `return` or a `goto` has more than one exit target, and `load_mems`
- *  moves none of its cells (loop.c:2512-2525); any other branch sets `maybe_never` for the whole
- *  loop (loop.c:8889-8925, a label or a conditional jump with more of the loop after it), and then
- *  no cell that may trap is moved (8978-8981), which on Thumb is every cell but the frame's: its
- *  address is a register (rtlanal.c `may_trap_p`). On IDO, measured: the store under an `if` stays.
- *  Past them, the compiler's own half: {@link sunkStore}, {@link hoistedStore}. */
+ *  KEPT, by every compiler, whatever the loop's addresses: a call anywhere in the loop
+ *  (loop.c:2444-2449; IDO and KMC gcc 2.7.2, measured, one under an `if` too). Past it, the
+ *  compiler's own half: {@link sunkStore}, {@link hoistedStore}. */
 function movedWrite(s: Loop, motion: 'sinks' | 'hoists', ctx: TreeContext): Write | undefined {
   const stmts = loopStmts(s);
   for (const inner of ownLoops(stmts)) {
@@ -470,39 +464,45 @@ function movedWrite(s: Loop, motion: 'sinks' | 'hoists', ctx: TreeContext): Writ
     }
   }
   const exprs = [...walkExprs([{ k: 'exprstmt', value: s.cond }, ...stmts])];
-  const straight = (st: Stmt): boolean => st.k === 'assign' || st.k === 'store' || st.k === 'exprstmt';
-  if (
-    !everyStmt(stmts).every(straight) ||
-    exprs.some((e) => e.k === 'call' || (e.k === 'bin' && (e.op === '&&' || e.op === '||')))
-  ) {
+  if (exprs.some((e) => e.k === 'call')) {
     return undefined;
   }
   const assigned = new Set(assignsIn([...stmts]).map((a) => a.name));
-  // An expression the loop does not change: it reads no memory, makes no call and names no local
-  // the loop assigns — nor, for IDO's hoist of a value, a global, whose read the loop makes.
-  const fixed = (e: Expr, globalsMove = false): boolean =>
+  return motion === 'hoists' ? hoistedStore(stmts, assigned, ctx) : sunkStore(stmts, exprs, assigned, ctx);
+}
+
+/** agbcc's half of {@link movedWrite}: the plain write `load_mems` keeps in a register for the
+ *  loop and writes once after it, or undefined.
+ *
+ *  KEPT, whatever the RTL's register history is: control flow of the loop's own — a statement that
+ *  branches (an `if`, a `switch`, a nested loop, a `break`, `continue`, `goto` or `return`) or a
+ *  condition that does (`&&`, `||`). A loop left by a `return` or a `goto` has more than one exit
+ *  target, and `load_mems` moves none of its cells (loop.c:2512-2525); any other branch sets
+ *  `maybe_never` for the whole loop (loop.c:8889-8925, a label or a conditional jump with more of
+ *  the loop after it), and then no cell that may trap is moved (8978-8981), which on Thumb is every
+ *  cell but the frame's: its address is a register (rtlanal.c `may_trap_p`). Past it, an access
+ *  whose bytes provably overlap the write's where one of the two is a byte, and the write itself
+ *  qualified ({@link plainWrite}). Every other plain write at a fixed address is the one returned.
+ *  An address is fixed in the loop when it reads no memory, makes no call and names no local the
+ *  loop assigns anything but the one constant the function gives it (`literalLocals`); a write whose width the tree does not say (a member, or a global assigned by its
+ *  name) has no bytes to overlap, so only the other keeps can clear it. */
+function sunkStore(
+  stmts: readonly Stmt[],
+  exprs: readonly Expr[],
+  assigned: ReadonlySet<string>,
+  ctx: TreeContext,
+): Write | undefined {
+  const straight = (st: Stmt): boolean => st.k === 'assign' || st.k === 'store' || st.k === 'exprstmt';
+  if (!everyStmt(stmts).every(straight) || exprs.some((e) => e.k === 'bin' && (e.op === '&&' || e.op === '||'))) {
+    return undefined;
+  }
+  const fixed = (e: Expr): boolean =>
     e.k !== 'call' &&
     e.k !== 'index' &&
     e.k !== 'field' &&
     e.k !== 'postincr' &&
-    !(e.k === 'var' && (assigned.has(e.name) || (globalsMove && !ctx.locals.has(e.name)))) &&
-    exprChildren(e).every((c) => fixed(c, globalsMove));
-  return motion === 'hoists' ? hoistedStore(stmts, fixed, ctx) : sunkStore(stmts, exprs, fixed, ctx);
-}
-
-/** agbcc's half of {@link movedWrite}, in a straight loop: past the call and the control flow,
- *  the keeps its rule makes whatever the RTL's register history is — a read whose bytes provably
- *  overlap the write's where one of the two is a byte; the write itself qualified
- *  ({@link plainWrite}). Every other plain write at a fixed address is the one returned. An address
- *  is fixed in the loop when it reads no memory, makes no call and names no local the loop assigns;
- *  a write whose width the tree does not say (a member, or a global assigned by its name) has no
- *  bytes to overlap, so only the other keeps can clear it. */
-function sunkStore(
-  stmts: readonly Stmt[],
-  exprs: readonly Expr[],
-  fixed: (e: Expr) => boolean,
-  ctx: TreeContext,
-): Write | undefined {
+    !(e.k === 'var' && assigned.has(e.name) && !ctx.literalLocals.has(e.name)) &&
+    exprChildren(e).every(fixed);
   const accesses = exprs.filter((e): e is Access => e.k === 'index' || e.k === 'field');
   // The bytes an element at a constant subscript covers: from a constant address — a literal, or a
   // local the function sets once to one — or from a base spelled alike, which the recompile reads as
@@ -519,21 +519,22 @@ function sunkStore(
       ? { base: null, lo: literal + lo, width: e.width }
       : { base: e.base, lo, width: e.width };
   };
-  const stores = new Set(everyStmt(stmts).flatMap((st) => (st.k === 'store' ? [st.lval] : [])));
-  // KEPT: a read whose bytes provably overlap the write's, in an alias set the write's conflicts
-  // with — a byte, which aliases anything (c-common.c:1892-1980) — and that is not the write's own
-  // cell at its own width. Such a read conflicts with the cell whatever the addresses' register
-  // history (alias.c `true_dependence`, `memrefs_conflict_p` answers overlap on known addresses and
-  // conflict on unknown ones), so the written cell is not moved (loop.c:8958-8976). The write's own
-  // cell at its own width is no such proof: `insert_loop_mem` merges it with the write when their
-  // address registers are equal (loop.c:8766-8773, `rtx_equal_p` ignores the qualifier), and then
-  // it moves with it, as in `((u16 *)A)[10] = a0; ((volatile u16 *)A)[10];`, which sinks.
+  // KEPT: a read or another store whose bytes provably overlap the write's, in an alias set the
+  // write's conflicts with — a byte, which aliases anything (c-common.c:1892-1980) — and that is not
+  // the write's own cell at its own width. Such an access conflicts with the cell whatever the
+  // addresses' register history (alias.c `true_dependence`, `memrefs_conflict_p` answers overlap on
+  // known addresses and conflict on unknown ones), so the written cell is not moved: a store that
+  // conflicts with it (loop.c:8941-8952), as in `*(u16 *)0x4000104 = a0; *(u8 *)0x4000105 = a0;`,
+  // whose two stores stay, or a read (8958-8976). The write's own cell at its own width is no such
+  // proof: `insert_loop_mem` merges it with the write when their address registers are equal
+  // (loop.c:8766-8773, `rtx_equal_p` ignores the qualifier), and then it moves with it, as in
+  // `((u16 *)A)[10] = a0; ((volatile u16 *)A)[10];`, which sinks.
   const overlapped = (w: Access): boolean => {
     const at = bytesOf(w);
     return (
       at !== undefined &&
       accesses.some((a) => {
-        const by = a === w || stores.has(a) ? undefined : bytesOf(a);
+        const by = a === w ? undefined : bytesOf(a);
         return (
           by !== undefined &&
           (at.width === 1 || by.width === 1) &&
@@ -562,29 +563,40 @@ function sunkStore(
   });
 }
 
-/** IDO 7.1's half of {@link movedWrite}, in a straight loop: the plain write it makes each time
- *  round that the compiler writes once AHEAD of the loop, or undefined. COMPILED at `-O2`: a lone
- *  store of a value the loop does not change, at an address it does not change, is hoisted to the
- *  preheader — `while (*(vu32 *)A & 3) ((s32 *)B)[5] = a0;`, the same with a global `gW = a0;`, a
- *  do-while, and the store of a `for` nested in a poll — so the recompile writes it once, before
- *  the first test. Each of these keeps it in the loop, measured: a value the loop computes (`x +=
- *  …; B[5] = x;`) or reads (`B[5] = gV;`), a second store beside it, and the call and the `if`
- *  {@link movedWrite} keeps. */
-function hoistedStore(
-  stmts: readonly Stmt[],
-  fixed: (e: Expr, globalsMove?: boolean) => boolean,
-  ctx: TreeContext,
-): Write | undefined {
-  const writes = everyStmt(stmts).filter((st) => st.k === 'store' || (st.k === 'assign' && !ctx.locals.has(st.name)));
-  const w = writes.length === 1 ? writes[0] : undefined;
-  if (w === undefined || !plainWrite(w, ctx)) {
+/** The `hoists` half of {@link movedWrite} (IDO 7.1, KMC gcc 2.7.2): the plain write the compiler
+ *  makes each time round that it writes once AHEAD of the loop, or undefined. COMPILED at `-O2`: a
+ *  lone store of a value the loop does not change, at an address it does not change, is hoisted to
+ *  the preheader — `while (*(vu32 *)A & 3) ((s32 *)B)[5] = a0;`, the same with a global `gW = a0;`,
+ *  a do-while, the store of a `for` nested in a poll — so the recompile writes it once, before the
+ *  first test. Control flow beside it is no keep: IDO hoists it past an unrelated `if`, an `if (…)
+ *  break;`, an early `return` and a `&&` in the condition, so only the loop's own statements outside
+ *  every branch are candidates, and a write under an `if` is kept (measured on both). Each of these
+ *  keeps it, measured on both: a value the loop computes (`x += …; B[5] = x;`) and a second store
+ *  to another cell. Two stores to one cell are one, and hoisted. A memory read is no change: KMC
+ *  loads `B[1] = gV;`'s global once ahead of the loop and writes it there too, so only a local the
+ *  loop assigns (anything but its one constant), a post-increment, a call or a qualified access (a declared global's included)
+ *  moves a value or an address. */
+function hoistedStore(stmts: readonly Stmt[], assigned: ReadonlySet<string>, ctx: TreeContext): Write | undefined {
+  const fixed = (e: Expr): boolean =>
+    e.k !== 'call' &&
+    e.k !== 'postincr' &&
+    !((e.k === 'index' || e.k === 'field') && qualifiedAccessChain(e)) &&
+    !(e.k === 'var' && ((assigned.has(e.name) && !ctx.literalLocals.has(e.name)) || ctx.declared.has(e.name))) &&
+    exprChildren(e).every(fixed);
+  // the loop's own statements on every path round it, past none of its branches
+  const writes = stmts.filter((st): st is Write => st.k === 'store' || (st.k === 'assign' && !ctx.locals.has(st.name)));
+  const w = writes[0];
+  const oneCell = writes.every((x) =>
+    x.k === 'store' && w.k === 'store'
+      ? exprEquals(x.lval, w.lval)
+      : x.k === 'assign' && w.k === 'assign' && x.name === w.name,
+  );
+  if (w === undefined || !oneCell || !writes.every((x) => plainWrite(x, ctx))) {
     return undefined;
   }
   const at =
-    w.k === 'store'
-      ? (w.lval.k === 'index' || w.lval.k === 'field') && exprChildren(w.lval).every((c) => fixed(c, true))
-      : true;
-  return at && fixed(w.value, true) ? w : undefined;
+    w.k === 'store' ? (w.lval.k === 'index' || w.lval.k === 'field') && exprChildren(w.lval).every(fixed) : true;
+  return at && writes.every((x) => fixed(x.value)) ? w : undefined;
 }
 
 /** The reads the guard-fused loops in a tree stand for past their conditions' own renders, by key,
@@ -763,8 +775,9 @@ export interface EffectBehaviors {
   keepsLoopInvariantReads?: boolean;
 }
 
-/** Each local `sfn` assigns exactly once, a constant (or a cast of one), by the constant; never a
- *  parameter, whose entry value is a second definition, nor a local a `++` steps. */
+/** Each local `sfn` assigns only one constant (or a cast of one), by the constant, however many
+ *  times it assigns it — a constant address the register allocator re-materialises in a loop; never
+ *  a parameter, whose entry value is a second definition, nor a local a `++` steps. */
 function literalLocalsOf(sfn: SFn): Map<string, number> {
   const params = new Set([
     ...sfn.params.map((v) => v.name),
@@ -775,11 +788,14 @@ function literalLocalsOf(sfn: SFn): Map<string, number> {
     sets.set(a.name, [...(sets.get(a.name) ?? []), a.value]);
   }
   const out = new Map<string, number>();
+  const literal = (v: Expr): number | undefined => {
+    const e = v.k === 'cast' ? v.e : v;
+    return e.k === 'const' ? e.value : undefined;
+  };
   for (const [name, values] of sets) {
-    const v = values.length === 1 && !params.has(name) ? values[0] : undefined;
-    const e = v?.k === 'cast' ? v.e : v;
-    if (e?.k === 'const') {
-      out.set(name, e.value);
+    const k = literal(values[0]);
+    if (!params.has(name) && k !== undefined && values.every((v) => literal(v) === k)) {
+      out.set(name, k);
     }
   }
   return out;

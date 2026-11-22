@@ -19,6 +19,25 @@
 //     void i13(s32 a0) { while (*(vs32 *)&gF == 0) { ((vu32 *)0xA4600000)[5] = a0; } g(); }
 //     void h1(s32 a0, s32 a1) { while (((vu32 *)0xA4600010)[0] & 3) {
 //       ((s32 *)0xA4600000)[5] = a0; ((u16 *)0xA4500000)[2] = a1; } g(); }
+//     void j13(s32 a0, s32 a1) { s32 n = 0; while (*(vu32 *)0xA4000010 & 3) {
+//       ((vs32 *)0xA0001000)[5] = a0; if (a1 & 1) n++; } return n; }
+//     void q4(s32 a0) { do { ((s32 *)0xA4000000)[5] = a0; }
+//       while ((*(vu32 *)0xA4600010 & 3) || (*(vu32 *)0xA4600014 & 1)); }
+//     void i04(s32 a0) { while (*(vu32 *)0xA4600010 & 3) {
+//       ((vs32 *)0xA4000000)[5] = a0; ((vs32 *)0xA4000000)[5] = a0; } }
+//   agbcc -mthumb-interwork -O2 -fhex-asm, again
+//     void e2(s32 *q) { while (*(vu16 *)0x3000100 != 50) { *(vu16 *)0x3000100 = 7; *q++ = 0; } }
+//     void e7(s32 *q) { while (*(vu8 *)0x3000100 != 50) { *(vu8 *)0x3000100 = 7; *q++ = 0; } }
+//     void o6(s32 a0) { while (*(vu8 *)0x4000108 & 1) { *(u16 *)0x4000104 = a0; *(u8 *)0x4000105 = a0; } }
+//     void k16c(s32 a0) { s32 s = 0; while (s < 100 && (*(vu32 *)0x4000104 & 3)) { s++; } }
+//   agbcc -mthumb-interwork -O1 -fhex-asm
+//     s32 m15(s32 a0, s32 *q) { s32 s = 0; while (*(volatile s32 *)0x4000104 & 3) {
+//       ((volatile s32 *)0x3001000)[1] = a0; s += *q++; } return s; }
+//   KMC gcc 2.7.2 -O2 -G0 -mips3 -mgp32 -mfp32
+//     s32 m4(s32 *q) { s32 s = 0; while (*(vu32 *)0xA4000010 & 3) {
+//       ((vs32 *)0xA0001000)[1] = 5; s += *q++; } return s; }
+//     void m7(s32 a0) { s32 i; for (i = 0; i < 10; i++) {
+//       while (*(vu32 *)0xA4000010 & 3); ((s32 *)0xA0001000)[1] = a0; } }
 //   mwcc 2.4.2 -O4,p
 //     void qw(void) { while (*(vu32 *)0xCC006010 & 3) ; g(); }
 //
@@ -30,7 +49,12 @@
 // loaded once ahead of the loop beside the `s32` store, and se's `u8` read stays in it,
 // while kq's, through a parameter, is loaded once ahead of the loop beside a byte store. i13's store
 // is written once ahead of the loop compiled against `extern volatile s32 gF;`, and h1, recompiled
-// plain, is the original.
+// plain, is the original. Recompiled plain, j13's store is written once ahead of the loop (IDO, past
+// the `if`), q4's second read is loaded once ahead of it (IDO), i04's two stores are one, written
+// ahead of it; e2's read and store leave the loop together (agbcc `load_mems`) while e7's byte cell
+// keeps both; o6's two overlapping stores stay; k16c's body read is the guard's again and goes;
+// m15 (agbcc -O1) and m4 (KMC) load their poll once, and m4's store is then written once ahead of
+// the loop, as it is with the poll spelled volatile; m7's inner guard read leaves the outer loop.
 import { describe, expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
@@ -393,6 +417,233 @@ const H1 = `
   5c:	nop
 `;
 
+const E2 = `
+e2:
+	push	{r4, lr}
+	add	r3, r0, #0
+	ldr	r1, .L7
+	ldrh	r0, [r1]
+	cmp	r0, #0x32
+	beq	.L4	@cond_branch
+	mov	r4, #0x7
+	mov	r2, #0x0
+.L5:
+	strh	r4, [r1]
+	stmia	r3!, {r2}
+	ldrh	r0, [r1]
+	cmp	r0, #0x32
+	bne	.L5	@cond_branch
+.L4:
+	pop	{r4}
+	pop	{r0}
+	bx	r0
+.L8:
+	.align	2, 0
+.L7:
+	.word	0x3000100
+.Lfe1:
+`;
+const E7 = E2.replaceAll('e2', 'e7').replaceAll('strh', 'strb').replaceAll('ldrh', 'ldrb');
+const O6 = `
+o6:
+	push	{r4, r5, r6, lr}
+	add	r2, r0, #0
+	ldr	r3, .L7
+	ldrb	r1, [r3]
+	mov	r0, #0x1
+	and	r0, r0, r1
+	cmp	r0, #0
+	beq	.L4	@cond_branch
+	ldr	r6, .L7+0x4
+	ldr	r5, .L7+0x8
+	mov	r4, #0x1
+.L5:
+	strh	r2, [r6]
+	strb	r2, [r5]
+	ldrb	r1, [r3]
+	add	r0, r4, #0
+	and	r0, r0, r1
+	cmp	r0, #0
+	bne	.L5	@cond_branch
+.L4:
+	pop	{r4, r5, r6}
+	pop	{r0}
+	bx	r0
+.L8:
+	.align	2, 0
+.L7:
+	.word	0x4000108
+	.word	0x4000104
+	.word	0x4000105
+.Lfe1:
+`;
+const K16C = `
+k16c:
+	push	{lr}
+	mov	r2, #0x0
+	ldr	r3, .L9
+	ldr	r0, [r3]
+	mov	r1, #0x3
+	b	.L8
+.L10:
+	.align	2, 0
+.L9:
+	.word	0x4000104
+.L5:
+	add	r2, r2, #0x1
+	cmp	r2, #0x63
+	bgt	.L4	@cond_branch
+	ldr	r0, [r3]
+.L8:
+	and	r0, r0, r1
+	cmp	r0, #0
+	bne	.L5	@cond_branch
+.L4:
+	pop	{r0}
+	bx	r0
+.Lfe1:
+`;
+const M15 = `
+m15:
+	push	{r4, r5, r6, lr}
+	add	r4, r0, #0
+	add	r5, r1, #0
+	mov	r2, #0x0
+	ldr	r0, .L7
+	add	r3, r0, #0
+	mov	r1, #0x3
+	ldr	r0, [r0]
+	and	r0, r0, r1
+	cmp	r0, #0
+	beq	.L4	@cond_branch
+	ldr	r6, .L7+0x4
+.L5:
+	str	r4, [r6]
+	ldmia	r5!, {r0}
+	add	r2, r2, r0
+	ldr	r0, [r3]
+	and	r0, r0, r1
+	cmp	r0, #0
+	bne	.L5	@cond_branch
+.L4:
+	add	r0, r2, #0
+	pop	{r4, r5, r6}
+	pop	{r1}
+	bx	r1
+.L8:
+	.align	2, 0
+.L7:
+	.word	0x4000104
+	.word	0x3001004
+.Lfe1:
+`;
+const M4 = `
+00000000 <m4>:
+   0:	lui	v0,0xa400
+   4:	ori	v0,v0,0x10
+   8:	lw	v0,0(v0)
+   c:	andi	v0,v0,0x3
+  10:	beqz	v0,48 <m4+0x48>
+  14:	move	a1,zero
+  18:	lui	a3,0xa000
+  1c:	ori	a3,a3,0x1004
+  20:	li	t0,5
+  24:	lui	a2,0xa400
+  28:	ori	a2,a2,0x10
+  2c:	sw	t0,0(a3)
+  30:	lw	v1,0(a0)
+  34:	lw	v0,0(a2)
+  38:	addiu	a0,a0,4
+  3c:	andi	v0,v0,0x3
+  40:	bnez	v0,2c <m4+0x2c>
+  44:	addu	a1,a1,v1
+  48:	jr	ra
+  4c:	move	v0,a1
+`;
+const M7 = `
+00000000 <m7>:
+   0:	move	a1,zero
+   4:	lui	a3,0xa400
+   8:	ori	a3,a3,0x10
+   c:	lui	a2,0xa000
+  10:	ori	a2,a2,0x1004
+  14:	lw	v0,0(a3)
+  18:	andi	v0,v0,0x3
+  1c:	beqzl	v0,40 <m7+0x40>
+  20:	addiu	a1,a1,1
+  24:	lui	v1,0xa400
+  28:	ori	v1,v1,0x10
+  2c:	lw	v0,0(v1)
+  30:	andi	v0,v0,0x3
+  34:	bnez	v0,2c <m7+0x2c>
+  38:	nop
+  3c:	addiu	a1,a1,1
+  40:	slti	v0,a1,10
+  44:	bnez	v0,14 <m7+0x14>
+  48:	sw	a0,0(a2)
+  4c:	jr	ra
+  50:	nop
+`;
+const J13 = `
+00000000 <j13>:
+   0:	lui	a2,0xa400
+   4:	ori	a2,a2,0x10
+   8:	lw	t6,0(a2)
+   c:	andi	v0,a1,0x1
+  10:	lui	a1,0xa000
+  14:	andi	t7,t6,0x3
+  18:	beqz	t7,40 <j13+0x40>
+  1c:	move	v1,zero
+  20:	ori	a1,a1,0x1014
+  24:	beqz	v0,30 <j13+0x30>
+  28:	sw	a0,0(a1)
+  2c:	addiu	v1,v1,1
+  30:	lw	t8,0(a2)
+  34:	andi	t9,t8,0x3
+  38:	bnez	t9,24 <j13+0x24>
+  3c:	nop
+  40:	jr	ra
+  44:	move	v0,v1
+`;
+const Q4 = `
+00000000 <q4>:
+   0:	lui	t6,0xa400
+   4:	lui	v1,0xa460
+   8:	lui	v0,0xa460
+   c:	ori	v0,v0,0x10
+  10:	ori	v1,v1,0x14
+  14:	sw	a0,20(t6)
+  18:	lw	t7,0(v0)
+  1c:	andi	t8,t7,0x3
+  20:	bnezl	t8,1c <q4+0x1c>
+  24:	lw	t7,0(v0)
+  28:	lw	t9,0(v1)
+  2c:	andi	t0,t9,0x1
+  30:	bnezl	t0,1c <q4+0x1c>
+  34:	lw	t7,0(v0)
+  38:	jr	ra
+  3c:	nop
+`;
+const I04 = `
+00000000 <i04>:
+   0:	lui	v0,0xa460
+   4:	ori	v0,v0,0x10
+   8:	lw	t6,0(v0)
+   c:	lui	v1,0xa400
+  10:	ori	v1,v1,0x14
+  14:	andi	t7,t6,0x3
+  18:	beqz	t7,38 <i04+0x38>
+  1c:	nop
+  20:	sw	a0,0(v1)
+  24:	sw	a0,0(v1)
+  28:	lw	t8,0(v0)
+  2c:	andi	t9,t8,0x3
+  30:	bnezl	t9,24 <i04+0x24>
+  34:	sw	a0,0(v1)
+  38:	jr	ra
+  3c:	nop
+`;
+
 /** The relocations the object file gives IDO's text: `gF`'s address and the call to `g`. */
 const relocs = (list: Array<[number, string, string]>): AsmData => ({
   sections: new Map(),
@@ -424,8 +675,33 @@ describe('a poll read the compiler would move out of its loop is pinned volatile
     expect(decompile('w1', W1, o0, { prototypes }).source).not.toContain('volatile');
   });
 
-  test('agbcc: a read past a branch of the loop stays plain (maybe_never keeps it)', () => {
-    expect(decompile('w7', W7, AGBCC, { prototypes }).source).toContain('} while (*(u16 *)67108870 != 3);');
+  test('agbcc: a read past a branch of the loop that its exit tests is pinned too', () => {
+    expect(decompile('w7', W7, AGBCC, { prototypes }).source).toContain('} while (*(volatile u16 *)67108870 != 3);');
+    // the body's read the loop's test is passed, a rotated poll's, which `gcse` deletes plain
+    expect(decompile('k16c', K16C, AGBCC).source).toMatch(/v\d = \*\(volatile s32 \*\)67109124;/);
+  });
+
+  test('IDO: a read past a branch of the loop that its exit tests is pinned', () => {
+    expect(decompile('q4', Q4, MIPS_IDO).source).toContain('(*(volatile s32 *)-1537212396 & 1) == 0');
+  });
+
+  test('a read whose address moves keeps no poll read beside it: agbcc -O1, KMC', () => {
+    const o1 = targetFor('agbcc', ['-mthumb-interwork', '-O1', '-fhex-asm']).target;
+    expect(() => decompile('m15', M15, o1)).toThrow(SINKS);
+    const kmc = targetFor('gcc2.7.2kmc', ['-O2']).target;
+    expect(() => decompile('m4', M4, kmc)).toThrow(SINKS);
+  });
+
+  test('agbcc: a cell the loop writes keeps its read beside a moving access only where a byte conflicts', () => {
+    expect(() => decompile('e2', E2, AGBCC)).toThrow(SINKS);
+    expect(decompile('e7', E7, AGBCC).source).toContain('while (*(u8 *)50331904 != 50) {');
+  });
+
+  test("KMC: an inner poll's guard, a constant built with `or`, is pinned with it", () => {
+    const kmc = targetFor('gcc2.7.2kmc', ['-O2']).target;
+    const src = decompile('m7', M7, kmc).source;
+    expect(src).toContain('while ((*(volatile s32 *)-1543503856 & 3) != 0) {');
+    expect(src).not.toContain('(*(s32 *)-1543503856');
   });
 
   test('agbcc: a read beside a store through a stepped pointer is pinned unless a byte keeps it', () => {
@@ -475,6 +751,17 @@ describe('a poll loop that stores is judged by how the compiler moves the store'
   test('IDO: a poll of a global declared volatile hoists the store too', () => {
     const contextGlobals = globalsFromContext('typedef int s32; extern volatile s32 gF;', 'c');
     expect(() => decompile('i13', I13, MIPS_IDO, { prototypes, contextGlobals, asmData: I13_RELOCS })).toThrow(SINKS);
+  });
+
+  test('agbcc: two plain stores whose bytes overlap, one a byte, keep each other', () => {
+    const src = decompile('o6', O6, AGBCC).source;
+    expect(src).toContain('*(u16 *)67109124 = a0;');
+    expect(src).toContain('*(u8 *)67109125 = a0;');
+  });
+
+  test('IDO: control flow beside the store is no keep, and two stores to one cell are one', () => {
+    expect(() => decompile('j13', J13, MIPS_IDO)).toThrow(SINKS);
+    expect(() => decompile('i04', I04, MIPS_IDO)).toThrow(SINKS);
   });
 
   test('IDO: two stores keep each other, and the fused guard of their poll is credited', () => {

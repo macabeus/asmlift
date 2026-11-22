@@ -105,6 +105,7 @@ const BEHAVIORS: Record<string, CompilerBehaviors> = {
     largestAlignment: 8,
   },
   MIPS_GCC: {
+    pollStoreMotion: 'hoists',
     // ControlFlowBehaviors
     coalesceLoopInit: true,
     preserveDivergentBranchSense: true,

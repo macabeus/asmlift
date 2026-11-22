@@ -1297,13 +1297,18 @@ export interface LoadBehaviors {
   // refuses to print plain (contracts.ts `sunkPollStore`). COMPILED at the canonical flags:
   //   'sinks'  — agbcc: loop.c `load_mems` keeps the cell in a register and writes it once after
   //              the loop, unless an access the alias pass cannot tell apart from it keeps it;
-  //   'hoists' — IDO 7.1 at `-O2`: a lone store of a value the loop does not change is written
-  //              once ahead of the loop (`while (*(vu32 *)A & 3) ((s32 *)B)[5] = a0;`, a global
-  //              store, a do-while); a value the loop computes, a store under an `if`, and two
-  //              stores stay in it.
+  //   'hoists' — IDO 7.1 and KMC gcc 2.7.2 at `-O2`: a lone store of a value the loop does not
+  //              change, made each time round, is written once ahead of the loop (IDO: `while
+  //              (*(vu32 *)A & 3) ((s32 *)B)[5] = a0;`, a global store, a do-while, and past an
+  //              unrelated `if`, a `break`, a `return` or a `&&` in the condition; KMC: `while
+  //              (*(vu32 *)A & 3) { ((s32 *)B)[1] = 5; s += *q++; }`, `B[1] = gV;` and `gW = a0;`
+  //              beside that read, which KMC keeps in the loop without it). A value the loop
+  //              computes, a store under an `if`, two stores to two cells, and a call stay in it
+  //              on both.
   //   Either only where the level moves loop-invariant code (`keepsLoopInvariantReads` absent):
   //   gcc's loop pass runs from `-O1`, and agbcc `-O0` keeps the store in the loop.
-  // ABSENT ⇒ the store stays in the loop: KMC gcc 2.7.2 and mwcc kept it in every probe.
+  // ABSENT ⇒ the store stays in the loop: mwcc kept it in every probe, those shapes KMC moves
+  // included (mwcc 2.4.2 `-O4,p`).
   pollStoreMotion?: 'sinks' | 'hoists';
   // WHERE DOES THIS COMPILER PUT A READ NOBODY USES, at a level that keeps a plain one
   // (`keepsUnusedReads`)? The register a `volatile` read with no consumer is loaded into, and no
@@ -2006,6 +2011,10 @@ export const MIPS_GCC: TargetDescription = {
   fpu: O32_FPU,
   capabilities: { endianness: 'big', hwDivide: true, hwFloat: true, flags: false },
   compilerBehaviors: {
+    // a plain store of an invariant value in a poll loop is written once ahead of it (the field),
+    // COMPILED on KMC gcc 2.7.2; Mario Party 3's gcc 2.7.2 is unmeasured, and refusing the store
+    // there costs a lift, never a wrong one
+    pollStoreMotion: 'hoists',
     plainCharSigned: true,
     contractsFloatProducts: false,
     coalesceLoopInit: true,
