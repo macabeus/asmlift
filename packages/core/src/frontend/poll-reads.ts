@@ -58,12 +58,15 @@
  *     branch the loop takes, or is one the loop's exit tests wherever in the loop it is. A read
  *     past a branch is `maybe_never` to agbcc's loop pass (loop.c, under a label or a conditional
  *     jump), which on Thumb, where any load may trap (rtlanal.c `may_trap_p`), leaves it in the
- *     loop; but that is the pass, not the compiler. COMPILED: IDO 7.1 loads `do { … } while
- *     ((*(vu32 *)A & 3) || (*(u32 *)B & 1));`'s B once ahead of the loop when B is plain; agbcc
- *     reads `v1 = *(s32 *)0x4000104; while ((v1 & 3) != 0) { if (v0 + 1 > 99) break; v0++; v1 =
- *     *(s32 *)0x4000104; }`'s REG once, the body's read being the guard's again with no store
- *     between (`gcse`); KMC gcc 2.7.2 does the same to a `while (s < 100) { …; if ((REG & 3) ==
- *     0) break; }`. An untested read past a branch is left as it was;
+ *     loop, and so do KMC gcc 2.7.2 and mwcc, COMPILED (`for (i = 0; i < gCount; i++) { if
+ *     (gTab[i] == x) …; }`, `synthetic:retpost_tail`, matches with its bound plain). Two reads past
+ *     a branch are pinned all the same. A rotated poll's, which the loop's test reads through a
+ *     block argument, is the read ahead of the loop again with no store between, which agbcc's
+ *     `gcse` deletes: `v1 = *(s32 *)0x4000104; while ((v1 & 3) != 0) { if (v0 + 1 > 99) break;
+ *     v0++; v1 = *(s32 *)0x4000104; }` reads REG once. And on IDO 7.1, which moves a read from
+ *     past a branch (target.ts `movesReadsPastBranches`: `do { … } while ((*(vu32 *)A & 3) ||
+ *     (*(u32 *)B & 1));` loads B once ahead of the loop when B is plain), every read the loop's
+ *     exit tests;
  *   • its address is invariant: every value it is computed from is a constant, a symbol's address,
  *     or a value defined outside the loop, through pure arithmetic — no read, no block argument of
  *     a loop block;
@@ -188,7 +191,8 @@ export function pinPollReads(irBlocks: readonly Block[], target: TargetDescripti
         : ops.some((op) => (op.opcode === 'store' || op.opcode === 'astore') && moves(op))
           ? () => true
           : undefined;
-    const tested = stores ? testedReads(loop, defOf, defBlock, incoming) : undefined;
+    const decided = testedReads(loop, defOf, defBlock, incoming);
+    const tested = stores ? decided.tested : undefined;
     const fromFrame = (v: Value, depth = 0): boolean => {
       const d = defOf.get(v);
       return (
@@ -198,8 +202,10 @@ export function pinPollReads(irBlocks: readonly Block[], target: TargetDescripti
           ((d.opcode === 'add' || d.opcode === 'sub') && d.operands.some((o) => fromFrame(o, depth + 1))))
       );
     };
-    // and the reads past one of the loop's branches that its exit tests
-    const candidates = [...new Set([...loop.header.ops, ...(tested ?? testedReads(loop, defOf, defBlock, incoming))])];
+    // and, past one of the loop's branches, a rotated poll's read, and on a compiler that moves
+    // one from there every read the loop's exit tests
+    const past = target.compilerBehaviors.movesReadsPastBranches === true ? decided.tested : decided.rotated;
+    const candidates = [...new Set([...loop.header.ops, ...past])];
     const pinned: Op[] = [];
     for (const op of candidates) {
       if (
@@ -213,6 +219,25 @@ export function pinPollReads(irBlocks: readonly Block[], target: TargetDescripti
       ) {
         op.attrs = { ...op.attrs, volatile: true };
         pinned.push(op);
+      }
+    }
+    // The read a rotated poll's entry makes ahead of the loop, which its test reads the first time
+    // round, is the same cell's (`v0 = REG; while (v0 & M) v0 = REG;`): pinned with it, as the
+    // source's one read.
+    for (const p of loop.header.params) {
+      for (const a of incoming.get(p) ?? []) {
+        const d = defOf.get(a);
+        const at = defBlock.get(a);
+        if (
+          d !== undefined &&
+          at !== undefined &&
+          !loop.body.has(at) &&
+          (d.opcode === 'load' || d.opcode === 'aload') &&
+          d.attrs.volatile !== true &&
+          pinned.some((x) => sameRead(x, d, defOf))
+        ) {
+          d.attrs = { ...d.attrs, volatile: true };
+        }
       }
     }
     // The guard a rotated `while` duplicates its test into ahead of the loop reads the same cell
@@ -372,7 +397,7 @@ function testedReads(
   defOf: ReadonlyMap<Value, Op>,
   defBlock: ReadonlyMap<Value, Block>,
   incoming: ReadonlyMap<Value, readonly Value[]>,
-): Set<Op> {
+): { tested: Set<Op>; rotated: Set<Op> } {
   // A branch to a block that only goes on to the header goes round again too: a MIPS
   // branch-likely's delay slot is such a block on the taken edge.
   const roundAgain = (b: Block): boolean => {
@@ -394,8 +419,9 @@ function testedReads(
     ...[...loop.body].filter((b) => (terminator(b)?.successors ?? []).some((e) => roundAgain(e.block))),
   ]);
   const out = new Set<Op>();
+  const rotated = new Set<Op>();
   const seen = new Set<Value>();
-  const walk = (v: Value, depth: number): void => {
+  const walk = (v: Value, depth: number, viaArg: boolean): void => {
     if (seen.has(v) || depth > 16) {
       return;
     }
@@ -403,20 +429,24 @@ function testedReads(
     const d = defOf.get(v);
     if (d === undefined) {
       // a block argument: the values it is passed, a rotated poll's read among them
-      (incoming.get(v) ?? []).forEach((o) => walk(o, depth + 1));
+      (incoming.get(v) ?? []).forEach((o) => walk(o, depth + 1, true));
       return;
     }
     if (d.opcode === 'load' || d.opcode === 'aload') {
       out.add(d);
+      if (viaArg) {
+        rotated.add(d);
+      }
       return;
     }
-    d.operands.forEach((o) => walk(o, depth + 1));
+    d.operands.forEach((o) => walk(o, depth + 1, viaArg));
   };
   for (const b of deciding) {
     const t = terminator(b);
     if (t?.opcode === 'cond_br' && loop.body.has(b)) {
-      walk(t.operands[0], 0);
+      walk(t.operands[0], 0, false);
     }
   }
-  return new Set([...out].filter((op) => op.results.some((r) => loop.body.has(defBlock.get(r) as Block))));
+  const inLoop = (op: Op) => op.results.some((r) => loop.body.has(defBlock.get(r) as Block));
+  return { tested: new Set([...out].filter(inLoop)), rotated: new Set([...rotated].filter(inLoop)) };
 }

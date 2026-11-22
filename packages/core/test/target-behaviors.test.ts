@@ -72,6 +72,7 @@ const BEHAVIORS: Record<string, CompilerBehaviors> = {
   },
   MIPS_IDO: {
     pollStoreMotion: 'hoists',
+    movesReadsPastBranches: true,
     // ControlFlowBehaviors
     coalesceLoopInit: true,
     preserveDivergentBranchSense: true,

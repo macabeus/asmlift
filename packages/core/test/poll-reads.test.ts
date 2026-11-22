@@ -675,8 +675,8 @@ describe('a poll read the compiler would move out of its loop is pinned volatile
     expect(decompile('w1', W1, o0, { prototypes }).source).not.toContain('volatile');
   });
 
-  test('agbcc: a read past a branch of the loop that its exit tests is pinned too', () => {
-    expect(decompile('w7', W7, AGBCC, { prototypes }).source).toContain('} while (*(volatile u16 *)67108870 != 3);');
+  test("agbcc: a read past a branch of the loop stays plain (maybe_never keeps it), a rotated poll's is pinned", () => {
+    expect(decompile('w7', W7, AGBCC, { prototypes }).source).toContain('} while (*(u16 *)67108870 != 3);');
     // the body's read the loop's test is passed, a rotated poll's, which `gcse` deletes plain
     expect(decompile('k16c', K16C, AGBCC).source).toMatch(/v\d = \*\(volatile s32 \*\)67109124;/);
   });

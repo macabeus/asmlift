@@ -1310,6 +1310,14 @@ export interface LoadBehaviors {
   // ABSENT ⇒ the store stays in the loop: mwcc kept it in every probe, those shapes KMC moves
   // included (mwcc 2.4.2 `-O4,p`).
   pollStoreMotion?: 'sinks' | 'hoists';
+  // DOES THIS COMPILER MOVE a plain read at a loop-invariant address out of a loop from PAST one
+  // of the loop's branches? COMPILED at `-O2`: IDO 7.1 loads `do { ((s32 *)A)[5] = a0; } while
+  // ((*(vu32 *)B & 3) || (*(u32 *)C & 1));`'s C once ahead of the loop; agbcc keeps it
+  // (`maybe_never` and Thumb's `may_trap_p`, loop.c), and so do KMC gcc 2.7.2 and mwcc 2.4.2 at
+  // `-O4,p`. Read by the poll-read pin (frontend/poll-reads.ts), which then pins a read the loop's
+  // exit tests wherever in the loop it is.
+  // ABSENT ⇒ false: past the loop's header, only a rotated poll's read is the pin's.
+  movesReadsPastBranches?: boolean;
   // WHERE DOES THIS COMPILER PUT A READ NOBODY USES, at a level that keeps a plain one
   // (`keepsUnusedReads`)? The register a `volatile` read with no consumer is loaded into, and no
   // plain local is ever homed in. COMPILED at the keeping levels, one statement per line:
@@ -1877,6 +1885,8 @@ export const MIPS_IDO: TargetDescription = {
   compilerBehaviors: {
     // a plain store of an invariant value in a poll loop is written once ahead of it (the field)
     pollStoreMotion: 'hoists',
+    // and a read past one of the loop's branches is loaded once ahead of it (the field)
+    movesReadsPastBranches: true,
     plainCharSigned: false,
     contractsFloatProducts: false,
     coalesceLoopInit: true,
