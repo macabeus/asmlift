@@ -1,12 +1,13 @@
 {
   "generatedBy": "pnpm regen:declines-census (scripts/regen-decline-census.ts) — do not hand-edit",
-  "distinctMessages": 348,
-  "residueTotal": 152,
+  "distinctMessages": 352,
+  "residueTotal": 156,
   "residueByFile": [
     {
       "file": "frontend/thumb.ts",
       "count": 48,
       "messages": [
+        "Ximmediate 'X' is not an integer literal — a symbol, a character constant or an expression is gas's to resolve, and a literal past a 32-bit word is gas's to truncate; this frontend will not read either as a number",
         "cannot lift 'X': 'X X' branches to 'X', which this asm defines as a data label — not modelled",
         "cannot lift 'X': 'X X' calls through a register that holds no function's address — not modelled",
         "cannot lift 'X': 'X X' loads a word that is not X's own into X, which is then used as a value — a pop is read as restoring each register it names, so the copy it makes is not modelled",
@@ -53,15 +54,15 @@
         "cannot lift 'X': reachable code in block 'X' falls through into data bytes",
         "cannot lift 'X': register 'X' in 'X X' is spelled in upper case — this frontend identifies registers by spelling and models the lower-case forms only",
         "cannot lift 'X': stm with the base register in its own list, not as the lowest entry — the value stored for that register is UNPREDICTABLE and differs between ARMv4 (new base) and ARMv5 (old base)",
-        "cannot lift 'X': the include chain X repeats a file or nests deeper than this frontend reads",
-        "immediate 'X' is not an integer literal — a symbol, a character constant or an expression is gas's to resolve, and this frontend will not read it as a number"
+        "cannot lift 'X': the include chain X repeats a file or nests deeper than this frontend reads"
       ]
     },
     {
       "file": "frontend/splat.ts",
-      "count": 24,
+      "count": 26,
       "messages": [
         "cannot lift 'X': 'X' at 0xX has the immediate 'X', which its 16-bit field does not hold",
+        "cannot lift 'X': 'X' at 0xX has the immediate 'X', which its field (0..X) does not hold",
         "cannot lift 'X': 'X' calls 'X', a name a \\`.macro\\` in this file or a file it includes defines, and gas expands the macro before it reads an instruction of that name, which this reader does not do",
         "cannot lift 'X': 'X' inside the function can emit fill between instructions, which this reader does not model",
         "cannot lift 'X': 'X' inside the function changes which lines are assembled, and this reader reads every line as written",
@@ -75,6 +76,7 @@
         "cannot lift 'X': X holds a non-ASCII character outside a comment or string, which gas reads as part of a name, so this reader cannot tell which statements gas assembles",
         "cannot lift 'X': \\`.include \"X\"\\` X",
         "cannot lift 'X': branch/jump target 'X' is not a local label in this function (tail call / cross-function branch not modelled)",
+        "cannot lift 'X': constant expression 'X' takes a value past a 32-bit word, a shift count past 31 or a right shift of a negative value, where gas's 64-bit arithmetic and the word this reader holds it to part",
         "cannot lift 'X': data directive 'X' in the code stream — skipping it would silently delete its effect",
         "cannot lift 'X': its \\`glabel\\` sits inside a conditional, macro or repeated body, which this reader does not model",
         "cannot lift 'X': operand 'X' has a leading-zero magnitude ('X'), which is octal to the assembler and a radix this reader does not model",
@@ -116,7 +118,7 @@
     },
     {
       "file": "frontend/ppc.ts",
-      "count": 15,
+      "count": 16,
       "messages": [
         "X X",
         "X carries a relocation ('X') on a stack-pointer adjust — an address built in r1 is not a shape this frontend models",
@@ -130,6 +132,7 @@
         "cannot lift 'X': conditional branch 'X' has no reaching compare (X): X",
         "cannot lift 'X': conditional branch 'X' tests X, but X",
         "cannot lift 'X': control falls off the end (the block at 0xX has no terminator and no successorX)",
+        "cannot lift 'X': operand 'X' X as a register — it names no PowerPC register",
         "cannot lift 'X': the 'X' at 0xX leaves the function for 'X' — a tail call is not modelled",
         "cannot lift 'X': the X reads the link register the X overwrote on some path, with no 'mtlr' since — the return address is lost there",
         "cannot lift 'X': the store to 'X' at 0xX is not the link register's save — X"
@@ -137,7 +140,7 @@
     },
     {
       "file": "frontend/mips.ts",
-      "count": 14,
+      "count": 15,
       "messages": [
         "X has the non-numeric immediate 'X' where a number belongs — this frontend will not read it as one",
         "X moves sp X, which releases no frame this function pushed — no compiler emits it",
@@ -149,6 +152,7 @@
         "cannot lift 'X': X is read after the 'lw' at 0xX restores the caller's X into it — no C value names it",
         "cannot lift 'X': no instructions found in the input text",
         "cannot lift 'X': operand 'X' read as a register — it names no O32 register",
+        "cannot lift 'X': operand 'X' written as a register — it names no O32 register",
         "cannot lift 'X': relocation 'X X' at 0xX carries an addend (0xX), but MIPS relocations are REL and hold the addend in the instruction fields — this object is not the assumed format",
         "cannot lift 'X': relocation 'X X' at 0xX falls inside the function (0xX..0xX) but on no instruction — the relocation table and this disassembly disagree about addressing",
         "cannot lift 'X': the caller's X, which the 'lw' at 0xX restores, reaches a value this function computes with — no C value names it",
