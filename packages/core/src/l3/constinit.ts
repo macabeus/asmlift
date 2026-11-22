@@ -22,11 +22,11 @@
 // read-only object of its own, spelled as a function-scope `static const` of the element its
 // directives wrote, at the alignment they show where it is wider than that element's own
 // (`SImage.align`, kept by structure/local-statics.ts as for a named static), which the kept
-// `memcpy` reads. That is sound whenever every mention of the
-// image is the whole source of a block copy whose constant count stays inside it, into a
-// non-volatile local with room for that count where the copy starts — the standard fixes that such
-// a copy only reads its source, so nothing writes through the `const`, and a copy that ran past its
-// local would write the saved registers, which no C object spells. It is the fallback, not the
+// `memcpy` reads. That is sound whenever every mention of the image is the whole source of a block
+// copy whose constant count stays inside it, into a non-volatile local with room for that count
+// where the copy starts — the standard fixes that such a copy only reads its source, so nothing
+// writes through the `const`, and a copy that ran past its local would write the saved registers,
+// which no C object spells. It is the fallback, not the
 // reading: an initializer is the source the compiler was given, so the fold is taken wherever it
 // holds, and one copy that cannot fold keeps every copy of that image.
 //

@@ -13557,14 +13557,14 @@ export const SYNTHETIC: SynthSpec[] = [
   //      below without being a copy destination joins it, so `b` becomes u8[20] and .LC186 cannot fill
   //      it, so its copy stays a `memcpy` reading the image as a `static const` (l3/constinit.ts):
   //      imgidx lifts as that one object, a correct nonmatch. The image rows are agbcc only, for
-  //      item 2's reason; imgpair is their control. The cpy rows
-  //      carry the cause on every lane, cpypair their control: cpyidx is the index refusal
-  //      (instrumented on agbcc, gcc2.7.2kmc and ido7.1); cpyspill is one cause down three paths —
-  //      agbcc absorbs the spills into the top part, ido7.1 puts them below the arrays so the lowest
-  //      part is no copy start, gcc2.7.2 leaves a pad gap so the runs do not tile; gcc2.7.2kmc keeps
-  //      them in registers and splits (its residue is other machinery), and mwcc_242_81 never splits.
-  //      Both state `memcpy` in their proto: undeclared, gcc 2.7.2 (no `-fno-builtin`) open-codes the
-  //      candidate's copy, and cpyidx then reads 65/66 against the declared 12/25.
+  //      item 2's reason; imgpair is their control. The cpy rows carry the cause on every lane,
+  //      cpypair their control: cpyidx is the index refusal (instrumented on agbcc, gcc2.7.2kmc and
+  //      ido7.1); cpyspill is one cause down three paths — agbcc absorbs the spills into the top
+  //      part, ido7.1 puts them below the arrays so the lowest part is no copy start, gcc2.7.2
+  //      leaves a pad gap so the runs do not tile; gcc2.7.2kmc keeps them in registers and splits
+  //      (its residue is other machinery), and mwcc_242_81 never splits. Both state `memcpy` in
+  //      their proto: undeclared, gcc 2.7.2 (no `-fno-builtin`) open-codes the candidate's copy,
+  //      and cpyidx then reads 65/66 against the declared 12/25.
   //      Two fixes, a PREDICTION each until built: whole-word fixed accesses outside every copy extent
   //      stay out of the parts; and an index based at a part's copy destination stays in that part,
   //      which needs adjudication (the gate's author rejected it: "it may reach every one").
@@ -15453,8 +15453,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // the unit's .i context). Two of them hit a blocker no row reproduced; one is still imgidx's; one
   // printed C with an ASMLIFT_ERROR no row reproduced. Each refusal was instrumented on the real
   // function and on the rows below, and each gap row prints the real function's words at its site:
-  //   - sub_0804D0B0 was still imgidx's (and imgnbr's): l3/constinit.ts `planCopy` refused the one
-  //     frame object a runtime index keeps whole (now a `memcpy` from a `static const` image). Its `u8[36]` is the two 16-byte arrays and the
+  //   - sub_0804D0B0 is still imgidx's (and imgnbr's): l3/constinit.ts `planCopy` refuses the one
+  //     frame object a runtime index keeps whole. Its `u8[36]` is the two 16-byte arrays and the
   //     arg0 spill word; imgidx with a spilled argument says `u8[48]` at the same site.
   //  28. brk2sw / brk2sw_one / brk2sw_ctl (sub_0800D188, `goto exit_loop`). An inner search loop
   //      sits in a `switch` arm, and its `goto` lands on that arm's `break`, past the code after
@@ -15936,16 +15936,16 @@ export const SYNTHETIC: SynthSpec[] = [
   //      part); with the hand-back gate ablated as well, both lift. imgidx has no spill word, so a
   //      fix to provenParts alone lifts imgidx and leaves sub_0804D0B0 declining. Item 23's reading
   //      that imgspill pins the spill word does not hold: with no runtime index the gate hands the
-  //      word back, which is why imgspill MATCHes. Neither blocker declines any more: a copy the
+  //      word back, which is why imgspill MATCHes. Neither blocker declines the row: a copy the
   //      image cannot fold into stays a `memcpy` from a `static const` (l3/constinit.ts), so
-  //      imgidxsp lifts as one `u8[36]`, a correct nonmatch. imgidxsp is imgidx with five values live across
-  //      two calls, so agbcc spills one word above the arrays (reload1.c:2274 `alter_reg`; thumb.h
-  //      569/573, the frame grows up); agbcc only, for item 2's reason. cpyidxsp is the same pair of
-  //      gates without images: smoked, then with the index refusal ablated, then both, agbcc
-  //      59/90 -> 17/79 -> MATCH, gcc2.7.2kmc 36/79 -> 36/79 -> MATCH, gcc2.7.2 44/81 -> 44/81 ->
-  //      17/80, ido7.1 65/83 -> 65/83 -> 36/74 (ido spills below the arrays; the gate keeps those
-  //      words from the bottom). mwcc_242_81 never asks for parts, so neither gate fires there and the
-  //      row has no lane on it.
+  //      imgidxsp lifts as one `u8[36]`, a correct nonmatch. imgidxsp is imgidx with five values
+  //      live across two calls, so agbcc spills one word above the arrays (reload1.c:2274
+  //      `alter_reg`; thumb.h 569/573, the frame grows up); agbcc only, for item 2's reason.
+  //      cpyidxsp is the same pair of gates without images: smoked, then with the index refusal
+  //      ablated, then both, agbcc 59/90 -> 17/79 -> MATCH, gcc2.7.2kmc 36/79 -> 36/79 -> MATCH,
+  //      gcc2.7.2 44/81 -> 44/81 -> 17/80, ido7.1 65/83 -> 65/83 -> 36/74 (ido spills below the
+  //      arrays; the gate keeps those words from the bottom). mwcc_242_81 never asks for parts, so
+  //      neither gate fires there and the row has no lane on it.
   //  32. brk2out / brk2out_sw / brk2out_ctl (sub_0800D188: "the jump table's case arms do not
   //      linearize"). The refusing switch is the 115-entry table over `gEntityInfo[var_sb].id` in the
   //      `for (var_sb = gUnk_030051D8; var_sb <= gUnk_03004788; var_sb++)` loop, whose arms either
