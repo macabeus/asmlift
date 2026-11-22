@@ -39,8 +39,10 @@ Party 4, Pikmin), classified by `classifyRelocSymbol` itself rather than by eye.
   The same kind covers gcc's anonymous constant, the GNU as local label `.LC0` (agbcc writes it for
   a string literal and for a local aggregate's initializer image). The Thumb frontend READS that
   one rather than refusing it: where the image is the source of a block copy that fills a local
-  array, it is spelled back as the local's initializer (`l3/constinit.ts`), and refused there where
-  it is not. The kind is decided once, in `reloc-symbol.ts`; only what a frontend does with it
+  array, it is spelled back as the local's initializer (`l3/constinit.ts`); where that fold is not
+  sound but every read of the image is a block copy's source, the copy stays and the image is a
+  `static const` named from its label (`LC0`); and it is refused where neither holds. The kind is
+  decided once, in `reloc-symbol.ts`; only what a frontend does with it
   differs, and ppc still refuses `@N`, since every `@N` a lift reaches there is a literal no fold
   spells and mwcc's frame local is refused first.
 

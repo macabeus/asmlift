@@ -141,7 +141,7 @@ function zeroInitialized(
 export interface LocalStaticShapes {
   infos: Map<string, SymbolInfo>;
   statics: SStatic[];
-  /** the compiler's anonymous constant images, which no declaration spells (l3/constinit.ts) */
+  /** the compiler's anonymous constant images, which no source declaration names (l3/constinit.ts) */
   images: SImage[];
 }
 
@@ -476,7 +476,7 @@ export function nameLocalStatics(sfn: SFn, objs: LocalObjects): SFn | { symbol: 
   const bySource = new Map<string, string>();
   for (const obj of objs.values()) {
     if (obj.anonymous) {
-      continue; // no source name: folded into a local's initializer at emission (l3/constinit.ts)
+      continue; // no source name: folded or named at emission (l3/constinit.ts)
     }
     const say = (why: string) => ({ symbol: obj.symbol, refused: `whose source name '${obj.name}' ${why}` });
     const other = bySource.get(obj.name);

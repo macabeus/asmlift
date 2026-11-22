@@ -88,17 +88,17 @@ test('a local holding only the address, assigned ahead of the copy, is the local
   const sfn = fn([alias, copy('sp0', '.LC0', 4), use(v('sp0')), use(at(1)), use(at(3))], locals);
   expect(constantImageRefusal(sfn)).toBeNull();
   expect(foldConstantImages(sfn).body).toEqual([alias, use(v('sp0')), use(at(1)), use(at(3))]);
-  // …and only that: read through ahead of the copy, past it, or pointed elsewhere later, it refuses
-  expect(constantImageRefusal(fn([alias, use(v('p0')), copy('sp0', '.LC0', 4)], locals))?.refused).toContain(
-    'not the first thing the body does with it',
-  );
-  expect(constantImageRefusal(fn([alias, copy('sp0', '.LC0', 4), use(at(4))], locals))?.refused).toContain(
-    'which the body indexes past the 4 bytes copied',
-  );
+  // …and only that: read through ahead of the copy, past it, or pointed elsewhere later, it does not
+  // fold, and the copy stays a statement reading the image as a static
   const moved: Stmt = { k: 'assign', name: 'p0', value: v('gBuf') };
-  expect(constantImageRefusal(fn([alias, copy('sp0', '.LC0', 4), moved], locals))?.refused).toContain(
-    'not the first thing the body does with it',
-  );
+  for (const body of [
+    [alias, use(v('p0')), copy('sp0', '.LC0', 4)],
+    [alias, copy('sp0', '.LC0', 4), use(at(4))],
+    [alias, copy('sp0', '.LC0', 4), moved],
+  ]) {
+    expect(constantImageRefusal(fn(body, locals))).toBeNull();
+    expect(cBackend.emit(fn(body, locals))).toContain('    memcpy(sp0, (u8 *)LC0, 4);\n');
+  }
 });
 
 test('a local reached only by elements takes the image’s element, and the signedness its reads say', () => {
@@ -210,9 +210,9 @@ test('a count built by a shift is the constant it computes', () => {
       args: [v('sp0'), { k: 'addr', name: '.LC0' }, { k: 'bin', op: '<<', l: c(1), r: c(1) }],
     },
   };
-  expect(constantImageRefusal(fn([short, use(v('sp0'))], bytes4))?.refused).toContain(
-    'does not move its whole 4 bytes',
-  );
+  // a copy of part of it does not fold, and reads the image as a static
+  expect(constantImageRefusal(fn([short, use(v('sp0'))], bytes4))).toBeNull();
+  expect(cBackend.emit(fn([short, use(v('sp0'))], bytes4))).toContain('    memcpy(sp0, (u8 *)LC0, 1 << 1);\n');
 });
 
 test.each<[string, SFn, string]>([
@@ -222,31 +222,47 @@ test.each<[string, SFn, string]>([
     'reads other than as the source of a block copy',
   ],
   [
+    'read by a copy past its bytes',
+    fn([copy('sp0', '.LC0', 8)], [{ name: 'sp0', type: T.array(T.u(8), 8) }]),
+    'does not move its whole 4 bytes',
+  ],
+])('%s: refuses, and the emitter will not print it', (_, sfn, why) => {
+  expect(constantImageRefusal(sfn)?.refused).toContain(why);
+  expect(() => cBackend.emit(sfn)).toThrow(why);
+});
+
+// A copy the fold cannot move into a declaration stays the statement it is, and the image it reads
+// becomes the read-only static it is in the machine: the standard fixes that a block copy only
+// reads its source, so nothing writes through the `static const`.
+const STATIC = '    static const u8 LC0[4] = { 1, 2, 3, 4 };\n';
+test.each<[string, SFn, string]>([
+  [
     'copied twice into one local',
     fn([copy('sp0', '.LC0', 4), use(v('sp0')), copy('sp0', '.LC0', 4)], bytes4),
-    "whose copy into 'sp0' is not the first thing the body does with it",
+    '    memcpy(sp0, (u8 *)LC0, 4);\n    g(sp0);\n    memcpy(sp0, (u8 *)LC0, 4);\n',
   ],
   [
     'copied inside a branch',
     fn([{ k: 'if', cond: v('x'), then: [copy('sp0', '.LC0', 4)], else: [] }], bytes4),
-    'which no top-level block-copy call (memcpy) takes as its source',
+    'memcpy(sp0, (u8 *)LC0, 4);',
   ],
-  ['copied in part', fn([copy('sp0', '.LC0', 2)], bytes4), 'does not move its whole 4 bytes'],
-  ['into a global', fn([copy('gBuf', '.LC0', 4)], bytes4), 'does not fill a local'],
+  ['copied in part', fn([copy('sp0', '.LC0', 2)], bytes4), '    memcpy(sp0, (u8 *)LC0, 2);\n'],
+  ['into a global', fn([copy('gBuf', '.LC0', 4)], bytes4), '    memcpy(gBuf, (u8 *)LC0, 4);\n'],
   [
     'into a volatile local',
     fn([copy('sp0', '.LC0', 4)], [{ name: 'sp0', type: T.array(T.u(8), 4), volatile: true }]),
-    'which is volatile',
+    '    volatile u8 sp0[4];\n    memcpy(sp0, (u8 *)LC0, 4);\n',
   ],
   [
-    'into a local of another size',
+    // imgnbr: the image fills the head of one frame object that also holds an escaping word
+    'into part of a wider local',
     fn([copy('sp0', '.LC0', 4)], [{ name: 'sp0', type: T.array(T.u(8), 8) }]),
-    'not an integer array of its 4 bytes',
+    '    u8 sp0[8];\n    memcpy(sp0, (u8 *)LC0, 4);\n',
   ],
   [
     'into a local the body touched first',
     fn([use(v('sp0')), copy('sp0', '.LC0', 4)], bytes4),
-    'not the first thing the body does with it',
+    '    g(sp0);\n    memcpy(sp0, (u8 *)LC0, 4);\n',
   ],
   [
     'into a local reached by an offset of another element',
@@ -254,12 +270,12 @@ test.each<[string, SFn, string]>([
       [copy('sp0', '.LC0', 4), use({ k: 'bin', op: '+', l: v('sp0'), r: c(1) })],
       [{ name: 'sp0', type: T.array(T.u(16), 2) }],
     ),
-    'are not the 2-byte elements the body reaches',
+    '    u16 sp0[2];\n    memcpy(sp0, (u8 *)LC0, 4);\n',
   ],
   [
     'into a local reached past the copy',
     fn([copy('sp0', '.LC0', 3), use({ k: 'bin', op: '+', l: v('sp0'), r: c(3) })], bytes4, image([1, 2, 3])),
-    'the body reaches past the 3 bytes copied',
+    '    static const u8 LC0[3] = { 1, 2, 3 };\n    u8 sp0[4];\n    memcpy(sp0, (u8 *)LC0, 3);\n',
   ],
   [
     'into a local indexed past the copy',
@@ -271,11 +287,32 @@ test.each<[string, SFn, string]>([
       bytes4,
       image([1, 2, 3]),
     ),
-    'indexes past the 3 bytes copied',
+    '    static const u8 LC0[3] = { 1, 2, 3 };\n    u8 sp0[4];\n    memcpy(sp0, (u8 *)LC0, 3);\n',
   ],
-])('%s: refuses, and the emitter will not print it', (_, sfn, why) => {
-  expect(constantImageRefusal(sfn)?.refused).toContain(why);
-  expect(() => cBackend.emit(sfn)).toThrow(why);
+])('%s: no fold, so the copy stays and reads the image as a static', (_, sfn, printed) => {
+  expect(constantImageRefusal(sfn)).toBeNull();
+  const out = cBackend.emit(sfn);
+  expect(out).toContain(printed);
+  if (!printed.includes('static')) {
+    expect(out).toContain(STATIC);
+  }
+});
+
+test('the static takes a name nothing in the function names, and the image’s own element', () => {
+  const taken = [...bytes4, { name: 'LC0', type: T.u(32) }];
+  const signed = image([1, -1, 3, 4], 1, true);
+  const out = cBackend.emit(fn([copy('sp0', '.LC0', 2), use(v('LC0'))], taken, signed));
+  expect(out).toContain('    static const s8 LC0_1[4] = { 1, -1, 3, 4 };\n');
+  expect(out).toContain('    memcpy(sp0, (s8 *)LC0_1, 2);\n    g(LC0);\n');
+});
+
+test('an image that folds still folds where another copy of it would not', () => {
+  // one image, two copies: one folds alone, but together the image is kept as the static
+  const locals = [...bytes4, { name: 'sp4', type: T.array(T.u(8), 8) }];
+  const sfn = fn([copy('sp0', '.LC0', 4), copy('sp4', '.LC0', 4), use(v('sp0')), use(v('sp4'))], locals);
+  expect(cBackend.emit(sfn)).toContain(`${STATIC}    u8 sp0[4];\n    u8 sp4[8];\n    memcpy(sp0, (u8 *)LC0, 4);\n`);
+  // …and alone it folds as before
+  expect(cBackend.emit(fn([copy('sp0', '.LC0', 4), use(v('sp0'))], bytes4))).not.toContain('static');
 });
 
 test('an image of mixed widths has no element type to declare', () => {

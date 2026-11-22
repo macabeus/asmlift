@@ -15,8 +15,16 @@
 // which is what keeps dead-store elimination and the coalescers off the object. A folded tree
 // would hold a local nothing mentions, which l3/dce.ts deletes — and with it the initializer the
 // compiler keeps (agbcc copies `u8 a[16] = {…}` even when nothing reads `a`). So structure()
-// asks this pass whether the fold is possible and refuses the function loudly where it is not,
-// and the C-family emitter folds (backend/cfamily.ts), the same seam l3/slotorder.ts uses.
+// asks this pass whether the image can be spelled and refuses the function loudly where it cannot,
+// and the C-family emitter spells it (backend/cfamily.ts), the same seam l3/slotorder.ts uses.
+//
+// WHERE THE FOLD IS NOT SOUND, THE COPY STAYS and the image becomes what it is in the machine: a
+// read-only object of its own, spelled as a function-scope `static const` of the element its
+// directives wrote, which the kept `memcpy` reads. That is sound whenever every mention of the
+// image is the whole source of a block copy whose constant count stays inside it — the standard
+// fixes that such a copy only reads its source, so nothing writes through the `const`. It is the
+// fallback, not the reading: an initializer is the source the compiler was given, so the fold is
+// taken wherever it holds, and one copy that cannot fold keeps every copy of that image.
 //
 // THE FOLD IS SOUND exactly when the declaration's initializer and the copy are one program:
 //   • the copy is a block copy the C standard fixes (proto.ts `blockCopyRoles`), a TOP-LEVEL
@@ -30,10 +38,10 @@
 //     count — one image may fill several locals, since the compiler places one per identical
 //     constant (varasm.c `output_constant_def`), each into its own local. Several arrays in one
 //     frame are each their own local where the frame audit proves the boundaries between them
-//     (frontend/frame-objects.ts `provenParts`). KNOWN GAP: where it keeps the frame's
-//     address-taken bytes as one local instead — a neighbour handed to a callee nothing bounds, or
-//     a compiler whose placement of such arrays is not known (target.ts `addressTakenArrayOrder`)
-//     — the image refuses at the size check;
+//     (frontend/frame-objects.ts `provenParts`). Where it keeps the frame's address-taken bytes as
+//     one local instead — a neighbour handed to a callee nothing bounds, or a compiler whose
+//     placement of such arrays is not known (target.ts `addressTakenArrayOrder`) — the image
+//     fails the size check and is kept as the static its copy reads, into its part of that local;
 //   • the image writes one element width (a struct's mixed widths, or padding alone, has no
 //     element type this pass could declare). An element it relocates holds an address, spelled as
 //     the address constant it is (`u32 a[16] = { (u32)&h1, … }`, which agbcc copies from the same
@@ -55,12 +63,14 @@ import {
   type InitAddress,
   type SFn,
   type SImage,
+  type SStatic,
   type Stmt,
   mapExprChildren,
   mapStmtExprs,
   mentionedName,
   walkExprs,
 } from './ast';
+import { takenNames } from './hoist';
 import { localMentions, mentionsAnyLocal } from './mentions';
 
 /** `e` without the casts around it. */
@@ -317,16 +327,87 @@ function uses(
   return { indexed, extents, reads, other: total !== accounted };
 }
 
-/** Whether every anonymous image `sfn` holds folds into a local's initializer: null when it does,
- *  else the image's name and the tail of the sentence that refuses it. */
+/** How one image is spelled: folded into the locals its copies fill, kept as the read-only static
+ *  its copies read ({@link asStatic}), or refused with the tail of the sentence that says why. */
+function planImage(sfn: SFn, image: SImage): Fold[] | 'static' | string {
+  const plan = planFolds(sfn, image);
+  if (typeof plan !== 'string' || image.type.kind !== 'array' || image.type.elem.kind !== 'int') {
+    return plan;
+  }
+  return onlyCopied(sfn.body, image) ? 'static' : plan;
+}
+
+/** Whether every mention of `image` in `body` is the whole source of a block copy whose constant
+ *  count stays inside it — anywhere in the body. The standard fixes that a copy only READS its
+ *  source, so the bytes may be a `static const` object; a mention of any other kind may write
+ *  through it, or read it at a width or an offset the declaration would have to answer for. */
+function onlyCopied(body: readonly Stmt[], image: SImage): boolean {
+  const size = byteSize(image.type);
+  let copies = 0;
+  for (const e of walkExprs(body as Stmt[])) {
+    const roles = e.k === 'call' ? blockCopyRoles(e.fn) : undefined;
+    if (e.k !== 'call' || roles === undefined) {
+      continue;
+    }
+    const src = e.args[roles.src];
+    const n = constantValue(e.args[roles.n] ?? { k: 'var', name: '' });
+    if (src !== undefined && wholeObject(src) === image.name && n !== null && n >= 0 && size !== null && n <= size) {
+      copies++;
+    }
+  }
+  return copies > 0 && copies === mentions(body, image.name);
+}
+
+/** Whether every anonymous image `sfn` holds can be spelled — folded into a local's initializer or
+ *  kept as the static its copies read: null when it can, else the image's name and the tail of the
+ *  sentence that refuses it. */
 export function constantImageRefusal(sfn: SFn): { image: string; refused: string } | null {
   for (const image of sfn.images ?? []) {
-    const plan = planFolds(sfn, image);
-    if (typeof plan === 'string') {
+    const plan = planImage(sfn, image);
+    if (typeof plan === 'string' && plan !== 'static') {
       return { image: image.name, refused: plan };
     }
   }
   return null;
+}
+
+/** `image` as a function-scope `static const` named `name`: its element and signedness are the
+ *  ones its directives wrote, a hole is the zero C supplies, and a byte image written as a string
+ *  stays one. */
+function asStatic(image: SImage, name: string): SStatic {
+  return {
+    name,
+    type: image.type,
+    const: true,
+    init: image.init.map((v) => v ?? 0),
+    ...(image.string === true &&
+    image.type.kind === 'array' &&
+    image.type.elem.kind === 'int' &&
+    image.type.elem.width === 8
+      ? { string: true as const }
+      : {}),
+  };
+}
+
+/** A C name for the image labelled `label` (`.LC0` → `LC0`) that nothing `sfn` names already. */
+function staticName(sfn: SFn, label: string): string {
+  const taken = new Set([sfn.name, ...takenNames(sfn), ...(sfn.statics ?? []).map((s) => s.name)]);
+  for (const g of sfn.globals ?? []) {
+    taken.add(g.name);
+  }
+  const stem = label.replace(/[^A-Za-z0-9_]/g, '');
+  const base = /^[A-Za-z_]/.test(stem) ? stem : `k${stem}`;
+  let name = base;
+  for (let k = 1; taken.has(name); k++) {
+    name = `${base}_${k}`;
+  }
+  return name;
+}
+
+/** `e` with every mention of `from` renamed `to`. */
+function renamed(e: Expr, from: string, to: string): Expr {
+  const r = mapExprChildren(e, (c) => renamed(c, from, to));
+  return (r.k === 'var' || r.k === 'addr' || r.k === 'postincr') && mentionedName(r) === from ? { ...r, name: to } : r;
 }
 
 /** `e` with every access to a folded local that reads one of its elements AS that element spelled
@@ -380,8 +461,9 @@ function elementOf(
 }
 
 /** `sfn` with every anonymous image folded into the initializer of each local its copies fill,
- *  the copies gone and the image with them. Throws where one does not fold: structure() refused
- *  that function already, so a tree that reaches here unfoldable was made so by a later pass. */
+ *  the copies gone and the image with them — or, where the fold is not sound, kept as a `static
+ *  const` its copies read. Throws where neither holds: structure() refused that function already,
+ *  so a tree that reaches here unspellable was made so by a later pass. */
 export function foldConstantImages(sfn: SFn): SFn {
   if (sfn.images === undefined) {
     return sfn;
@@ -389,7 +471,16 @@ export function foldConstantImages(sfn: SFn): SFn {
   let out: SFn = { ...sfn };
   delete out.images;
   for (const image of sfn.images) {
-    const plan = planFolds(out, image);
+    const plan = planImage(out, image);
+    if (plan === 'static') {
+      const name = staticName(out, image.name);
+      out = {
+        ...out,
+        statics: [...(out.statics ?? []), asStatic(image, name)],
+        body: out.body.map((st) => mapStmtExprs(st, (e) => renamed(e, image.name, name))),
+      };
+      continue;
+    }
     if (typeof plan === 'string') {
       throw new Error(`cannot spell '${sfn.name}': the compiler's anonymous constant '${image.name}' ${plan}`);
     }

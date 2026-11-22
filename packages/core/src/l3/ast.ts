@@ -550,9 +550,10 @@ export interface SFn {
    *  header does, because the source defined them here. */
   statics?: SStatic[];
   /** The compiler's own constant images this function copies a local's initializer from
-   *  (structure/local-statics.ts), under labels the source never wrote. Not statics: no declaration
-   *  may spell one, so the C-family emitter folds each into the initializer of the local its copy
-   *  fills (l3/constinit.ts), and a backend that cannot refuses. */
+   *  (structure/local-statics.ts), under labels the source never wrote. Not statics yet: the
+   *  C-family emitter folds each into the initializer of the local its copy fills, or, where that
+   *  is not sound, makes it the `static const` the copy reads (l3/constinit.ts), and a backend
+   *  that cannot refuses. */
   images?: SImage[];
   retType: IrType;
   body: Stmt[];
