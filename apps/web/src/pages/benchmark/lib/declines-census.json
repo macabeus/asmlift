@@ -1,7 +1,7 @@
 {
   "generatedBy": "pnpm regen:declines-census (scripts/regen-decline-census.ts) — do not hand-edit",
-  "distinctMessages": 344,
-  "residueTotal": 148,
+  "distinctMessages": 348,
+  "residueTotal": 152,
   "residueByFile": [
     {
       "file": "frontend/thumb.ts",
@@ -59,8 +59,9 @@
     },
     {
       "file": "frontend/splat.ts",
-      "count": 22,
+      "count": 24,
       "messages": [
+        "cannot lift 'X': 'X' at 0xX has the immediate 'X', which its 16-bit field does not hold",
         "cannot lift 'X': 'X' calls 'X', a name a \\`.macro\\` in this file or a file it includes defines, and gas expands the macro before it reads an instruction of that name, which this reader does not do",
         "cannot lift 'X': 'X' inside the function can emit fill between instructions, which this reader does not model",
         "cannot lift 'X': 'X' inside the function changes which lines are assembled, and this reader reads every line as written",
@@ -77,6 +78,7 @@
         "cannot lift 'X': data directive 'X' in the code stream — skipping it would silently delete its effect",
         "cannot lift 'X': its \\`glabel\\` sits inside a conditional, macro or repeated body, which this reader does not model",
         "cannot lift 'X': operand 'X' has a leading-zero magnitude ('X'), which is octal to the assembler and a radix this reader does not model",
+        "cannot lift 'X': operand 'X' spells 'X' without the '$' the assembler reads a register by",
         "cannot lift 'X': relocation operand 'X' — this reader resolves a '%hi'/'%lo' half only against a symbol ('SYM' or 'SYM ± <integer>'), and will not treat one it cannot resolve as arithmetic",
         "cannot lift 'X': the included file X assembles 'X' inside the function, which is not the function's own text",
         "cannot lift 'X': two relocation operands on one instruction ('X' at 0xX): 'X' and 'X'",
@@ -135,9 +137,10 @@
     },
     {
       "file": "frontend/mips.ts",
-      "count": 12,
+      "count": 14,
       "messages": [
         "X has the non-numeric immediate 'X' where a number belongs — this frontend will not read it as one",
+        "X moves sp X, which releases no frame this function pushed — no compiler emits it",
         "X sits in the delay slot of a transfer",
         "X — its delay slot at 0xX is not the next instruction of its block (a branch target, a control transfer, or missing), so it does not run before this call alone",
         "cannot lift 'X': 'X' at X — the disassembly has no instruction at X for the not-taken edge to land on",
@@ -145,6 +148,7 @@
         "cannot lift 'X': 'j' at 0xX jumps to 'X' — a tail call into another function is not modelled",
         "cannot lift 'X': X is read after the 'lw' at 0xX restores the caller's X into it — no C value names it",
         "cannot lift 'X': no instructions found in the input text",
+        "cannot lift 'X': operand 'X' read as a register — it names no O32 register",
         "cannot lift 'X': relocation 'X X' at 0xX carries an addend (0xX), but MIPS relocations are REL and hold the addend in the instruction fields — this object is not the assumed format",
         "cannot lift 'X': relocation 'X X' at 0xX falls inside the function (0xX..0xX) but on no instruction — the relocation table and this disassembly disagree about addressing",
         "cannot lift 'X': the caller's X, which the 'lw' at 0xX restores, reaches a value this function computes with — no C value names it",
