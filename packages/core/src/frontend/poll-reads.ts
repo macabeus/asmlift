@@ -55,13 +55,13 @@
  *     (`synthetic:fieldbase`, `dmafield`, `dmaflat`), whose constant-address plain read agbcc moves. Not on a compiler that keeps the read beside any store (target.ts
  *     `keepsInvariantReadsBesideStores`: mwcc, in every probe);
  *   • the read is in the loop's header, the block every time round starts with, ahead of every
- *     branch the loop takes, or is one the loop's exit tests wherever in the loop it is. A read
- *     past a branch is `maybe_never` to agbcc's loop pass (loop.c, under a label or a conditional
- *     jump), which on Thumb, where any load may trap (rtlanal.c `may_trap_p`), leaves it in the
- *     loop, and so do KMC gcc 2.7.2 and mwcc, COMPILED (`for (i = 0; i < gCount; i++) { if
- *     (gTab[i] == x) …; }`, `synthetic:retpost_tail`, matches with its bound plain). Two reads past
- *     a branch are pinned all the same. A rotated poll's, which the loop's test reads through a
- *     block argument, is the read ahead of the loop again with no store between, which agbcc's
+ *     branch the loop takes, or one of two reads past a branch below. A read past a branch is
+ *     `maybe_never` to agbcc's loop pass (loop.c, under a label or a conditional jump), which on
+ *     Thumb, where any load may trap (rtlanal.c `may_trap_p`), leaves it in the loop, and so do
+ *     KMC gcc 2.7.2 and mwcc, COMPILED (`for (i = 0; i < gCount; i++) { if (gTab[i] == x) …; }`,
+ *     `synthetic:retpost_tail`, matches with its bound plain). But a rotated poll's read, which is
+ *     itself passed as the block argument the loop's test reads, is the read ahead of the loop
+ *     again with no store between, which agbcc's
  *     `gcse` deletes: `v1 = *(s32 *)0x4000104; while ((v1 & 3) != 0) { if (v0 + 1 > 99) break;
  *     v0++; v1 = *(s32 *)0x4000104; }` reads REG once. And on IDO 7.1, which moves a read from
  *     past a branch (target.ts `movesReadsPastBranches`: `do { … } while ((*(vu32 *)A & 3) ||
@@ -428,8 +428,11 @@ function testedReads(
     seen.add(v);
     const d = defOf.get(v);
     if (d === undefined) {
-      // a block argument: the values it is passed, a rotated poll's read among them
-      (incoming.get(v) ?? []).forEach((o) => walk(o, depth + 1, true));
+      // a block argument: the values it is passed, and a read passed as one is a rotated poll's
+      (incoming.get(v) ?? []).forEach((o) => {
+        const od = defOf.get(o);
+        walk(o, depth + 1, od?.opcode === 'load' || od?.opcode === 'aload');
+      });
       return;
     }
     if (d.opcode === 'load' || d.opcode === 'aload') {
