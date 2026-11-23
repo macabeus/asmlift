@@ -10,14 +10,16 @@
 // `aggregate` stamp), so the word is bytes of a declared object, and each use of it names a byte
 // range: a narrowing store or extension (the low end), or one of those applied to a right shift
 // by whole bytes, or such a shift alone (the top end, whose zero fill is the member's own zero
-// extension). Where every use names exactly one declared integer member, the word is those
-// member reads — the same bytes, read at the same program point: each member load is placed where
-// the word load was, and the word load is left to dce.
+// extension), or an op of `+ - * & | ^ ~ neg` whose result's demanded bits (ir/bits.ts
+// `demandedBitsAt`) fit the low member. Where every use names exactly one declared integer
+// member, the word is those member reads — the same bytes, read at the same program point: each
+// member load is placed where the word load was, and the word load is left to dce.
 //
 // REFUSALS, each leaving the word read whole (spelled through a cast, which is the same bytes):
 //   * the base is not a frame object the audit typed as a struct, or the read is qualified;
-//   * a use is anything but the shapes above (an add, a compare of the whole word, a phi
-//     argument, a call argument), or a shift whose uses are not all of one width;
+//   * a use is anything but the shapes above (an add whose sum reaches a reader past the low
+//     member, a compare of the whole word, a phi argument, a call argument), or a shift whose
+//     uses are not all of one width;
 //   * a range names no declared member exactly (a straddle, padding, a bitfield, a nested
 //     aggregate) — the member must start at that byte and be an integer of that width.
 import { type DemandedBitsIndex, demandedBitsAt, demandedBitsIndex } from '../ir/bits';
