@@ -1249,9 +1249,9 @@ function addressFlow(
  *  candidate once one value it carries or moves names the object, and one is struck while an
  *  incoming value is no frame address — a pointer from outside the frame (`p = cnt ? cnt : a`), a
  *  load. A phi of two objects (`p = c ? a : b`) points into the lower one, and is named in `merges`:
- *  only the one object, where both are its bytes, declares it. An exact phi moved by a constant is
- *  one too: its displacement is known, but the access through it is read as unbounded, which only
- *  widens what it may touch. */
+ *  only the one object, where both are its bytes, declares it. A phi of one object on every path
+ *  (`mergedFrameAddresses`) is no stepped pointer but that object's address, whose constant move
+ *  is named before the audit (`nameMergedFrameAddresses`). */
 function steppedPointers(
   irBlocks: readonly Block[],
   objects: ReadonlyMap<number, readonly Op[]>,
@@ -1267,16 +1267,9 @@ function steppedPointers(
     }
   }
   const phis = [...incoming.keys()].filter((p) => !defOf.has(p));
-  const exactPhis = new Map(phis.flatMap((p) => (taint.has(p) ? [[p, taint.get(p)!] as const] : [])));
-  for (let changed = true; changed;) {
-    changed = false;
-    for (const [p, off] of exactPhis) {
-      if (!incoming.get(p)!.every((a) => (exact.get(a) ?? exactPhis.get(a)) === off)) {
-        exactPhis.delete(p);
-        changed = true;
-      }
-    }
-  }
+  const exactPhis = new Map(
+    [...mergedFrameAddresses(irBlocks)].flatMap(([p, offs]) => (offs.size === 1 ? [[p, [...offs][0]] as const] : [])),
+  );
   const exactOf = (v: Value): number | undefined => exact.get(v) ?? exactPhis.get(v);
   // the runtime index sums `indexedAccess` judges: an exact value plus a value that is no constant
   const indexSum = (v: Value): number | undefined => {
@@ -1303,7 +1296,7 @@ function steppedPointers(
   // is the indexed element at a displacement, which `indexedAccess` judges
   const handed = new Set([...incoming.values()].flat());
   const startOf = (v: Value, r: Value): number | undefined =>
-    stepped.get(v) ?? exactPhis.get(v) ?? (handed.has(r) ? indexSum(v) : undefined);
+    stepped.get(v) ?? (handed.has(r) ? indexSum(v) : undefined);
   // the pointer a move moves, and what it is moved by
   const moved = (op: Op): { from: Value; by: Value } | undefined => {
     const [x, y] = op.operands;
@@ -1341,12 +1334,9 @@ function steppedPointers(
       if (m === undefined || taint.has(m.by) || stepped.has(m.by) || exactOf(m.by) !== undefined) {
         continue;
       }
-      // an exact phi moves only by a constant here: plus a runtime value, it is an index sum
-      lower(
-        r,
-        stepped.get(m.from) ??
-          (constOf(m.by) !== undefined ? (exactPhis.get(m.from) ?? startOf(m.from, r)) : undefined),
-      );
+      // an exact value moves to no pointer here: by a constant it is a capture at the sum
+      // (`nameMergedFrameAddresses`), and plus a runtime value it is an index sum
+      lower(r, stepped.get(m.from) ?? (constOf(m.by) !== undefined ? startOf(m.from, r) : undefined));
     }
   }
   for (let struck = true; struck;) {
@@ -3764,26 +3754,43 @@ function mergedFrameAddresses(irBlocks: readonly Block[]): Map<Value, ReadonlySe
   return out;
 }
 
-/** A STRUCT RETURNED THROUGH A MERGE OF ONE LOCAL'S ADDRESS IS THAT LOCAL. gcc rotates a loop that
- *  calls a struct-returning function, `while (lo > 0) { qr = ldiv(lo, 10); … }`, so `addiu a0,sp,16`
- *  runs once ahead of the loop and once in the delay slot of its back branch, and hoists it into
- *  both arms of `if (x) a = f(x); else a = f(x + 1);` ahead of one shared `jal`. The call then
- *  reads a block parameter, but every path hands it the same frame address, so the call is handed
- *  that address: an `laddr` of it, minted ahead of the call, which the frame-object audit types as
- *  the struct (`declaredStructs`) and `refuseSretOutsideFrame` accepts. A merge of two offsets is
- *  two objects, and is left for the audit to refuse. Run before the audit, on every frontend whose call
- *  lowering passes the hidden pointer. */
-export function nameMergedSretObjects(irBlocks: Block[]): void {
+/** A MERGE OF ONE LOCAL'S ADDRESS IS THAT LOCAL, where a use must name it. Two uses must:
+ *
+ *  - A STRUCT RETURNED THROUGH IT. gcc rotates a loop that calls a struct-returning function,
+ *    `while (lo > 0) { qr = ldiv(lo, 10); … }`, so `addiu a0,sp,16` runs once ahead of the loop and
+ *    once in the delay slot of its back branch, and hoists it into both arms of `if (x) a = f(x);
+ *    else a = f(x + 1);` ahead of one shared `jal`. The call then reads a block parameter, and the
+ *    hidden pointer must be a frame object the audit accepted (`refuseSretOutsideFrame`).
+ *  - A CONSTANT MOVE OF IT. agbcc copies `sp` into a register in both arms of an `if` and adds a
+ *    member's offset after the join, `mov r4, sp` … `add r0, r4, #4 / bl take`: the address of the
+ *    member, which `foldMovedCaptures` folds only off a capture.
+ *
+ *  Every path hands the phi the same frame address, so the use is handed that address: an `laddr`
+ *  of it, minted just ahead of the use. Any other use reads the phi as a pointer to the object
+ *  (`addressFlow`), and is left as it is. A merge of two offsets is two objects, and is left for the
+ *  audit to judge (`steppedPointers`). Run before the audit, on every frontend. */
+export function nameMergedFrameAddresses(irBlocks: Block[]): void {
   const merged = mergedFrameAddresses(irBlocks);
+  const consts = new Set(
+    irBlocks.flatMap((b) => b.ops.filter((op) => op.opcode === 'const').map((op) => op.results[0])),
+  );
+  const mustName = (op: Op, i: number): boolean =>
+    op.opcode === 'call'
+      ? i === 0 && op.attrs.sret === true
+      : op.opcode === 'add' && op.operands.length === 2 && consts.has(op.operands[1 - i]);
   for (const b of irBlocks) {
     b.ops = b.ops.flatMap((op) => {
-      const offs = op.opcode === 'call' && op.attrs.sret === true ? merged.get(op.operands[0]) : undefined;
-      if (offs === undefined || offs.size !== 1) {
-        return [op];
-      }
-      const at = mkValue(T.unk(32));
-      op.operands = [at, ...op.operands.slice(1)];
-      return [mkOp('laddr', { results: [at], attrs: { off: [...offs][0] } }), op];
+      const named: Op[] = [];
+      op.operands = op.operands.map((v, i) => {
+        const offs = merged.get(v);
+        if (offs === undefined || offs.size !== 1 || !mustName(op, i)) {
+          return v;
+        }
+        const at = mkValue(T.unk(32));
+        named.push(mkOp('laddr', { results: [at], attrs: { off: [...offs][0] } }));
+        return at;
+      });
+      return [...named, op];
     });
   }
 }
@@ -3793,7 +3800,7 @@ export function nameMergedSretObjects(irBlocks: Block[]): void {
  *  handed over directly — `gS = f(..)` (agbcc, ido, gcc), IDO's `*p = f(..)`, and the caller's own
  *  hidden pointer forwarded by `return f(..)` — is another spelling, which nothing here states. A
  *  merge of frame addresses never reaches here: one that names one address on every path was handed
- *  that address's `laddr` before the audit (`nameMergedSretObjects`), and a merge of two names no one
+ *  that address's `laddr` before the audit (`nameMergedFrameAddresses`), and a merge of two names no one
  *  storage, which the audit refuses (`steppedUse`: `a phi merges the frame objects`). Asked
  *  of every frontend whose call lowering passes the hidden pointer
  *  (`CallLowering.memoryReturn`). */

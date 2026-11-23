@@ -21295,6 +21295,43 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 's32 stkphi2_idx(s32 c, s32 n);',
     proto: { stkphi2_idx: { params: ['s32', 's32'], returns: 's32' } },
   },
+  //      stkphi_move: a phi that holds ONE array on every path, moved by a constant after the
+  //      join — agbcc `mov r4, sp` in each arm, then `add r0, r4, #4 / bl take`. It is that array's
+  //      address, so the move is the capture at the sum (frame-objects.ts `nameMergedFrameAddresses`).
+  {
+    sym: 'stkphi_move',
+    src:
+      'void h(void);\n' +
+      'void k(void);\n' +
+      'void take(u32 *p);\n' +
+      'u32 stkphi_move(s32 c, u32 x, u32 y)\n' +
+      '{\n' +
+      '    u32 a[4];\n' +
+      '    u32 *p;\n' +
+      '    a[0] = x;\n' +
+      '    a[1] = y;\n' +
+      '    a[2] = x;\n' +
+      '    a[3] = y;\n' +
+      '    if (c) {\n' +
+      '        p = a;\n' +
+      '        h();\n' +
+      '    } else {\n' +
+      '        p = a;\n' +
+      '        k();\n' +
+      '    }\n' +
+      '    take(p + 1);\n' +
+      '    return a[0] + a[3];\n' +
+      '}',
+    features: ['pointer'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'void h(void);\nvoid k(void);\nvoid take(u32 *p);\nu32 stkphi_move(s32 c, u32 x, u32 y);',
+    proto: {
+      stkphi_move: { params: ['s32', 'u32', 'u32'], returns: 'u32' },
+      h: { params: [], returnsVoid: true },
+      k: { params: [], returnsVoid: true },
+      take: { params: ['u32 *'], returnsVoid: true },
+    },
+  },
   //  40. dmafill_call (kl2dct sub_0802E340: "stack pointer used as data — the store to [sp,#0] is
   //      never reloaded"). A DMA fill whose temp's address is stored to the device's source register,
   //      then a call taking `&w`. agbcc loads the register's address into r0, the same register that

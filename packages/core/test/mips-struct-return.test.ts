@@ -543,7 +543,7 @@ describe('a hidden pointer that is not a local of this frame declines', () => {
 
 // gcc hoists `addiu a0,sp,16` into both arms ahead of one shared `jal` (`pc`), and rotates a loop
 // so that it runs once ahead of the loop and once in the delay slot of the back branch (`litoa`):
-// every path names the one local, which the call is handed (`nameMergedSretObjects`)
+// every path names the one local, which the call is handed (`nameMergedFrameAddresses`)
 describe('a hidden pointer that names one local on every path is that local', () => {
   test('two arms ahead of one call', () => {
     expect(lift('pc', KMC_PC, MIPS_GCC)).toMatch(/struct S8 sp16;\n\s+if \(a0 == 0\) a0 = 1;\n\s+sp16 = mk8\(a0\);/);

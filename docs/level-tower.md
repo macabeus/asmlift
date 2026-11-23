@@ -1284,10 +1284,13 @@ operands' low n bits alone, so `(s.h & 0xf0) | 1` stored to a byte reads `s.h`, 
 struct-returning function, so `addiu a0,sp,16` runs once ahead of the loop and once in the delay
 slot of its back branch, and it hoists the same instruction into both arms of an `if` ahead of one
 shared `jal`. The call then reads a block parameter. Where every path hands that parameter the same
-frame address, a shared pre-audit step (`frame-objects.ts` `nameMergedSretObjects`, on MIPS and
-Thumb) hands the call an `laddr` of that address, minted just ahead of it, and the audit types it
-as the struct like any other return temp. A merge of two different addresses names no one storage,
-and the audit refuses it (`a phi merges the frame objects`).
+frame address, a shared pre-audit step (`frame-objects.ts` `nameMergedFrameAddresses`, on every
+frontend) hands the call an `laddr` of that address, minted just ahead of it, and the audit types it
+as the struct like any other return temp. The same step names such a phi where a constant moves it
+(agbcc's `mov r4, sp` in both arms, then `add r0, r4, #4`), which is then the capture at the sum.
+A merge of two different addresses names no one storage: a return temp reached through one is
+refused (`a phi merges the frame objects`), and any other use is the pointer into the one object
+that the frame audit reads.
 
 **What is NOT built.** A member read of a returned struct at any word but the temp's first: the
 Thumb slot model keys `[sp,#k]` as a slot (`stack pointer used as data`); the audit would rebase it

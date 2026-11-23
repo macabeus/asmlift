@@ -1801,6 +1801,28 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(src).toMatch(/return \*v\d;/);
     });
 
+    // …and a phi that holds ONE object on every path is that object, so a constant move of it is
+    // the capture at the sum. agbcc's own output for `u32 a[4], *p; a[0..3] = x, y, x, y; if (c)
+    // { p = a; h(); } else { p = a; k(); } take(p + 1); return a[0] + a[3];`: `mov r4, sp` in each
+    // arm, `add r0, r4, #4` after the join (`nameMergedFrameAddresses`).
+    test('a constant move of a phi of one object is the capture at the sum', () => {
+      const moved =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x10\n\tstr\tr1, [sp]\n\tstr\tr2, [sp, #0x4]\n' +
+        '\tstr\tr1, [sp, #0x8]\n\tstr\tr2, [sp, #0xc]\n\tcmp\tr0, #0\n\tbeq\t.L3\n\tmov\tr4, sp\n\tbl\th\n' +
+        '\tb\t.L4\n.L3:\n\tmov\tr4, sp\n\tbl\tk\n.L4:\n\tadd\tr0, r4, #0x4\n\tbl\ttake\n\tldr\tr0, [sp]\n' +
+        '\tldr\tr1, [sp, #0xc]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x10\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+      const prototypes = {
+        f: { params: ['s32', 's32', 's32'], returns: 's32' },
+        h: { params: [], returnsVoid: true },
+        k: { params: [], returnsVoid: true },
+        take: { params: ['u32 *'], returnsVoid: true },
+      };
+      const src = decompile('f', moved, ARMV4T_AGBCC, { prototypes }).source;
+      expect(src).toContain('u8 sp0[16];');
+      expect(src).toContain('take((u32)sp0 + 4);');
+      expect(src).toContain('return *(s32 *)sp0 + ((s32 *)sp0)[3];');
+    });
+
     // hand-written: the merged pointer meets a pointer from outside the frame (`i`), so it may be
     // neither object, and a member of the one object at its offset would be the wrong storage
     test('a phi of two objects and a pointer from outside the frame refuses', () => {
