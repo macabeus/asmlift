@@ -4777,13 +4777,11 @@ export const SYNTHETIC: SynthSpec[] = [
   {
     sym: 'callvia_frame',
     src:
-      'typedef unsigned short u16;\nextern void (*gfp2)(int, int);\nextern void take(u16 *);\n' +
+      'extern void (*gfp2)(int, int);\nextern void take(u16 *);\n' +
       'void callvia_frame(int a, int b, u16 c)\n{\n    u16 s;\n    s = c;\n    gfp2(a, b);\n    take(&s);\n}',
     features: ['fnptr', 'stack-addr'],
     toolchains: ['agbcc'],
-    ctx:
-      'typedef unsigned short u16;\nextern void (*gfp2)(int, int);\nextern void take(u16 *);\n' +
-      'void callvia_frame(int a, int b, u16 c);',
+    ctx: 'extern void (*gfp2)(int, int);\nextern void take(u16 *);\nvoid callvia_frame(int a, int b, u16 c);',
     proto: { callvia_frame: { returnsVoid: true }, take: { params: ['u16 *'], returnsVoid: true } },
   },
   // A CALLEE'S BODY PROVES IT TAKES NO HIDDEN STRUCT-RETURN POINTER (frontend/callee-body.ts
