@@ -879,7 +879,9 @@ the pointee of a pointer PARAMETER they are loaded off whole from byte 0, where 
 that parameter, which is then typed a pointer to the struct and passed as `*p` — or refuses. Only a
 parameter: the retyping types the name a value prints as, and a computed pointer (`p[i]`'s `add`)
 or a loaded one (`**pp`) prints as its own expression, typed from its operands, so `*` over it
-would not compile. It refuses a struct agbcc never puts in memory: an SImode struct of four bytes or less,
+would not compile. And only words the call alone reads: kmc loads `p->b` once for an argument and
+the struct's word both, and that load, outliving the fold, would print off the retyped parameter as
+a recovered `field_4` rather than as the declared member at that offset. It refuses a struct agbcc never puts in memory: an SImode struct of four bytes or less,
 built in a register by an `and`/`orr` insert chain over the register's stale bits, and an all-word
 eight-byte struct passed straight from the registers holding its members. Its words are values, not
 one object's, and spelling them would mean a local struct the lift invents, with member stores

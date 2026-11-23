@@ -745,3 +745,55 @@ describe('a function that itself returns a struct', () => {
     expect(lift('rmk1', KMC_RMK1, MIPS_GCC)).toMatch(/s32 \* rmk1\(s32 \*a0, s32 a1\)/);
   });
 });
+
+// gcc2.7.2kmc -O2 of `struct Q { s32 a; s32 b; }; void takeQ(s32 k, struct Q q);`
+describe("a struct passed by value as a pointer parameter's pointee", () => {
+  const takeQ = {
+    params: ['s32', 'struct Q'],
+    returnsVoid: true,
+    byValueLayouts: { 1: layout(['a', 's32'], ['b', 's32']) },
+  };
+  const pass = (name: string, lines: string[], params: string[]) =>
+    decompile(name, obj(name, lines), MIPS_GCC, {
+      asmData: relocs([[lines.findIndex((l) => l.includes('jal')) * 4, 'R_MIPS_26', 'takeQ']]),
+      prototypes: { takeQ, [name]: { params, returnsVoid: true } },
+    }).source;
+
+  // `void f(s32 k, struct Q *p) { takeQ(k, *p); }`
+  test('is `*p` where the call alone reads its words', () => {
+    const lines = [
+      '0:\taddiu\tsp,sp,-24',
+      '4:\tmove\tv0,a1',
+      '8:\tsw\tra,16(sp)',
+      'c:\tlw\ta1,0(v0)',
+      '10:\tjal\t0 <f>',
+      '14:\tlw\ta2,4(v0)',
+      '18:\tlw\tra,16(sp)',
+      '1c:\tjr\tra',
+      '20:\taddiu\tsp,sp,24',
+    ];
+    expect(pass('f', lines, ['s32', 'struct Q *'])).toContain('takeQ(a0, *a1);');
+  });
+
+  // `void f(struct Q *p) { takeQ(p->b, *p); }`: kmc loads `p->b` once for the argument and the
+  // struct's second word (`move a2,a0`), so the load outlives the fold and would print off the
+  // retyped parameter as a recovered `field_4` — under a header whose names collide, the wrong
+  // offset at exit 0
+  test('declines where another reader shares a word', () => {
+    const lines = [
+      '0:\taddiu\tsp,sp,-24',
+      '4:\tmove\tv0,a0',
+      '8:\tsw\tra,16(sp)',
+      'c:\tlw\ta0,4(v0)',
+      '10:\tlw\ta1,0(v0)',
+      '14:\tjal\t0 <f>',
+      '18:\tmove\ta2,a0',
+      '1c:\tlw\tra,16(sp)',
+      '20:\tjr\tra',
+      '24:\taddiu\tsp,sp,24',
+    ];
+    expect(() => pass('f', lines, ['struct Q *'])).toThrow(
+      /the call to `takeQ` passes struct Q by value, and its words are not one frame object, one global/,
+    );
+  });
+});
