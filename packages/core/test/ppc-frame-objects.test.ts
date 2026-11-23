@@ -390,10 +390,9 @@ describe('what the local area refuses', () => {
     );
   });
 
-  test('a frame address plus a runtime index carried across a join', () => {
-    // `p = a + i` on one arm, `p = a + j` on the other, then `*p`: which object the sum indexes is
-    // not known at the join
-    expect(() =>
+  test('a frame address plus a runtime index carried across a join is a pointer into the object', () => {
+    // `p = a + i` on one arm, `p = a + j` on the other, then `*p`
+    expect(
       lift('f', [
         'stwu    r1,-32(r1)',
         'mflr    r0',
@@ -410,7 +409,34 @@ describe('what the local area refuses', () => {
         'addi    r1,r1,32',
         'blr',
       ]),
-    ).toThrow(/address-taken stack local/);
+    ).toMatch(/v0 = \(s32 \*\)\(\(u32\)sp8 \+ a1\);[^]*v0 = \(s32 \*\)\(\(u32\)sp8 \+ a2\);[^]*return \*v0;/);
+  });
+
+  test('a pointer stepped through the frame and handed to a callee refuses', () => {
+    // `for (p = a; …; p++) use(p)`: the escape of an address inside the object at no known offset
+    expect(() =>
+      lift(
+        'f',
+        [
+          'stwu    r1,-32(r1)',
+          'mflr    r0',
+          'stw     r0,36(r1)',
+          'stw     r31,28(r1)',
+          'addi    r31,r1,8',
+          'mr      r3,r31', // 5
+          'bl use',
+          'addi    r31,r31,4',
+          'cmpwi   r3,0',
+          'bne+    @5',
+          'lwz     r0,36(r1)',
+          'lwz     r31,28(r1)',
+          'mtlr    r0',
+          'addi    r1,r1,32',
+          'blr',
+        ],
+        { use: { params: ['s32 *'] } },
+      ),
+    ).toThrow(/a pointer stepped through the frame from the object at \[sp,#8\) flows into `call` as a value/);
   });
 
   test('a reload of an area word by `lmw`', () => {

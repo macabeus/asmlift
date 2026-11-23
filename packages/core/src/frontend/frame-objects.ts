@@ -470,7 +470,7 @@ function auditFrame({
   const facts = frameAddressFacts(irBlocks, symbols, target);
   const { laddrs, splitRefusal } = splitAddressingCopies(irBlocks, captures, foldedHere, declaredStructs(irBlocks));
   const objects = frameObjects(laddrs, owned, fail);
-  const flow = addressFlow(irBlocks, objects, facts, fail);
+  const flow = addressFlow(irBlocks, objects, facts);
   const uses = classifyFrameUses({
     irBlocks,
     objects,
@@ -482,7 +482,7 @@ function auditFrame({
     fail,
   });
   const windows = escapeWindows(irBlocks, uses, flow, facts, target);
-  const model = chooseFrameModel({ oneObject, uses, windows, returnsWithoutHiddenPointer, fail });
+  const model = chooseFrameModel({ oneObject, uses, merges: flow.merges, windows, returnsWithoutHiddenPointer, fail });
   if (capturedObjectIsTheWholeFrame) {
     recheckWholeFramePremise({ uses, returnsWithoutHiddenPointer, fail });
   }
@@ -1128,20 +1128,34 @@ function frameObjects(laddrs: readonly Op[], owned: FrameRange, fail: Refuse): M
 interface AddressFlow {
   readonly taint: ReadonlyMap<Value, number>;
   readonly frameOnEveryPath: ReadonlySet<Value>;
+  /** the values that hold an address INTO the object at their offset, at no one displacement from
+   *  it: a pointer stepped through the frame (`steppedPointers`) */
+  readonly stepped: ReadonlyMap<Value, number>;
+  /** why one value may hold the address of two objects: a pointer into the one object at no one
+   *  member, which only that answer declares (`chooseFrameModel`) */
+  readonly merges: string | undefined;
+  /** the values that may hold two objects: a phi `taint` sees meet two or carry such a phi, and the
+   *  values `steppedPointers` finds over two (`twoObjects`). Where one is `stepped` every use of it
+   *  but an access refuses as the merge; otherwise every use refuses */
+  readonly merged: ReadonlySet<Value>;
 }
 
 function addressFlow(
   irBlocks: readonly Block[],
   objects: ReadonlyMap<number, readonly Op[]>,
   facts: LiteralAddresses,
-  fail: Refuse,
 ): AddressFlow {
   const { defOf, constOf } = facts;
   // Taint maps a value to the OBJECT whose address it may hold, closed over phis: a tainted
   // edge arg taints the receiving block param. A phi that merges two objects has no single
-  // answer, and picking one would put an access on the wrong storage: `get(c ? &a : &b)` is
-  // `add r0, sp, #0x4 / beq / add r0, sp, #0x8 / bl get`, and refuses here.
+  // answer, and picking one would put an access on the wrong storage: `p = c ? a : b; p[i]` is
+  // agbcc's `mov r1, sp / bne / add r1, r2, #0 / add r0, r1, r3 / ldrb r0, [r0]`. It keeps the
+  // lower object and is `merged`: where every value it carries is this frame's it is a pointer
+  // into the frame at no one object (`steppedPointers`), which only the one object declares, and
+  // the per-object model refuses it (`merges`); otherwise every use of it refuses.
   const taint = new Map<Value, number>();
+  const merged = new Set<Value>();
+  let merges: string | undefined;
   for (const [off, ops] of objects) {
     for (const op of ops) {
       taint.set(op.results[0], off);
@@ -1159,11 +1173,14 @@ function addressFlow(
               return;
             }
             const had = taint.get(param);
-            if (had === from) {
-              return;
+            if (((had !== undefined && had !== from) || merged.has(arg)) && !merged.has(param)) {
+              const [lo, hi] = had === undefined ? [from, from] : [Math.min(had, from), Math.max(had, from)];
+              merges ??= `a phi merges the frame objects at [sp,#${lo}] and [sp,#${hi}] — one value, two objects`;
+              merged.add(param);
+              changed = true;
             }
-            if (had !== undefined) {
-              fail(`a phi merges the frame objects at [sp,#${had}] and [sp,#${from}] — one value, two objects`);
+            if (had !== undefined && had <= from) {
+              return;
             }
             taint.set(param, from);
             changed = true;
@@ -1214,7 +1231,169 @@ function addressFlow(
       }
     }
   }
-  return { taint, frameOnEveryPath };
+  // a pointer `steppedPointers` finds over two objects is merged too: its second object may arrive
+  // as an index sum (`c ? a : b + n`), which taint, seeing no exact value of `b`, does not call a
+  // merge, and it may be a loop phi or a move of the phi that merges them, which taint does not follow
+  const stepped = steppedPointers(irBlocks, objects, taint, incoming, facts);
+  for (const p of stepped.twoObjects) {
+    merged.add(p);
+  }
+  return { taint, frameOnEveryPath, stepped: stepped.stepped, merges: merges ?? stepped.merges, merged };
+}
+
+/** A POINTER STEPPED THROUGH THE FRAME. Strength reduction turns `for (i = 0; i < n; i++)
+ *  use(a[i])` over a local array into a pointer that starts at the array and moves by the element
+ *  size each trip — kmc's `addiu s1,sp,16 / lw a0,0(s1) / … / addiu s1,s1,4`, mwcc's `addi r31,r1,8
+ *  / lwz r3,0(r31) / addi r31,r31,4`, agbcc's `mov r5, sp / ldmia r5!, {r0}` — and `u16 *p = buf + n;
+ *  *p-- = v` starts it at a runtime index. Such a value is a phi whose every incoming value is
+ *  this frame's address: the object's own (`exact`, a phi of nothing else included), a runtime
+ *  index into it (`indexedAccess` judges the sum), or the phi itself, or another such pointer,
+ *  moved by a constant or by a runtime value. It names a different byte on each trip, so an access
+ *  through it is an access through a runtime index nothing bounds (`classifyFrameUses`): in C it is
+ *  `p` walking the array it was set from, which stays inside that array.
+ *
+ *  A GREATEST FIXPOINT, because the step feeds the phi it steps: a phi or an `add`/`sub` is a
+ *  candidate once one value it carries or moves names the object, and one is struck while an
+ *  incoming value is no frame address — a pointer from outside the frame (`p = cnt ? cnt : a`), a
+ *  load. A phi of two objects (`p = c ? a : b`, or `c ? a : b + n`) points into the lower one, and
+ *  so does every pointer stepped or moved from it, each carrying the higher one too: such a value
+ *  is named in `merges` — only the one object, where both are its bytes, declares it — and is
+ *  returned in `twoObjects`, which `addressFlow` adds to `merged`, so every use but an access
+ *  refuses as that merge. A phi of one object on every path (`mergedFrameAddresses`) is no stepped
+ *  pointer but that object's address, whose constant move is named before the audit
+ *  (`nameMergedFrameAddresses`). */
+function steppedPointers(
+  irBlocks: readonly Block[],
+  objects: ReadonlyMap<number, readonly Op[]>,
+  taint: ReadonlyMap<Value, number>,
+  incoming: ReadonlyMap<Value, readonly Value[]>,
+  { defOf, constOf }: LiteralAddresses,
+): { stepped: Map<Value, number>; merges: string | undefined; twoObjects: ReadonlySet<Value> } {
+  // the object values, and the phis that carry exactly one of them on every path
+  const exact = new Map<Value, number>();
+  for (const [off, ops] of objects) {
+    for (const op of ops) {
+      exact.set(op.results[0], off);
+    }
+  }
+  const phis = [...incoming.keys()].filter((p) => !defOf.has(p));
+  const exactPhis = new Map(
+    [...mergedFrameAddresses(irBlocks)].flatMap(([p, offs]) => (offs.size === 1 ? [[p, [...offs][0]] as const] : [])),
+  );
+  const exactOf = (v: Value): number | undefined => exact.get(v) ?? exactPhis.get(v);
+  // the runtime index sums `indexedAccess` judges: an exact value plus a value that is no constant
+  const indexSum = (v: Value): number | undefined => {
+    const d = defOf.get(v);
+    if (d?.opcode !== 'add' || d.operands.length !== 2) {
+      return undefined;
+    }
+    const [x, y] = d.operands;
+    const off = exactOf(x) ?? exactOf(y);
+    const other = exactOf(x) !== undefined ? y : x;
+    return off !== undefined && !taint.has(other) && constOf(other) === undefined ? off : undefined;
+  };
+  // the candidates, each with the object it would point into, from a value it carries or moves
+  const stepped = new Map<Value, number>();
+  const moves: Op[] = [];
+  for (const blk of irBlocks) {
+    for (const op of blk.ops) {
+      if ((op.opcode === 'add' || op.opcode === 'sub') && op.operands.length === 2 && op.results.length === 1) {
+        moves.push(op);
+      }
+    }
+  }
+  // …and a move of an index sum, where what it moves to is handed to a phi: one used any other way
+  // is the indexed element at a displacement, which `indexedAccess` judges
+  const handed = new Set([...incoming.values()].flat());
+  const startOf = (v: Value, r: Value): number | undefined =>
+    stepped.get(v) ?? (handed.has(r) ? indexSum(v) : undefined);
+  // the pointer a move moves, and what it is moved by
+  const moved = (op: Op): { from: Value; by: Value } | undefined => {
+    const [x, y] = op.operands;
+    const r = op.results[0];
+    const tx = startOf(x, r) !== undefined;
+    const ty = op.opcode === 'add' && startOf(y, r) !== undefined;
+    return tx === ty ? undefined : tx ? { from: x, by: y } : { from: y, by: x };
+  };
+  // what a value a phi carries points into: a phi over two objects points into the LOWER one, at
+  // no one displacement from it, like a pointer stepped from it (`p = c ? a : b`)
+  const frameOf = (a: Value): number | undefined => stepped.get(a) ?? exactOf(a) ?? indexSum(a);
+  const lowest = (offs: readonly (number | undefined)[]): number | undefined => {
+    const known = offs.filter((o): o is number => o !== undefined);
+    return known.length === 0 ? undefined : Math.min(...known);
+  };
+  // the offset only ever moves down, to the lowest object a value may carry, so this ends
+  let changed = true;
+  const lower = (v: Value, off: number | undefined): void => {
+    const had = stepped.get(v);
+    if (off !== undefined && (had === undefined || off < had)) {
+      stepped.set(v, off);
+      changed = true;
+    }
+  };
+  while (changed) {
+    changed = false;
+    for (const p of phis) {
+      if (!exactPhis.has(p)) {
+        lower(p, lowest(incoming.get(p)!.map(frameOf)));
+      }
+    }
+    for (const op of moves) {
+      const m = moved(op);
+      const r = op.results[0];
+      if (m === undefined || taint.has(m.by) || stepped.has(m.by) || exactOf(m.by) !== undefined) {
+        continue;
+      }
+      // an exact value moves to no pointer here: by a constant it is a capture at the sum
+      // (`nameMergedFrameAddresses`), and plus a runtime value it is an index sum
+      lower(r, stepped.get(m.from) ?? (constOf(m.by) !== undefined ? startOf(m.from, r) : undefined));
+    }
+  }
+  for (let struck = true; struck;) {
+    struck = false;
+    for (const [v, off] of stepped) {
+      const d = defOf.get(v);
+      const m = d === undefined ? undefined : moved(d);
+      const offs = d === undefined ? incoming.get(v)!.map(frameOf) : [];
+      const holds =
+        d === undefined
+          ? offs.every((o) => o !== undefined) && lowest(offs) === off
+          : m !== undefined && startOf(m.from, v) === off;
+      if (!holds) {
+        stepped.delete(v);
+        struck = true;
+      }
+    }
+  }
+  // …and the HIGHEST object each surviving value may carry, raised through the same phis and moves
+  // the lowest went down through: a value whose highest is not its lowest holds two objects — the
+  // phi `p = c ? a : b + n` itself, the loop phi it feeds, `p + 1` of it — and names the merge
+  // only the one-object answer declares; a value not raised carries its one object, so a phi over
+  // pointers each stepped through its own object (`p = a; do p++` on one path, `p = b` on the other)
+  // holds both
+  const highest = new Map<Value, number>();
+  const highOf = (a: Value): number | undefined => highest.get(a) ?? frameOf(a);
+  for (let raised = true; raised;) {
+    raised = false;
+    for (const [v, off] of stepped) {
+      const d = defOf.get(v);
+      const hi = Math.max(
+        off,
+        ...(d === undefined ? incoming.get(v)!.map((a) => highOf(a) ?? off) : [highOf(moved(d)!.from) ?? off]),
+      );
+      if (hi > (highest.get(v) ?? off)) {
+        highest.set(v, hi);
+        raised = true;
+      }
+    }
+  }
+  let merges: string | undefined;
+  const twoObjects = new Set<Value>();
+  for (const [v, hi] of highest) {
+    merges ??= `a phi merges the frame objects at [sp,#${stepped.get(v)}] and [sp,#${hi}] — one value, two objects`;
+    twoObjects.add(v);
+  }
+  return { stepped, merges, twoObjects };
 }
 
 /** One fixed-offset access at an object's own address. */
@@ -1343,7 +1522,7 @@ function mayWrite(uses: FrameUses, off: number): boolean {
 function classifyFrameUses({
   irBlocks,
   objects,
-  flow: { taint, frameOnEveryPath },
+  flow: { taint, frameOnEveryPath, stepped, merges, merged },
   facts,
   splitRefusal,
   oneObject,
@@ -1477,11 +1656,27 @@ function classifyFrameUses({
   for (const blk of irBlocks) {
     for (const op of blk.ops) {
       for (const [idx, v] of op.operands.entries()) {
-        const off = taint.get(v);
+        const off = stepped.get(v) ?? taint.get(v);
         if (off === undefined) {
           continue;
         }
         useCount.set(off, (useCount.get(off) ?? 0) + 1);
+        if (stepped.has(v)) {
+          steppedUse(
+            op,
+            idx,
+            { off, through: v },
+            { indexed, accessOps },
+            stepped,
+            merged.has(v) ? merges : undefined,
+            fail,
+          );
+          continue;
+        }
+        // a value that may hold either of two objects, or a pointer from outside the frame
+        if (merged.has(v) && merges !== undefined) {
+          fail(merges);
+        }
         if (op.opcode === 'load' && idx === 0) {
           scalar('load', op, off, v);
           accessOps.set(op, { off, through: v });
@@ -1567,7 +1762,7 @@ function classifyFrameUses({
             { indexed, accessOps },
             { off, through: v },
             { sum: op.results[0], range: facts.addressRangeOf(other, blk, 'narrowest') },
-            facts.constOf,
+            { constOf: facts.constOf, stepped },
             fail,
           );
           continue;
@@ -1699,7 +1894,7 @@ function indexedAccess(
   { indexed, accessOps }: { indexed: Map<number, IndexedAccess[]>; accessOps: Map<Op, FrameAccessOp> },
   object: FrameAccessOp,
   { sum, range }: { sum: Value; range: StridedRange | undefined },
-  constOf: (v: Value) => number | undefined,
+  { constOf, stepped }: { constOf: (v: Value) => number | undefined; stepped: ReadonlyMap<Value, number> },
   fail: Refuse,
 ): void {
   const { off } = object;
@@ -1711,11 +1906,21 @@ function indexedAccess(
   const judge = (at: Value, by: number): void => {
     for (const blk of irBlocks) {
       for (const op of blk.ops) {
+        // …save the start of a pointer stepped from the indexed element (`steppedPointers`), whose
+        // own accesses are judged where it is used. A phi that also carries a lower object is
+        // stepped from that one, and is the merge only the one object declares (`merges`)
         const roles = [
           ...op.operands.flatMap((v, i) => (v === at ? [i] : [])),
-          ...(op.successors ?? []).flatMap((s) => (s.args.includes(at) ? [-1] : [])),
+          ...(op.successors ?? []).flatMap((s) =>
+            s.args.some((a, i) => a === at && !(by === 0 && (stepped.get(s.block.params[i]) ?? Infinity) <= off))
+              ? [-1]
+              : [],
+          ),
         ];
         for (const i of roles) {
+          if (i >= 0 && by === 0 && op.results.length === 1 && stepped.get(op.results[0]) === off) {
+            continue;
+          }
           const k =
             at === sum && op.opcode === 'add' && op.operands.length === 2 && i >= 0
               ? constOf(op.operands[1 - i])
@@ -1747,6 +1952,39 @@ function indexedAccess(
     }
   };
   judge(sum, 0);
+}
+
+/** One use of a pointer stepped through the frame object at `off` (`steppedPointers`): a load or
+ *  store through it, at any displacement, is a runtime-indexed access whose reach nothing bounds; a
+ *  move of it is another such pointer, judged where it is used. Anything else — an escape, a
+ *  compare — is not modelled, and a value over two objects (`merges`) refuses as that merge. */
+function steppedUse(
+  op: Op,
+  idx: number,
+  object: FrameAccessOp,
+  { indexed, accessOps }: { indexed: Map<number, IndexedAccess[]>; accessOps: Map<Op, FrameAccessOp> },
+  stepped: ReadonlyMap<Value, number>,
+  merges: string | undefined,
+  fail: Refuse,
+): void {
+  if ((op.opcode === 'load' || op.opcode === 'store') && idx === 0) {
+    const width = op.attrs.width as number;
+    const index = { width, signed: op.opcode === 'load' && op.attrs.signed === true, reach: null };
+    (indexed.get(object.off) ?? indexed.set(object.off, []).get(object.off)!).push(index);
+    accessOps.set(op, { ...object, index });
+    return;
+  }
+  if (op.results.length === 1 && stepped.get(op.results[0]) === object.off) {
+    return;
+  }
+  if (merges !== undefined) {
+    fail(merges);
+  }
+  fail(
+    `a pointer stepped through the frame from the object at [sp,#${object.off}) flows into ` +
+      `\`${op.opcode}\`${op.opcode === 'store' || op.opcode === 'call' ? ' as a value' : ''} — ` +
+      'only a load or store through it is modelled',
+  );
 }
 
 /** Why two access types on one byte refuse, as every refusal of it words it. THE RULE IS AGBCC'S
@@ -2044,12 +2282,15 @@ function writerNotKept(uses: FrameUses, returnsWithoutHiddenPointer: (callee: st
 function chooseFrameModel({
   oneObject,
   uses,
+  merges,
   windows,
   returnsWithoutHiddenPointer,
   fail,
 }: {
   oneObject: FrameRange | undefined;
   uses: FrameUses;
+  /** why a value holds two objects (`AddressFlow.merges`) */
+  merges?: string;
   windows: ReadonlyMap<number, ReadWindow>;
   returnsWithoutHiddenPointer: (callee: string) => boolean;
   fail: Refuse;
@@ -2079,6 +2320,10 @@ function chooseFrameModel({
     // shape alone is one the answer holds, so the shape alone does not say why this declined.
     withheld: (why) => (writer === null ? why : `${why} — and the one object cannot hold every writer: ${writer}`),
   };
+  // a pointer that may hold either of two objects names no one of them; the one object holds both
+  if (merges !== undefined && oneObject === undefined) {
+    model.shapeRefused(merges);
+  }
   if (uses.memberRefusal !== undefined) {
     model.shapeRefused(uses.memberRefusal);
   }
@@ -3539,26 +3784,43 @@ function mergedFrameAddresses(irBlocks: readonly Block[]): Map<Value, ReadonlySe
   return out;
 }
 
-/** A STRUCT RETURNED THROUGH A MERGE OF ONE LOCAL'S ADDRESS IS THAT LOCAL. gcc rotates a loop that
- *  calls a struct-returning function, `while (lo > 0) { qr = ldiv(lo, 10); … }`, so `addiu a0,sp,16`
- *  runs once ahead of the loop and once in the delay slot of its back branch, and hoists it into
- *  both arms of `if (x) a = f(x); else a = f(x + 1);` ahead of one shared `jal`. The call then
- *  reads a block parameter, but every path hands it the same frame address, so the call is handed
- *  that address: an `laddr` of it, minted ahead of the call, which the frame-object audit types as
- *  the struct (`declaredStructs`) and `refuseSretOutsideFrame` accepts. A merge of two offsets is
- *  two objects, and is left for the audit to refuse. Run before the audit, on every frontend whose call
- *  lowering passes the hidden pointer. */
-export function nameMergedSretObjects(irBlocks: Block[]): void {
+/** A MERGE OF ONE LOCAL'S ADDRESS IS THAT LOCAL, where a use must name it. Two uses must:
+ *
+ *  - A STRUCT RETURNED THROUGH IT. gcc rotates a loop that calls a struct-returning function,
+ *    `while (lo > 0) { qr = ldiv(lo, 10); … }`, so `addiu a0,sp,16` runs once ahead of the loop and
+ *    once in the delay slot of its back branch, and hoists it into both arms of `if (x) a = f(x);
+ *    else a = f(x + 1);` ahead of one shared `jal`. The call then reads a block parameter, and the
+ *    hidden pointer must be a frame object the audit accepted (`refuseSretOutsideFrame`).
+ *  - A CONSTANT MOVE OF IT. agbcc copies `sp` into a register in both arms of an `if` and adds a
+ *    member's offset after the join, `mov r4, sp` … `add r0, r4, #4 / bl take`: the address of the
+ *    member, which `foldMovedCaptures` folds only off a capture.
+ *
+ *  Every path hands the phi the same frame address, so the use is handed that address: an `laddr`
+ *  of it, minted just ahead of the use. Any other use reads the phi as a pointer to the object
+ *  (`addressFlow`), and is left as it is. A merge of two offsets is two objects, and is left for the
+ *  audit to judge (`steppedPointers`). Run before the audit, on every frontend. */
+export function nameMergedFrameAddresses(irBlocks: Block[]): void {
   const merged = mergedFrameAddresses(irBlocks);
+  const consts = new Set(
+    irBlocks.flatMap((b) => b.ops.filter((op) => op.opcode === 'const').map((op) => op.results[0])),
+  );
+  const mustName = (op: Op, i: number): boolean =>
+    op.opcode === 'call'
+      ? i === 0 && op.attrs.sret === true
+      : op.opcode === 'add' && op.operands.length === 2 && consts.has(op.operands[1 - i]);
   for (const b of irBlocks) {
     b.ops = b.ops.flatMap((op) => {
-      const offs = op.opcode === 'call' && op.attrs.sret === true ? merged.get(op.operands[0]) : undefined;
-      if (offs === undefined || offs.size !== 1) {
-        return [op];
-      }
-      const at = mkValue(T.unk(32));
-      op.operands = [at, ...op.operands.slice(1)];
-      return [mkOp('laddr', { results: [at], attrs: { off: [...offs][0] } }), op];
+      const named: Op[] = [];
+      op.operands = op.operands.map((v, i) => {
+        const offs = merged.get(v);
+        if (offs === undefined || offs.size !== 1 || !mustName(op, i)) {
+          return v;
+        }
+        const at = mkValue(T.unk(32));
+        named.push(mkOp('laddr', { results: [at], attrs: { off: [...offs][0] } }));
+        return at;
+      });
+      return [...named, op];
     });
   }
 }
@@ -3568,8 +3830,8 @@ export function nameMergedSretObjects(irBlocks: Block[]): void {
  *  handed over directly — `gS = f(..)` (agbcc, ido, gcc), IDO's `*p = f(..)`, and the caller's own
  *  hidden pointer forwarded by `return f(..)` — is another spelling, which nothing here states. A
  *  merge of frame addresses never reaches here: one that names one address on every path was handed
- *  that address's `laddr` before the audit (`nameMergedSretObjects`), and a merge of two names no one
- *  storage, which the audit refuses first (`addressFlow`: `a phi merges the frame objects`). Asked
+ *  that address's `laddr` before the audit (`nameMergedFrameAddresses`), and a merge of two names no one
+ *  storage, which the audit refuses (`classifyFrameUses`: `a phi merges the frame objects`). Asked
  *  of every frontend whose call lowering passes the hidden pointer
  *  (`CallLowering.memoryReturn`). */
 export function refuseSretOutsideFrame(name: string, irBlocks: readonly Block[], target: TargetDescription): void {

@@ -838,9 +838,22 @@ offset pick it by width through one helper (ir/types.ts `intFieldAt`, which stru
 memory where a device or a callee holds its address, or where nothing escapes and the per-object
 model refuses the frame (a by-value struct parameter, spilled word by word over the spill slots and
 read member by member through `mov rD, sp`, at two widths or two signednesses, or copied out a word
-at a time; `chooseFrameModel` offers it before any shape is judged). That read has a second
-inhabitant on Thumb, and the frontend tells them apart before the audit: agbcc promotes a `u8` or
-`u16` local to a word, spills it with `str`, and reloads only the narrow part through a copy of sp
+at a time; or a pointer that holds either of two locals, `p = c ? a : b` or `c ? a + n : b + n`,
+which names no one of them, read as a pointer into the lower one at no one displacement, which only
+the one object declares (frame-objects.ts `addressFlow` `merges`); `chooseFrameModel` offers it
+before any shape is judged). A pointer that may also hold an address from outside the frame, or that
+escapes, still refuses with the merge, and so does one stepped or moved from it (a loop phi it feeds,
+`p + 1`), which carries both objects too (`steppedPointers` raises each value's highest object
+beside its lowest). A POINTER STEPPED THROUGH THE FRAME is read in either model:
+a loop over a local array that the compiler strength-reduces carries the array's address in a loop
+phi moved each trip (kmc `addiu s1,sp,16 … addiu s1,s1,4`, mwcc `addi r31,r1,8 … addi r31,r31,4`,
+agbcc `mov r5, sp / ldmia r5!, {r0}`), and `u16 *p = buf + n; *p-- = v` starts one at a runtime index.
+Such a value names a different byte each trip, so a load or store through it, at any displacement,
+is an access through a runtime index nothing bounds, which may reach every byte of the frame
+(`steppedPointers`); any other use of it (an escape, a compare) refuses. A phi that holds ONE
+object on every path is no such pointer but that object's address. The one-object read has a
+second inhabitant on Thumb, and the frontend tells them apart before the audit: agbcc promotes a
+`u8` or `u16` local to a word, spills it with `str`, and reloads only the narrow part through a copy of sp
 made for that one load (`mov r2, sp / ldrh r2, [r2, #4]`), because Thumb has no sp-relative
 `ldrb`/`ldrh`. Those bytes are the stored word's low-order part (the slot's own address on a
 little-endian target), so the load is the slot's value narrowed, a `zext` of the slot, and the copy
@@ -1284,10 +1297,13 @@ operands' low n bits alone, so `(s.h & 0xf0) | 1` stored to a byte reads `s.h`, 
 struct-returning function, so `addiu a0,sp,16` runs once ahead of the loop and once in the delay
 slot of its back branch, and it hoists the same instruction into both arms of an `if` ahead of one
 shared `jal`. The call then reads a block parameter. Where every path hands that parameter the same
-frame address, a shared pre-audit step (`frame-objects.ts` `nameMergedSretObjects`, on MIPS and
-Thumb) hands the call an `laddr` of that address, minted just ahead of it, and the audit types it
-as the struct like any other return temp. A merge of two different addresses names no one storage,
-and the audit refuses it (`a phi merges the frame objects`).
+frame address, a shared pre-audit step (`frame-objects.ts` `nameMergedFrameAddresses`, on every
+frontend) hands the call an `laddr` of that address, minted just ahead of it, and the audit types it
+as the struct like any other return temp. The same step names such a phi where a constant moves it
+(agbcc's `mov r4, sp` in both arms, then `add r0, r4, #4`), which is then the capture at the sum.
+A merge of two different addresses names no one storage: a return temp reached through one is
+refused (`a phi merges the frame objects`), and any other use is the pointer into the one object
+that the frame audit reads.
 
 **What is NOT built.** A member read of a returned struct at any word but the temp's first: the
 Thumb slot model keys `[sp,#k]` as a slot (`stack pointer used as data`); the audit would rebase it

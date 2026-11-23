@@ -1764,6 +1764,146 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       );
     });
 
+    // …but read through, nothing escaping, the phi is a pointer into the local area as one object.
+    // agbcc's own output for `s8 a[4], b[4], *p; a[0..3] = 1..4; b[0..3] = 5..8; p = c ? a : b;
+    // return p[i];` (kl2dct sub_0802C510's shape).
+    const selobj = (join: string) =>
+      'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr3, r1, #0\n\tmov\tr2, sp\n' +
+      [1, 2, 3, 4].map((v, i) => `\tmov\tr1, #0x${v}\n\tstrb\tr1, [r2${i ? `, #0x${i}` : ''}]\n`).join('') +
+      '\tadd\tr2, sp, #0x4\n' +
+      [5, 6, 7, 8].map((v, i) => `\tmov\tr1, #0x${v}\n\tstrb\tr1, [r2${i ? `, #0x${i}` : ''}]\n`).join('') +
+      '\tmov\tr1, sp\n\tcmp\tr0, #0\n\tbne\t.L26\n\tadd\tr1, r2, #0\n.L26:\n' +
+      join +
+      '\tldrb\tr0, [r0, #0]\n\tlsl\tr0, r0, #24\n\tasr\tr0, r0, #24\n' +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n';
+    const selProto = { f: { params: ['s32', 's32'], returns: 's32' } };
+    test('a phi of two objects read through is a pointer into the one object', () => {
+      const src = decompile('f', selobj('\tadd\tr0, r1, r3\n'), ARMV4T_AGBCC, { prototypes: selProto }).source;
+      expect(src).toContain('u8 sp0[8];');
+      expect(src).toMatch(/= \(u8 \*\)\(\(u32\)sp0 \+ 4\);/);
+      expect(src).toMatch(/return \(s8\)\*\(v0 \+ a1\);/);
+    });
+
+    // …and so is a phi of two runtime indices, one into each: the higher object's sum is a start
+    // of the pointer as much as the lower one's. agbcc's own output for `u8 a[8], b[8], *p = c ?
+    // a + n : b + n; for (k = 0; k < 8; k++) { a[k] = k; b[k] = k * 2; } return *p;`.
+    test('a phi of an index into each of two objects is a pointer into the one object', () => {
+      const sums =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x10\n\tcmp\tr0, #0\n\tbeq\t.L3\n\tmov\tr0, sp\n' +
+        '\tadd\tr4, r0, r1\n\tadd\tr0, sp, #0x8\n\tb\t.L4\n.L3:\n\tadd\tr0, sp, #0x8\n\tadd\tr4, r0, r1\n' +
+        '.L4:\n\tmov\tr2, #0x0\n\tadd\tr3, r0, #0\n.L8:\n\tmov\tr1, sp\n\tadd\tr0, r1, r2\n\tstrb\tr2, [r0]\n' +
+        '\tadd\tr1, r3, r2\n\tlsl\tr0, r2, #0x1\n\tstrb\tr0, [r1]\n\tadd\tr2, r2, #0x1\n\tcmp\tr2, #0x7\n' +
+        '\tble\t.L8\n\tldrb\tr0, [r4]\n\tadd\tsp, sp, #0x10\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+      const src = decompile('f', sums, ARMV4T_AGBCC, { prototypes: selProto }).source;
+      expect(src).toContain('u8 sp0[16];');
+      expect(src).toMatch(/= \(u8 \*\)\(\(u32\)sp0 \+ a1\);/);
+      expect(src).toMatch(/= \(u8 \*\)\(\(u32\)sp0 \+ 8 \+ a1\);/);
+      expect(src).toMatch(/return \*v\d;/);
+    });
+
+    // …and a phi that holds ONE object on every path is that object, so a constant move of it is
+    // the capture at the sum. agbcc's own output for `u32 a[4], *p; a[0..3] = x, y, x, y; if (c)
+    // { p = a; h(); } else { p = a; k(); } take(p + 1); return a[0] + a[3];`: `mov r4, sp` in each
+    // arm, `add r0, r4, #4` after the join (`nameMergedFrameAddresses`).
+    test('a constant move of a phi of one object is the capture at the sum', () => {
+      const moved =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x10\n\tstr\tr1, [sp]\n\tstr\tr2, [sp, #0x4]\n' +
+        '\tstr\tr1, [sp, #0x8]\n\tstr\tr2, [sp, #0xc]\n\tcmp\tr0, #0\n\tbeq\t.L3\n\tmov\tr4, sp\n\tbl\th\n' +
+        '\tb\t.L4\n.L3:\n\tmov\tr4, sp\n\tbl\tk\n.L4:\n\tadd\tr0, r4, #0x4\n\tbl\ttake\n\tldr\tr0, [sp]\n' +
+        '\tldr\tr1, [sp, #0xc]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x10\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+      const prototypes = {
+        f: { params: ['s32', 's32', 's32'], returns: 's32' },
+        h: { params: [], returnsVoid: true },
+        k: { params: [], returnsVoid: true },
+        take: { params: ['u32 *'], returnsVoid: true },
+      };
+      const src = decompile('f', moved, ARMV4T_AGBCC, { prototypes }).source;
+      expect(src).toContain('u8 sp0[16];');
+      expect(src).toContain('take((u32)sp0 + 4);');
+      expect(src).toContain('return *(s32 *)sp0 + ((s32 *)sp0)[3];');
+    });
+
+    // …and a phi of one object and an index into the other is that merge too, though taint sees
+    // only one exact object meet it: its compare refuses as the merge, not as a stepped pointer.
+    // agbcc's own output for `u8 a[8], b[8], *p = c ? a : b + n; for (k = 0; k < 8; k++) { a[k] =
+    // k; b[k] = k * 2; } return p == b;`.
+    test('a compare of a phi of one object and an index into another refuses as the merge', () => {
+      const cmp =
+        'f:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x10\n\tcmp\tr0, #0\n\tbeq\t.L11\n\tmov\tr5, sp\n' +
+        '\tadd\tr3, sp, #0x8\n\tb\t.L12\n.L11:\n\tadd\tr0, sp, #0x8\n\tadd\tr5, r0, r1\n\tadd\tr3, r0, #0\n' +
+        '.L12:\n\tmov\tr2, #0x0\n\tadd\tr4, r3, #0\n.L16:\n\tmov\tr1, sp\n\tadd\tr0, r1, r2\n\tstrb\tr2, [r0]\n' +
+        '\tadd\tr1, r4, r2\n\tlsl\tr0, r2, #0x1\n\tstrb\tr0, [r1]\n\tadd\tr2, r2, #0x1\n\tcmp\tr2, #0x7\n' +
+        '\tble\t.L16\n\tmov\tr0, #0x0\n\tcmp\tr5, r3\n\tbne\t.L18\n\tmov\tr0, #0x1\n.L18:\n' +
+        '\tadd\tsp, sp, #0x10\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n';
+      expect(() => decompile('f', cmp, ARMV4T_AGBCC, { prototypes: selProto })).toThrow(
+        /a phi merges the frame objects at \[sp,#0\] and \[sp,#8\]/,
+      );
+    });
+
+    // …and so is every pointer stepped or moved from that phi, which carries both objects too: a
+    // loop phi it feeds, or the phi plus a constant, passed to a call refuses as the merge, not as a
+    // stepped pointer. agbcc's own output, with `void fill(u8 *); void take8(u8 *);`, for `u8 a[8],
+    // b[8], *p; fill(a); fill(b);` then `p = c ? a : b + n; for (i = 0; i < m; i++) { take8(p); p++; }
+    // return a[0];` (loop) and `p = c ? a : b; take8(p + 1); return a[0];` (move).
+    const fillProto = {
+      fill: { params: ['u8 *'], returnsVoid: true },
+      take8: { params: ['u8 *'], returnsVoid: true },
+    };
+    test.each([
+      [
+        'a loop phi it feeds',
+        'f:\n\tpush\t{r4, r5, r6, r7, lr}\n\tadd\tsp, sp, #-16\n\tadd\tr6, r0, #0\n\tadd\tr7, r1, #0\n' +
+          '\tadd\tr5, r2, #0\n\tmov\tr0, sp\n\tbl\tfill\n\tadd\tr4, sp, #8\n\tadd\tr0, r4, #0\n\tbl\tfill\n' +
+          '\tadd\tr4, r4, r5\n\tcmp\tr6, #0\n\tbeq\t.L11\n\tmov\tr4, sp\n.L11:\n\tcmp\tr7, #0\n\tble\t.L14\n' +
+          '\tadd\tr5, r7, #0\n.L16:\n\tadd\tr0, r4, #0\n\tbl\ttake8\n\tadd\tr4, r4, #1\n\tsub\tr5, r5, #1\n' +
+          '\tcmp\tr5, #0\n\tbne\t.L16\n.L14:\n\tmov\tr0, sp\n\tldrb\tr0, [r0]\n\tadd\tsp, sp, #16\n' +
+          '\tpop\t{r4, r5, r6, r7}\n\tpop\t{r1}\n\tbx\tr1\n',
+        ['s32', 's32', 's32'],
+      ],
+      [
+        'a constant move of it',
+        'f:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-16\n\tadd\tr4, r0, #0\n\tmov\tr0, sp\n\tbl\tfill\n' +
+          '\tadd\tr5, sp, #8\n\tadd\tr0, r5, #0\n\tbl\tfill\n\tmov\tr0, sp\n\tcmp\tr4, #0\n\tbne\t.L20\n' +
+          '\tadd\tr0, r5, #0\n.L20:\n\tadd\tr0, r0, #1\n\tbl\ttake8\n\tmov\tr0, sp\n\tldrb\tr0, [r0]\n' +
+          '\tadd\tsp, sp, #16\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n',
+        ['s32'],
+      ],
+    ])('%s, passed to a call, refuses as the merge of the two objects', (_, asm, params) => {
+      expect(() =>
+        decompile('f', asm, ARMV4T_AGBCC, { prototypes: { ...fillProto, f: { params, returns: 's32' } } }),
+      ).toThrow(/a phi merges the frame objects at \[sp,#0\] and \[sp,#8\]/);
+    });
+
+    // …and so does a phi whose every incoming value is a pointer stepped over ONE object, one over
+    // each: agbcc's own output, with `void sink(u32 *, u32 *); void take(u32 *);`, for `u32 a[4],
+    // b[4], *p; sink(a, b); if (c) { p = a; do p++; while (*p); } else { p = b; do p++; while (*p); }
+    // take(p); return 0;`
+    test('a phi of two pointers each stepped over its own object, passed to a call, refuses as the merge', () => {
+      const asm =
+        'f:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x20\n\tadd\tr4, r0, #0\n\tadd\tr5, sp, #0x10\n' +
+        '\tmov\tr0, sp\n\tadd\tr1, r5, #0\n\tbl\tsink\n\tcmp\tr4, #0\n\tbeq\t.L3\n\tmov\tr1, sp\n.L4:\n' +
+        '\tadd\tr1, r1, #0x4\n\tldr\tr0, [r1]\n\tcmp\tr0, #0\n\tbne\t.L4\n\tb\t.L9\n.L3:\n\tadd\tr1, r5, #0\n' +
+        '.L10:\n\tadd\tr1, r1, #0x4\n\tldr\tr0, [r1]\n\tcmp\tr0, #0\n\tbne\t.L10\n.L9:\n\tadd\tr0, r1, #0\n' +
+        '\tbl\ttake\n\tmov\tr0, #0x0\n\tadd\tsp, sp, #0x20\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n';
+      const prototypes = {
+        sink: { params: ['u32 *', 'u32 *'], returnsVoid: true },
+        take: { params: ['u32 *'], returnsVoid: true },
+        f: { params: ['s32'], returns: 'u32' },
+      };
+      expect(() => decompile('f', asm, ARMV4T_AGBCC, { prototypes })).toThrow(
+        /a phi merges the frame objects at \[sp,#0\] and \[sp,#16\] — one value, two objects/,
+      );
+    });
+
+    // hand-written: the merged pointer meets a pointer from outside the frame (`i`), so it may be
+    // neither object, and a member of the one object at its offset would be the wrong storage
+    test('a phi of two objects and a pointer from outside the frame refuses', () => {
+      const join = '\tcmp\tr3, #0\n\tbeq\t.L27\n\tadd\tr1, r3, #0\n.L27:\n\tadd\tr0, r1, #0\n';
+      expect(() => decompile('f', selobj(join), ARMV4T_AGBCC, { prototypes: selProto })).toThrow(
+        /a phi merges the frame objects at \[sp,#0\] and \[sp,#4\] — one value, two objects/,
+      );
+    });
+
     // A MOVE THE WALK DOES NOT FOLLOW IS STILL THE CAPTURE AT THE SUM, because the IR holds the
     // constant exactly: the register-offset spelling sa3's `sub_807A2AC` uses, `mov r0, sp / movs
     // r2, #4 / ldrsh r0, [r0, r2]`, is the object `add r0, sp, #4 / ldrsh r0, [r0]` names.
@@ -1814,15 +1954,24 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     });
 
     // …and a pointer a phi carries around a loop, stepped by a constant each trip (sa3's
-    // `sub_80B59E4`), names a different byte on each: no fold makes it one object.
-    test('a capture stepped around a loop is refused as the stepped pointer', () => {
-      const stepped =
+    // `sub_80B59E4`), names a different byte on each: an access through it is one through a
+    // runtime index nothing bounds, into the object it was set from.
+    test('a capture stepped around a loop is a pointer walking the object', () => {
+      const stepped = (step: string) =>
         'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr1, sp\n\tmovs\tr2, #0\n.L1:\n\tstrb\tr2, [r1]\n' +
-        '\tadds\tr1, #1\n\tadds\tr2, #1\n\tcmp\tr2, #8\n\tblt\t.L1\n\tmov\tr0, sp\n\tbl\tg\n\tadd\tsp, sp, #0x8\n' +
+        `\t${step}\n\tadds\tr2, #1\n\tcmp\tr2, #8\n\tblt\t.L1\n\tmov\tr0, sp\n\tbl\tg\n\tadd\tsp, sp, #0x8\n` +
         '\tpop\t{r1}\n\tbx\tr1\n';
+      const out = decompile('f', stepped('adds\tr1, #1'), ARMV4T_AGBCC, {
+        prototypes: { g: { params: 1, returnsVoid: true } },
+      }).source;
+      expect(out).toContain('u8 sp0[8];');
+      expect(out).toMatch(/v0 = \(u8 \*\)sp0;[^]*\*v0 = v1;[^]*v0 = v0 \+ 1;/);
+      // …and compared, the pointer is a value the audit does not follow
       expect(() =>
-        decompile('f', stepped, ARMV4T_AGBCC, { prototypes: { g: { params: 1, returnsVoid: true } } }),
-      ).toThrow('the captured address at [sp,#0) reaches a phi and is then moved by a constant');
+        decompile('f', stepped('adds\tr1, #1\n\tcmp\tr1, r0\n\tbeq\t.L1'), ARMV4T_AGBCC, {
+          prototypes: { g: { params: 1, returnsVoid: true } },
+        }),
+      ).toThrow('a pointer stepped through the frame from the object at [sp,#0) flows into');
     });
 
     // …but a phi that merges the capture with a PARAMETER steps nothing: agbcc's own output for

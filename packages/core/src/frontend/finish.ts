@@ -27,7 +27,7 @@ import {
   type FrameObjectAudit,
   type FrameObjectRelift,
   type FrameRange,
-  nameMergedSretObjects,
+  nameMergedFrameAddresses,
   refuseSretOutsideFrame,
 } from './frame-objects';
 import type { LocalStatics } from './local-object';
@@ -65,8 +65,7 @@ export interface LiftFinish {
    *  (`foldByValueArgs`, run ahead of the audit) */
   foldsByValueArgs: boolean;
   /** whether a call's lowering passes a hidden struct-return pointer (`CallLowering.memoryReturn`):
-   *  the merged pointer is named ahead of the audit (`nameMergedSretObjects`) and one that is no
-   *  frame object refuses after it (`refuseSretOutsideFrame`) */
+   *  one that is no frame object refuses after the audit (`refuseSretOutsideFrame`) */
   memoryReturn: boolean;
   /** the frame the audit judges, read at the audit (so a fact the frontend computes from the folded
    *  IR is computed there); undefined where the function has no frame for it to judge, and then no
@@ -95,9 +94,9 @@ export function finishLift(f: LiftFinish): Fn | FrameObjectRelift {
   if (f.foldsByValueArgs) {
     foldByValueArgs(name, irBlocks, calls, { symbols, context });
   }
-  if (f.memoryReturn) {
-    nameMergedSretObjects(irBlocks);
-  }
+  // A merge of one local's address is that local where a use must name it: a hidden struct-return
+  // pointer, a constant move (`nameMergedFrameAddresses`).
+  nameMergedFrameAddresses(irBlocks);
 
   // Prove every `laddr` this function emitted really does name storage of this function's own, at
   // a shape the machine states, or decline (auditFrameObjects); an accepted function then gets the

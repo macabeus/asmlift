@@ -21165,6 +21165,173 @@ export const SYNTHETIC: SynthSpec[] = [
       'extern int (*gFp)();\nint stkidx_fpspill(s32 i, s32 j, s32 k, s32 l);',
     proto: { stkidx_fpspill: { params: ['s32', 's32', 's32', 's32'] } },
   },
+  //  39e. stkwalk_up / stkwalk_call / stkwalk_down (kl2dct ReadEepromDword, sub_0805147C). A loop
+  //      over a local array that the compiler strength-reduces into a pointer stepped through the
+  //      frame: kmc `addiu s1,sp,16 / lw a0,0(s1) / … / addiu s1,s1,4`, mwcc `addi r31,r1,8 / lwz
+  //      r3,0(r31) / addi r31,r31,4`, agbcc `mov r5, sp / ldmia r5!, {r0}`; gcc2.7.2 -O1 keeps `a[i]`.
+  //      stkwalk_down starts the pointer at a runtime index, `u16 *p = buf + n; *p-- = v`, the
+  //      eeprom bit-serializer's shape. An access through the stepped pointer is one through a
+  //      runtime index nothing bounds (frame-objects.ts `steppedPointers`). agbcc's stkwalk_up and
+  //      stkwalk_call decline before the audit: an `ldmia` through the pointer is no read of
+  //      [sp,#0] to the outgoing-argument analysis (frontend/stackargs.ts (a)).
+  {
+    sym: 'stkwalk_up',
+    src:
+      'extern u32 gA, gB;\n' +
+      'extern s32 gN;\n' +
+      'void use(u32 x, s32 i);\n' +
+      'void stkwalk_up(void)\n' +
+      '{\n' +
+      '    u32 a[2];\n' +
+      '    s32 i;\n' +
+      '    a[0] = gA;\n' +
+      '    a[1] = gB;\n' +
+      '    for (i = 0; i < gN; i++)\n' +
+      '        use(a[i], i);\n' +
+      '}',
+    features: ['variable-index'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'extern u32 gA, gB;\nextern s32 gN;\nvoid use(u32 x, s32 i);\nvoid stkwalk_up(void);',
+    proto: { stkwalk_up: { returnsVoid: true }, use: { params: ['u32', 's32'], returnsVoid: true } },
+  },
+  {
+    sym: 'stkwalk_call',
+    src:
+      'extern u32 gA, gB;\n' +
+      'extern s32 gN;\n' +
+      'void use(u32 x, s32 i);\n' +
+      'void rng(void);\n' +
+      'void stkwalk_call(void)\n' +
+      '{\n' +
+      '    u32 a[2];\n' +
+      '    s32 i;\n' +
+      '    a[0] = gA;\n' +
+      '    a[1] = gB;\n' +
+      '    for (i = 0; i < gN; i++)\n' +
+      '        use(a[i], i);\n' +
+      '    rng();\n' +
+      '}',
+    features: ['variable-index'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'extern u32 gA, gB;\nextern s32 gN;\nvoid use(u32 x, s32 i);\nvoid rng(void);\nvoid stkwalk_call(void);',
+    proto: {
+      stkwalk_call: { returnsVoid: true },
+      use: { params: ['u32', 's32'], returnsVoid: true },
+      rng: { params: [], returnsVoid: true },
+    },
+  },
+  {
+    sym: 'stkwalk_down',
+    src:
+      'void sink(u16 *p);\n' +
+      'void stkwalk_down(s32 n, u16 v)\n' +
+      '{\n' +
+      '    u16 buf[16];\n' +
+      '    u16 *p = buf + n;\n' +
+      '    s32 k;\n' +
+      '    for (k = 0; k < n; k++) {\n' +
+      '        *p-- = v;\n' +
+      '        v >>= 1;\n' +
+      '    }\n' +
+      '    *p = 1;\n' +
+      '    sink(buf);\n' +
+      '}',
+    features: ['pointer'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'void sink(u16 *p);\nvoid stkwalk_down(s32 n, u16 v);',
+    proto: {
+      stkwalk_down: { params: ['s32', 'u16'], returnsVoid: true },
+      sink: { params: ['u16 *'], returnsVoid: true },
+    },
+  },
+  //  39f. stkphi2 (kl2dct sub_0802C510: "a phi merges the frame objects"). `p = c ? a : b; p[i]`
+  //      over two local arrays: one value holds either object's address, so it names no one of
+  //      them and the per-object model refuses it. With no address escaping, the local area is one
+  //      object, and the phi a pointer into it at no one member, like a stepped pointer
+  //      (frame-objects.ts `steppedPointers`).
+  {
+    sym: 'stkphi2',
+    src:
+      's32 stkphi2(s32 c, s32 i)\n' +
+      '{\n' +
+      '    s8 a[4];\n' +
+      '    s8 b[4];\n' +
+      '    s8 *p;\n' +
+      '    a[0] = 1;\n' +
+      '    a[1] = 2;\n' +
+      '    a[2] = 3;\n' +
+      '    a[3] = 4;\n' +
+      '    b[0] = 5;\n' +
+      '    b[1] = 6;\n' +
+      '    b[2] = 7;\n' +
+      '    b[3] = 8;\n' +
+      '    p = c ? a : b;\n' +
+      '    return p[i];\n' +
+      '}',
+    features: ['variable-index', 'pointer'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 's32 stkphi2(s32 c, s32 i);',
+    proto: { stkphi2: { params: ['s32', 's32'], returns: 's32' } },
+  },
+  //      stkphi2_idx: the phi carries a runtime index into each array, `c ? a + n : b + n`; the
+  //      higher array's index sum starts the pointer as the lower one's does (`indexedAccess`).
+  {
+    sym: 'stkphi2_idx',
+    src:
+      's32 stkphi2_idx(s32 c, s32 n)\n' +
+      '{\n' +
+      '    u8 a[8];\n' +
+      '    u8 b[8];\n' +
+      '    u8 *p = c ? a + n : b + n;\n' +
+      '    s32 k;\n' +
+      '    for (k = 0; k < 8; k++) {\n' +
+      '        a[k] = k;\n' +
+      '        b[k] = k * 2;\n' +
+      '    }\n' +
+      '    return *p;\n' +
+      '}',
+    features: ['variable-index', 'pointer'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 's32 stkphi2_idx(s32 c, s32 n);',
+    proto: { stkphi2_idx: { params: ['s32', 's32'], returns: 's32' } },
+  },
+  //      stkphi_move: a phi that holds ONE array on every path, moved by a constant after the
+  //      join — agbcc `mov r4, sp` in each arm, then `add r0, r4, #4 / bl take`. It is that array's
+  //      address, so the move is the capture at the sum (frame-objects.ts `nameMergedFrameAddresses`).
+  {
+    sym: 'stkphi_move',
+    src:
+      'void h(void);\n' +
+      'void k(void);\n' +
+      'void take(u32 *p);\n' +
+      'u32 stkphi_move(s32 c, u32 x, u32 y)\n' +
+      '{\n' +
+      '    u32 a[4];\n' +
+      '    u32 *p;\n' +
+      '    a[0] = x;\n' +
+      '    a[1] = y;\n' +
+      '    a[2] = x;\n' +
+      '    a[3] = y;\n' +
+      '    if (c) {\n' +
+      '        p = a;\n' +
+      '        h();\n' +
+      '    } else {\n' +
+      '        p = a;\n' +
+      '        k();\n' +
+      '    }\n' +
+      '    take(p + 1);\n' +
+      '    return a[0] + a[3];\n' +
+      '}',
+    features: ['pointer'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'void h(void);\nvoid k(void);\nvoid take(u32 *p);\nu32 stkphi_move(s32 c, u32 x, u32 y);',
+    proto: {
+      stkphi_move: { params: ['s32', 'u32', 'u32'], returns: 'u32' },
+      h: { params: [], returnsVoid: true },
+      k: { params: [], returnsVoid: true },
+      take: { params: ['u32 *'], returnsVoid: true },
+    },
+  },
   //  40. dmafill_call (kl2dct sub_0802E340: "stack pointer used as data — the store to [sp,#0] is
   //      never reloaded"). A DMA fill whose temp's address is stored to the device's source register,
   //      then a call taking `&w`. agbcc loads the register's address into r0, the same register that
