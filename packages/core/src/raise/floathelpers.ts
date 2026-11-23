@@ -35,7 +35,8 @@ import { isArgumentPair } from './pairparams';
  *   - an operand built from a load or two unrelated words, whose halves the int64 naming would put
  *     in the wrong order. Two CONSTANT words are the exception: they are a literal, read in the
  *     target's word order into an `fconst` (`a + 1.5` stages `0x3ff80000` in r2, its high word);
- *   - an argument the function also reads on its own, as a word or as one half of a pair;
+ *   - an argument the function also reads on its own, as a word or as one half of a pair — save a
+ *     single the `ret` hands back whole where every `ret` hands back a float (`returnedArgument`);
  *   - a result read as a word or a half (`*(int *)&c` is a double's HIGH word, in r0), passed to
  *     any other call, or carried across an edge;
  *   - a result NOTHING reads. Folded, it would be a dead float op, and `dce` would delete the
@@ -107,6 +108,23 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
       (consumers.has(u) && u.operands.every((o, i) => o !== v || consumers.get(u)!.includes(i))));
   const floatsOnly = (v: Value, calls: ReadonlySet<Op>) => (users.get(v) ?? []).every((u) => floatUse(u, v, calls));
   const entry = fn.blocks[0].params;
+  const rets = fn.blocks.flatMap((b) => b.ops.filter((op) => op.opcode === 'ret' && op.operands.length > 0));
+  // A SINGLE ARGUMENT THE FUNCTION RETURNS is moved whole into r0, so the `ret` takes it as the float
+  // it was handed — but only where every `ret` then hands back a float: an argument some fold reads
+  // as a float, or a float this pass makes. A `return a;` beside `return 5;` is a function whose
+  // other return C would convert to 5.0f, so there the `ret` stays a word read and the helper is
+  // refused. A double's pair is two words the `ret` reads apart, and stays refused.
+  const returnedArgument = (v: Value, calls: ReadonlySet<Op>) =>
+    entry.includes(v) &&
+    (users.get(v) ?? []).some((u) => floatUse(u, v, calls)) &&
+    (users.get(v) ?? []).every((u) => floatUse(u, v, calls) || u?.opcode === 'ret');
+  const returnsFloats = (calls: ReadonlySet<Op>) =>
+    rets.every((r) =>
+      r.operands.every((o) => {
+        const d = def.get(o);
+        return d === undefined ? returnedArgument(o, calls) : (calls.has(d) && sidesOf(d).result) || declaredSingle(d);
+      }),
+    );
   // A `concat` of the same two slots in the same order as `d`: the frontend builds one afresh at each
   // call it hands the pair to, so `g(x); g(x)` reads one parameter through two of them.
   const samePair = (u: Op | null, d: Op): u is Op =>
@@ -117,7 +135,7 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
   const argument = (v: Value, calls: ReadonlySet<Op>): boolean => {
     const d = def.get(v);
     if (d === undefined) {
-      return entry.includes(v) && floatsOnly(v, calls);
+      return entry.includes(v) && (floatsOnly(v, calls) || (returnedArgument(v, calls) && returnsFloats(calls)));
     }
     return (
       isArgumentPair(entry, d, (p) => users.get(p)!.filter((u) => !samePair(u, d)).length + 1) &&
@@ -223,9 +241,10 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
   // helper's result or a declared single's.
   const madeFloat = (v: Value) => {
     const d = def.get(v);
-    return d !== undefined && (returned.has(d) || (calls.has(d) && sidesOf(d).result));
+    return d === undefined
+      ? returnedArgument(v, calls) && argument(v, calls)
+      : returned.has(d) || (calls.has(d) && sidesOf(d).result);
   };
-  const rets = fn.blocks.flatMap((b) => b.ops.filter((op) => op.opcode === 'ret' && op.operands.length > 0));
   if (rets.some((r) => r.operands.some(madeFloat)) && !rets.every((r) => r.operands.every(madeFloat))) {
     throw new RaiseUnsupportedError(
       `cannot lift '${fn.name}': it returns a float on one path, and another return of this function hands ` +
