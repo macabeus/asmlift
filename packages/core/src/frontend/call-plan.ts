@@ -20,6 +20,7 @@ import {
   byValueCallArgs,
   byValueRefusal,
   integerUnionType,
+  nestsFloat,
   ownArgumentWordsOn,
   ownLeadingWordParamsOn,
   returnedAggregate,
@@ -1518,7 +1519,9 @@ export function structLocalType(
 //   - printed beside its callee's prototype, which the declarations block defines it by;
 //   - a floating member is read as its bits, `*(s32 *)&s`, which structure.ts spells only where
 //     every reader stores them into an integer lvalue the lift types (`floatBitsStoreTarget`): a
-//     float reader would convert them (agbcc: `bl __floatsisf`), so that declines there.
+//     float reader would convert them (agbcc: `bl __floatsisf`), so that declines there. A float
+//     inside a nested struct or union has no field to say so (aggregate.ts `nestsFloat`), so it
+//     has no local here.
 // Otherwise the register still holds nothing the caller may read. The ONE derivation of that type:
 // the call plan marks the call by it, and `liftRegisterStructCalls` declares the local by it.
 export function registerStructLocal(
@@ -1529,7 +1532,7 @@ export function registerStructLocal(
     return undefined;
   }
   const type = structLocalType(own, target);
-  if ('refused' in type || ![1, 2, 4].includes(type.size ?? 0)) {
+  if ('refused' in type || ![1, 2, 4].includes(type.size ?? 0) || nestsFloat(returnedAggregate(own))) {
     return undefined;
   }
   return spellableProto(own, target, type) === undefined ? undefined : type;

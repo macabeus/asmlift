@@ -107,6 +107,7 @@ import { type NaturalLoop, analyzeLoops } from '../ir/loops';
 import { CAST_WIDTHS, FLOAT_RESIZE, FLOAT_TO_INT, INT_TO_FLOAT, NEGATED_FCMP, WIDE_BITS, opSig } from '../ir/opcodes';
 import {
   type IrType,
+  type StructField,
   T,
   intFieldAt,
   intWidth,
@@ -783,6 +784,30 @@ function structureLadder(
   }
   refusedHeld.push(...refused!.held);
   throw refused!.error;
+}
+
+/** Whether a floating value lies in bytes [lo, hi) of an object of type `t`, at any depth. A
+ *  struct's field reaches to the next field's offset (the fields are sorted by it), the last one
+ *  past any read; an array's element is asked whole, so a float anywhere in it counts. Both widen
+ *  the bytes a member covers, never narrow them: a byte this cannot place counts as a float's. */
+function floatBytesIn(t: IrType, lo: number, hi: number): boolean {
+  switch (t.kind) {
+    case 'float':
+      return true;
+    case 'array':
+      return floatBytesIn(t.elem, 0, Infinity);
+    case 'union':
+      return t.members.some((m) => floatBytesIn(m.type, lo - m.off, hi - m.off));
+    case 'struct':
+      return t.fields.some((m, i) => fieldFloatBytes(m, t.fields[i + 1], lo, hi));
+    default:
+      return false;
+  }
+}
+
+/** `floatBytesIn` for one struct field, given the field after it (or none). */
+function fieldFloatBytes(m: StructField, next: StructField | undefined, lo: number, hi: number): boolean {
+  return m.off < hi && lo < (next?.off ?? Infinity) && floatBytesIn(m.type, lo - m.off, hi - m.off);
 }
 
 function structureRanked(
@@ -3416,15 +3441,20 @@ function structureRanked(
   // reader is a store into an lvalue whose integer type this lift states (`floatBitsStoreTarget`):
   // a whole-struct copy lowered to words, `((s32 *)&gV3)[1] = ((s32 *)&s)[1];`, passes the bits
   // through. Any other reader (a named global, a declared member, a call, a return, a join)
-  // declines. A store of bits into such a member is the bits, and keeps the cast.
+  // declines. A store of bits into such a member is the bits, and keeps the cast. The float may sit
+  // at any depth of the member the read covers (`floatBytesIn`): `{ float f[1]; }`, `{ struct {
+  // float f; } in; }` and `{ union { float f; u32 w; } u; }` hand back the same word as `{ float f;
+  // }`, and `gF = *(s32 *)&s;` converts it the same way under the project's `float gF`.
   const floatMemberBits = (op: Op): { name: string; width: number } | null => {
     if (op.opcode !== 'load') {
       return null;
     }
     const width = op.attrs.width as number;
+    const off = op.attrs.off as number;
     const t = defs.get(op.operands[0])?.results[0].type;
-    const f = t?.kind === 'ptr' && t.to.kind === 'struct' ? t.to.fields.find((m) => m.off === op.attrs.off) : undefined;
-    return f?.type.kind === 'float' && f.type.width === width * 8 ? { name: f.name, width } : null;
+    const s = t?.kind === 'ptr' && t.to.kind === 'struct' ? t.to : undefined;
+    const f = s?.fields.find((m, i) => fieldFloatBytes(m, s.fields[i + 1], off, off + width));
+    return f === undefined ? null : { name: f.name, width };
   };
   const refuseFloatBits = (m: { name: string; width: number }): never => {
     throw new StructureError(

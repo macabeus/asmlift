@@ -1172,7 +1172,9 @@ declares, of one, two or four bytes, its callee's prototype printable — a unio
 integers of distinct widths too, typed as its members at offset 0 under the headers' `union`
 spelling, since the IR's own `union` kind is nameless and inline; a floating member is read as its
 bits, `*(s32 *)&s`, spelled only where every reader stores them through an integer cell the lift
-types, a bare global's own `*(s32 *)&gF` included, since any float reader would convert them), the call
+types, a bare global's own `*(s32 *)&gF` included, since any float reader would convert them, and a
+float at any depth of the member a read covers counts, `{ float f[1]; }` too; a float inside a
+nested struct or union, which has no field to say so, gives no local, aggregate.ts `nestsFloat`), the call
 writes the return register as its value, marked `REGISTER_STRUCT`, and the frontend reads that
 word as it reads any call's; a guessed arity after the call still does not take it (ssa.ts
 `noteStructImage`), since the bytes do not say whether a callee nothing declares is handed the
