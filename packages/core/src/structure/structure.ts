@@ -108,6 +108,7 @@ import { CAST_WIDTHS, FLOAT_RESIZE, FLOAT_TO_INT, INT_TO_FLOAT, NEGATED_FCMP, WI
 import {
   type IrType,
   T,
+  intFieldAt,
   intWidth,
   scalarTypeForAccess,
   spellsAccessType,
@@ -3371,11 +3372,8 @@ function structureRanked(
     if (d?.opcode !== 'laddr' || d.attrs.aggregate !== true || t?.kind !== 'ptr' || t.to.kind !== 'struct') {
       return null;
     }
-    // the member of the access's own width: a union of integers sets every member at offset 0
-    // (aggregate.ts `integerUnionType`), and a struct has one field at any offset
-    const at = t.to.fields.filter((m) => m.off === off);
-    const f = at.find((m) => m.type.kind === 'int' && m.type.width === width * 8) ?? at[0];
-    if (f === undefined || f.type.kind !== 'int' || f.type.width !== width * 8 || qualifiedBy(op) !== null) {
+    const f = intFieldAt(t.to, off, width);
+    if (f?.type.kind !== 'int' || qualifiedBy(op) !== null) {
       return null;
     }
     return signed === null || spellsAccessType(f.type.signed, width, signed)
