@@ -4750,6 +4750,24 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'extern int gy;\nvoid cb();\nvoid bxr0_call(int a, int b);',
     proto: { bxr0_call: { returnsVoid: true }, cb: { returnsVoid: true } },
   },
+  // A CALLEE BODY HOLDING A CALL THROUGH A THUNK REGISTER STILL BOUNDS (frontend/callee-body.ts,
+  // `ARGS_BOUND_BY_ADDRESS`). agbcc calls through a function pointer with `bl _call_via_rK`, and
+  // with K below r4 the call takes at most r0..r(K-1) and no stack word (compiled: 0..3 arguments
+  // go through r0..r3 at -O1 and -O2), so `h`, which hands `a + 1` to `gfp` through r1, reads r0
+  // alone. Read as a body proving nothing, the caller's guess counts every register a value reaches
+  // and lifts `h(b, b, &gy)`, the `&gy` its store left in r2; bounded by the body, `h(b)` (kl2dct
+  // sub_0804E8CC's callee sub_0804A2B4 is such a body). agbcc only: no other lowering states that the
+  // address register bounds the call.
+  {
+    sym: 'callvia_body',
+    src:
+      'extern void (*gfp)(int);\nextern int gy, gz;\nvoid h(int a)\n{\n    gfp(a + 1);\n    gz = 0;\n}\n' +
+      'void callvia_body(int *p, int b)\n{\n    p[3] = b;\n    gy = 7;\n    h(b);\n}',
+    features: ['call', 'fnptr'],
+    toolchains: ['agbcc'],
+    ctx: 'extern void (*gfp)(int);\nextern int gy, gz;\nvoid h();\nvoid callvia_body(int *p, int b);',
+    proto: { callvia_body: { returnsVoid: true }, h: { returnsVoid: true } },
+  },
   // `spillarg` is `spill10` with a genuine outgoing argument under the spills: `five(i, 1, 2, 3,
   // v0)` stages argument 5 at [sp,#0] before every call and agbcc moves the spills above it, to
   // [sp,#4]..[sp,#0x20]. Several reach `bl five` unread, so the declaration (`five` takes one stack

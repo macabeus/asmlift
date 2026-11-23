@@ -45,7 +45,10 @@
 //     which registers it names, and which of them it reads is a guess (PowerPC `mtmsr r3` and MIPS
 //     `mtc0 a0, c0_sr` each read the argument the decode takes for written), so a lift holding one
 //     proves no more than one that fails;
-//   - the callee makes a call through a register, whose arity nothing here can force;
+//   - the callee makes a call through a register, whose arity nothing here can force, unless the
+//     register itself bounds it (`ARGS_BOUND_BY_ADDRESS`, ir/core.ts): agbcc's `bl _call_via_r1`
+//     takes at most r0 and no stack word, and the lowering already reads every register below the
+//     address, which is what forcing a named call does;
 //   - the callee's entry declares a struct or union return: one handed back through memory takes a
 //     hidden pointer the lift reads as no entry parameter, so its count is one argument word short
 //     (`struct Big mk(x)` reads r0 and r1 and lifts one parameter);
@@ -71,7 +74,7 @@
 // KNOWN GAP: an objdump listing (MIPS, PowerPC) shows no symbol binding, so a weak definition there
 // is read as the one the link keeps. A weak copy of one inline definition is that definition; a weak
 // default some other object overrides is not, and no row here has one.
-import { type Block, type Fn, successorsOf } from '../ir/core';
+import { ARGS_BOUND_BY_ADDRESS, type Block, type Fn, successorsOf } from '../ir/core';
 import {
   type FnProto,
   type Prototypes,
@@ -290,6 +293,9 @@ function liftedReads(
         }
         const at = op.attrs.target;
         if (typeof at !== 'string') {
+          if (op.attrs[ARGS_BOUND_BY_ADDRESS] === true) {
+            continue;
+          }
           return undefined;
         }
         if (!forced.has(at) && declaredCallArgs(calleeDeclaration(at, table, helpers), target) === undefined) {

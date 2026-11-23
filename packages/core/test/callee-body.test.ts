@@ -131,7 +131,36 @@ describe('the argument words a callee in the same input reads at most', () => {
   test('agbcc: none, the first, every register through a forwarding thunk, and no proof otherwise', () => {
     expect(
       read(boundsOf(thumb, TOOLCHAIN_TARGETS.agbcc.description), ['rnd', 'rd1', 'thk', 'ind', 'wk', 'st']),
-    ).toEqual({ rnd: 0, rd1: 1, thk: 4, ind: 'none', wk: 'none', st: 'none' });
+    ).toEqual({ rnd: 0, rd1: 1, thk: 4, ind: 2, wk: 'none', st: 'none' });
+  });
+  // agbcc's `bl _call_via_rK` with K below r4 passes at most r0..r(K-1) and no stack word (its
+  // `*call_indirect` takes the address in a register no argument is live in, and it fills r0 up), so
+  // the call reads every argument it can take and the body around it still bounds; through r4 or
+  // past it, the call may take every argument register and stack words, and nothing bounds it
+  test.each([
+    // reads r0 as the call's argument and r1 as its address
+    ['in2', '\tpush\t{lr}\n\tbl\t_call_via_r1\n\tpop\t{r0}\n\tbx\tr0\n', 2],
+    // the address loaded, r0 set: the call reads r0 and r1 of its own, and the body none
+    [
+      'own',
+      '\tpush\t{lr}\n\tldr\tr1, .Lp\n\tmov\tr0, #0x1f\n\tbl\t_call_via_r1\n\tpop\t{r0}\n\tbx\tr0\n.Lp:\n\t.word\tgP\n',
+      0,
+    ],
+    // r2 passed on, r0 and r1 its own: the third argument word is the body's
+    [
+      'r2',
+      '\tpush\t{lr}\n\tldr\tr3, .Lp\n\tmov\tr0, #0\n\tmov\tr1, #0\n\tbl\t_call_via_r3\n\tpop\t{r0}\n\tbx\tr0\n.Lp:\n\t.word\tgP\n',
+      3,
+    ],
+    [
+      'r4',
+      '\tpush\t{r4, lr}\n\tldr\tr4, .Lp\n\tmov\tr0, #0\n\tbl\t_call_via_r4\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.Lp:\n\t.word\tgP\n',
+      undefined,
+    ],
+  ])('agbcc: a body holding a call through a thunk register (%s)', (n, body, bound) => {
+    expect(
+      boundsOf(`\t.code\t16\n\t.text\n\t.thumb_func\n${n}:\n${body}`, TOOLCHAIN_TARGETS.agbcc.description)(n),
+    ).toBe(bound);
   });
   // A call the first one destroyed every argument register before holds none of the callee's
   // arguments: taken at all four, h would read registers g destroyed, and the lift of `two` refuse

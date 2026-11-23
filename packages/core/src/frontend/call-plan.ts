@@ -27,7 +27,17 @@ import {
   returnsInMemory,
   returnsWithoutHiddenPointer,
 } from '../aggregate';
-import { type Block, FLOATS_ATTR, type Op, REGISTER_STRUCT, type Value, calleeName, mkOp, mkValue } from '../ir/core';
+import {
+  ARGS_BOUND_BY_ADDRESS,
+  type Block,
+  FLOATS_ATTR,
+  type Op,
+  REGISTER_STRUCT,
+  type Value,
+  calleeName,
+  mkOp,
+  mkValue,
+} from '../ir/core';
 import { qualified } from '../ir/discipline';
 import { OPCODES, type OpSig } from '../ir/opcodes';
 import { type IrType, T, structSpelling, typeToString } from '../ir/types';
@@ -1339,6 +1349,7 @@ export function callDeclarations(
       results: [res],
       attrs: {
         ...(callee !== undefined ? { target: callee } : { indirect: true }),
+        ...(bound >= 0 ? { [ARGS_BOUND_BY_ADDRESS]: true } : {}),
         ...(sret === undefined ? {} : { sret: true }),
         ...(returns.kind === 'register-struct' && returns.image ? { [REGISTER_STRUCT]: true } : {}),
         ...(floats === undefined ? {} : { [FLOATS_ATTR]: floats }),
