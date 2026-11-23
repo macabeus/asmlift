@@ -194,9 +194,17 @@ export function helperPrototypes(
  *  emits for every compare, every conversion between `int`, `unsigned`, `long long` and either
  *  precision, and every widening and narrowing between the two precisions (compiled evidence: one
  *  function per operation at the canonical flags). There is no conversion of an unsigned integer
- *  INTO a float: agbcc open-codes `(float)u` around `__floatsisf` and `__addsf3`. `__cmpdi2`, which
+ *  INTO a float: agbcc open-codes `(float)u` around `__floatsisf` and `__addsf3`, which
+ *  raise/unsigned-float.ts rewrites to a call of `UNSIGNED_TO_SINGLE` for the fold. `__cmpdi2`, which
  *  it also calls converting an `unsigned long long`, is an integer compare and outside this
  *  family. */
+/** THE UNSIGNED CONVERSION A RUNTIME OPEN-CODES, as an entry no call in the asm names: GCC converts an
+ *  unsigned word to a single around the signed conversion and the single's sum (gcc/optabs.c:3591-3622)
+ *  where its runtime has no unsigned one, and raise/unsigned-float.ts rewrites that exact diamond to
+ *  a call of the entry with this op. The name spells the C conversion, and no assembler symbol is
+ *  spelled with parentheses, so a call the frontend reads off the asm never reaches it. */
+export const UNSIGNED_TO_SINGLE = '(float)(u32)';
+
 export const AGBCC_RUNTIME_HELPERS: Readonly<Record<string, RuntimeHelper>> = {
   // 32-bit software division — the ops `raise/softdiv.ts` rewrites, gated on the target having no
   // hardware divider, which is what those four are about.
@@ -249,6 +257,7 @@ export const AGBCC_RUNTIME_HELPERS: Readonly<Record<string, RuntimeHelper>> = {
   __fixsfsi: { op: 'fptosi', params: [32], returns: 32 },
   __fixunssfsi: { op: 'fptoui', params: [32], returns: 32 },
   __floatsisf: { op: 'sitofp', params: [32], returns: 32 },
+  [UNSIGNED_TO_SINGLE]: { op: 'uitofp', params: [32], returns: 32 },
   __fixdfsi: { op: 'fptosi', params: [64], returns: 32 },
   __fixunsdfsi: { op: 'fptoui', params: [64], returns: 32 },
   __floatsidf: { op: 'sitofp', params: [32], returns: 64 },

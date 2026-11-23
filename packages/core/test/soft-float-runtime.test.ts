@@ -8,6 +8,7 @@ import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
 import type { Prototypes } from '../src/proto';
+import { UNSIGNED_TO_SINGLE } from '../src/runtime-helpers';
 import { ARMV4T_AGBCC, targetFor } from '../src/target';
 
 const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-soft-float-rt.s'), 'utf8');
@@ -48,9 +49,10 @@ describe('an unsigned word converted to a single', () => {
   });
 
   // A float stored is a word read; and beside a return of an argument nothing reads as a float, the
-  // function's other return is a word.
+  // function's other return is a word. The diamond is still the conversion, so the fold refuses it
+  // as the one call of its table entry (`UNSIGNED_TO_SINGLE`), and the gap names that.
   test.each(['u2fst', 'u2fmix'])('%s: the converted value read as a word refuses', (name) => {
-    expect(() => lift(name)).toThrow("no model for the runtime helper '__floatsisf'");
+    expect(() => lift(name)).toThrow(`no model for the runtime helper '${UNSIGNED_TO_SINGLE}'`);
   });
 });
 

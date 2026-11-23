@@ -12,7 +12,7 @@ import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
 import type { Prototypes } from '../src/proto';
-import { AGBCC_RUNTIME_HELPERS, isFloatHelper } from '../src/runtime-helpers';
+import { AGBCC_RUNTIME_HELPERS, UNSIGNED_TO_SINGLE, isFloatHelper } from '../src/runtime-helpers';
 import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS, targetFor } from '../src/target';
 import { decompileTraced } from '../src/trace';
 
@@ -236,6 +236,7 @@ describe('what the table names', () => {
       '__fixsfsi',
       '__fixunssfsi',
       '__floatsisf',
+      UNSIGNED_TO_SINGLE,
       '__fixdfsi',
       '__fixunsdfsi',
       '__floatsidf',

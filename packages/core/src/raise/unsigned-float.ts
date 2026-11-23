@@ -26,63 +26,67 @@
 // predecessors and one parameter. A diamond with another constant, another shift, or a value read
 // inside an arm by anything else means something else, and stays for the helpers' own refusal.
 //
-// WHAT READS THE JOIN IS THE SOFT-FLOAT BOUNDARY'S QUESTION, not this file's: the converted value is
-// a float, which may go only where a helper's float result may (a helper the fold keeps, or a return
-// that hands back only floats), and whether a helper is kept depends on every other float around it.
-// So raise/floathelpers.ts asks for the diamonds, treats each join as a float source in its closed
-// set, and folds the ones it keeps with `foldUnsignedFloat`; a diamond it does not keep stays as the
-// helper calls the bytes make, and the helpers' refusal gaps them.
-import { Block, Fn, Op, Value, defOpMap, mkOp, predecessors } from '../ir/core';
-import { lookupHelper } from '../runtime-helpers';
+// WHAT READS THE CONVERTED VALUE IS THE SOFT-FLOAT BOUNDARY'S QUESTION, not this file's. So the
+// diamond is rewritten to one call of the conversion its runtime table names with the op `uitofp`
+// (agbcc's `UNSIGNED_TO_SINGLE`, runtime-helpers.ts) — the call shape every other helper has — and
+// raise/floathelpers.ts keeps it or refuses it by the rule it holds every helper to. A refused one
+// is gapped under that entry's name, which no symbol in the asm spells. The rewrite is the
+// identity, so it runs ahead of the fold and needs no reader of its own.
+import { Block, Fn, Op, Value, defOpMap, mkOp, mkValue, predecessors, replaceAllUsesWith } from '../ir/core';
+import type { Opcode } from '../ir/opcodes';
+import type { RuntimeHelper } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 
 /** One open-coded `(float)x` of an unsigned word: the block that tests `x`, the join whose one
- *  parameter is the converted value, the two arms between them, and the guard's compare. */
-export interface UnsignedFloatDiamond {
+ *  parameter is the converted value, the two arms between them, the guard's compare, and the
+ *  signed conversion the fitting arm calls (whose attrs the rewritten call keeps). */
+interface UnsignedFloatDiamond {
   head: Block;
   x: Value;
   join: Block;
   arms: readonly Block[];
   guard: Op;
+  conv: Op;
 }
 
-/** Every unsigned-to-single diamond in `fn`, keyed by the join's parameter; none where the target's
- *  runtime is not the one the shape is written against (a signed word to a single, and a single's
- *  sum). */
-export function unsignedFloatDiamonds(fn: Fn, target: TargetDescription): Map<Value, UnsignedFloatDiamond> {
+/** The name of the table's entry with this op and signature, or undefined. */
+function entryFor(
+  table: Readonly<Record<string, RuntimeHelper>>,
+  op: Opcode,
+  params: string,
+  returns: number,
+): string | undefined {
+  return Object.entries(table).find(([, h]) => h.op === op && h.params.join() === params && h.returns === returns)?.[0];
+}
+
+/** Rewrite every unsigned-to-single diamond in `fn` to `u = call <uitofp entry>(x)` at the end of its
+ *  head, which the join then continues (its parameter's uses now read `u`); the arms and the guard
+ *  go. ONE BLOCK, because the call is where the asm ran the conversion and its readers follow it
+ *  there: the fold stamps it a helper's (`helperOp`), which the structurer names at its def where it
+ *  renders in another block. Nothing where the target's runtime table states no such conversion, or
+ *  not the signed conversion and the single's sum the shape is written against. Returns whether
+ *  anything changed. */
+export function rewriteUnsignedFloatDiamonds(fn: Fn, target: TargetDescription): boolean {
   const table = target.runtimeHelpers ?? {};
-  const toFloat = lookupHelper(table, '__floatsisf');
-  const add = lookupHelper(table, '__addsf3');
-  const found = new Map<Value, UnsignedFloatDiamond>();
-  if (
-    toFloat?.op !== 'sitofp' ||
-    toFloat.params.join() !== '32' ||
-    toFloat.returns !== 32 ||
-    add?.op !== 'fadd' ||
-    add.params.join() !== '32,32' ||
-    add.returns !== 32
-  ) {
-    return found;
+  const unsigned = entryFor(table, 'uitofp', '32', 32);
+  const toFloat = entryFor(table, 'sitofp', '32', 32);
+  const add = entryFor(table, 'fadd', '32,32', 32);
+  if (unsigned === undefined || toFloat === undefined || add === undefined) {
+    return false;
   }
-  for (const d of findDiamonds(fn)) {
-    found.set(d.join.params[0], d);
+  const found = findDiamonds(fn, toFloat, add);
+  for (const { head, x, join, arms, guard, conv } of found) {
+    const was = join.params[0];
+    const u = mkValue(was.type);
+    const call = mkOp('call', { operands: [x], results: [u], attrs: { ...conv.attrs, target: unsigned } });
+    head.ops = [...head.ops.slice(0, -1).filter((op) => op !== guard), call, ...join.ops];
+    fn.blocks = fn.blocks.filter((b) => !arms.includes(b) && b !== join);
+    replaceAllUsesWith(fn, was, u);
   }
-  return found;
+  return found.length > 0;
 }
 
-/** Rewrite a diamond to `u = uitofp x` in its head and a jump to the join, which loses its parameter
- *  (the caller replaces its uses with `u`); the arms and the guard go. */
-export function foldUnsignedFloat(fn: Fn, d: UnsignedFloatDiamond, u: Value): void {
-  const { head, x, join, arms, guard } = d;
-  head.ops = head.ops.filter((op) => op !== guard);
-  head.ops.splice(head.ops.length - 1, 1, mkOp('uitofp', { operands: [x], results: [u] }), br(join));
-  join.params = [];
-  fn.blocks = fn.blocks.filter((b) => !arms.includes(b));
-}
-
-const br = (to: Block): Op => mkOp('br', { successors: [{ block: to, args: [] }] });
-
-function findDiamonds(fn: Fn): UnsignedFloatDiamond[] {
+function findDiamonds(fn: Fn, toFloat: string, add: string): UnsignedFloatDiamond[] {
   const defs = defOpMap(fn);
   const preds = predecessors(fn);
   // every reader of a value: the op, or the block whose edge argument it is
@@ -138,16 +142,17 @@ function findDiamonds(fn: Fn): UnsignedFloatDiamond[] {
       negOut === null ||
       posOut === null ||
       join !== posOut.block ||
+      join === fn.blocks[0] ||
       join.params.length !== 1 ||
       (preds.get(join) ?? []).length !== 2
     ) {
       continue;
     }
-    // the arm that fits a signed word: `__floatsisf(x)`, its result only the jump's argument
+    // the arm that fits a signed word: the signed conversion of `x`, its result only the jump's argument
     const conv = posBlock.ops[0];
     if (
       posBlock.ops.length !== 2 ||
-      !isCall(conv, '__floatsisf') ||
+      !isCall(conv, toFloat) ||
       conv.operands.length !== 1 ||
       conv.operands[0] !== x ||
       posOut.args[0] !== conv.results[0] ||
@@ -155,17 +160,29 @@ function findDiamonds(fn: Fn): UnsignedFloatDiamond[] {
     ) {
       continue;
     }
-    if (!halvingArm(negBlock, negOut, x, defs, onlyBy, constOf, isCall)) {
+    if (
+      !halvingArm(
+        negBlock,
+        negOut,
+        x,
+        defs,
+        onlyBy,
+        constOf,
+        (op) => isCall(op, toFloat),
+        (op) => isCall(op, add),
+      )
+    ) {
       continue;
     }
-    found.push({ head, x, join, arms: [negBlock, posBlock], guard: cond });
+    found.push({ head, x, join, arms: [negBlock, posBlock], guard: cond, conv });
   }
   return found;
 }
 
 type Successor = Op['successors'][number];
 
-/** The arm `(x & 1) | (x >> 1)` → `__floatsisf` → `f + f`, each value read only by the next. */
+/** The arm `(x & 1) | (x >> 1)` → the signed conversion → the sum `f + f`, each value read only by
+ *  the next. */
 function halvingArm(
   b: Block,
   out: Successor,
@@ -173,15 +190,16 @@ function halvingArm(
   defs: Map<Value, Op>,
   onlyBy: (v: Value, by: Op | Block) => boolean,
   constOf: (v: Value) => number | undefined,
-  isCall: (op: Op | undefined, name: string) => boolean,
+  isConv: (op: Op | undefined) => boolean,
+  isSum: (op: Op | undefined) => boolean,
 ): boolean {
   const sum = defs.get(out.args[0]);
-  if (!isCall(sum, '__addsf3') || sum!.operands.length !== 2 || !onlyBy(sum!.results[0], b)) {
+  if (!isSum(sum) || sum!.operands.length !== 2 || !onlyBy(sum!.results[0], b)) {
     return false;
   }
   const [f, g] = sum!.operands;
   const conv = defs.get(f);
-  if (f !== g || !isCall(conv, '__floatsisf') || conv!.operands.length !== 1 || !onlyBy(f, sum!)) {
+  if (f !== g || !isConv(conv) || conv!.operands.length !== 1 || !onlyBy(f, sum!)) {
     return false;
   }
   const or = defs.get(conv!.operands[0]);

@@ -361,8 +361,9 @@ off libgcc's contract — its sign orders the operands and its value on a NaN is
 the negated test is the unordered compare (`fcmp`, `fcmple`, `fcmpngt`, `fcmpbrn`). Unnamed, each was
 a guess, `(int)x` published as `__fixsfsi()`. agbcc has no unsigned-to-float helper: `(float)u` is
 open-coded around `__floatsisf` (`gcc/optabs.c:3591-3622`, the negative half halved with its low bit
-kept and doubled through `__addsf3`), and `raise/unsigned-float.ts` reads that exact diamond as one
-`uitofp`, `(float)(u32)x` (`u2f`). Still declined on agbcc: `(double)u` (`optabs.c:3633-3655`, a
+kept and doubled through `__addsf3`), and `raise/unsigned-float.ts` rewrites that exact diamond to one
+call of the table's `uitofp` entry (`UNSIGNED_TO_SINGLE`, a name no symbol spells), which the fold keeps
+as `(float)(u32)x` (`u2f`) or refuses, and gaps, as it does any helper. Still declined on agbcc: `(double)u` (`optabs.c:3633-3655`, a
 conditional `__adddf3` of 2^32 that joins a 64-bit pair across the diamond, which the Thumb frontend
 refuses), a single-precision literal word, a float loaded from or stored to memory, a float
 result handed to an undeclared callee, and a float carried to the return across an edge — the

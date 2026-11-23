@@ -20,7 +20,7 @@ import { arrivesAsDeclared, floatSidesOf, helperOp, isFloatHelper, lookupHelper 
 import type { TargetDescription } from '../target';
 import { RaiseUnsupportedError } from './errors';
 import { isArgumentPair } from './pairparams';
-import { foldUnsignedFloat, unsignedFloatDiamonds } from './unsigned-float';
+import { rewriteUnsignedFloatDiamonds } from './unsigned-float';
 
 /** Rewrite the float-arithmetic helper calls to the float ops, in place, each value at the width its
  *  helper's signature states, and hand a parameter the callee declares `double` or `float` (the
@@ -64,6 +64,8 @@ import { foldUnsignedFloat, unsignedFloatDiamonds } from './unsigned-float';
  *  and a float the function also reads as a word is no float source for it either. */
 export function recognizeFloatHelpers(fn: Fn, target: TargetDescription, self?: FnProto): boolean {
   const table = target.runtimeHelpers ?? {};
+  // agbcc's open-coded `(float)u`, rewritten to the one call of its table entry it is (raise/unsigned-float.ts)
+  const rewrote = rewriteUnsignedFloatDiamonds(fn, target);
   let sites: Op[] = [];
   const consumers = new Map<Op, ReadonlyMap<number, number>>();
   const def = new Map<Value, Op>();
@@ -97,7 +99,7 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription, self?: 
     }
   }
   if (!sites.length && !consumers.size && !returners.size) {
-    return false;
+    return rewrote;
   }
   // A projection nothing reads is not a read of a half: `dce` runs ahead of this pass only after a
   // fold that changed the IR, so the frontend's split of the result back into its registers may stand.
@@ -124,16 +126,6 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription, self?: 
   // a `ret` hands back a float only where the function may be declared to return one
   const floatRet = (u: Op | null) => u?.opcode === 'ret' && !returnsDeclaredWord;
   const rets = fn.blocks.flatMap((b) => b.ops.filter((op) => op.opcode === 'ret' && op.operands.length > 0));
-  // AN UNSIGNED WORD CONVERTED, as agbcc open-codes `(float)u` (raise/unsigned-float.ts): the join of
-  // its diamond holds a float source as a helper's result is, kept where its readers all take a
-  // float — a helper the fold keeps, or a return of a function returning only floats — and folded
-  // to one `uitofp`. The diamond's own helper calls read across its edges, so this pass refuses
-  // them; a diamond kept goes, a diamond not kept stays for the helpers' refusal.
-  const diamonds = unsignedFloatDiamonds(fn, target);
-  const converted = (v: Value, calls: ReadonlySet<Op>) =>
-    diamonds.has(v) &&
-    (users.get(v) ?? []).length > 0 &&
-    (users.get(v) ?? []).every((u) => floatUse(u, v, calls) || floatRet(u));
   // A SINGLE ARGUMENT THE FUNCTION RETURNS is moved whole into r0, so the `ret` takes it as the float
   // it was handed — but only where every `ret` then hands back a float: an argument some fold reads
   // as a float, or a float this pass makes. A `return a;` beside `return 5;` is a function whose
@@ -149,9 +141,7 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription, self?: 
     rets.every((r) =>
       r.operands.every((o) => {
         const d = def.get(o);
-        return d === undefined
-          ? returnedArgument(o, calls) || converted(o, calls)
-          : (calls.has(d) && sidesOf(d).result) || declaredSingle(d);
+        return d === undefined ? returnedArgument(o, calls) : (calls.has(d) && sidesOf(d).result) || declaredSingle(d);
       }),
     );
   // A `concat` of the same two slots in the same order as `d`: the frontend builds one afresh at each
@@ -183,9 +173,7 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription, self?: 
   const declaredSingle = (d: Op) => returners.get(d) === 'float' && intWidth(d.results[0].type) === 32;
   const fromCall = (v: Value, calls: ReadonlySet<Op>) => {
     const d = def.get(v);
-    return d === undefined
-      ? converted(v, calls) && (!(users.get(v) ?? []).some((u) => u?.opcode === 'ret') || returnsFloats(calls))
-      : (calls.has(d) && sidesOf(d).result) || declaredSingle(d);
+    return d !== undefined && ((calls.has(d) && sidesOf(d).result) || declaredSingle(d));
   };
   // A CONSTANT WORD, as a compiler may build one in two instructions: agbcc moves a word that is a
   // shifted byte as `mov`+`lsl` (thumb.md:66, `thumb_shiftable_const` at thumb.c:61) and one in
@@ -279,7 +267,7 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription, self?: 
   const madeFloat = (v: Value) => {
     const d = def.get(v);
     return d === undefined
-      ? (returnedArgument(v, calls) && argument(v, calls)) || fromCall(v, calls)
+      ? returnedArgument(v, calls) && argument(v, calls)
       : returned.has(d) || (calls.has(d) && sidesOf(d).result);
   };
   if (rets.some((r) => r.operands.some(madeFloat)) && !rets.every((r) => r.operands.every(madeFloat))) {
@@ -309,17 +297,11 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription, self?: 
       }
     }
   }
-  const keptDiamonds = [...diamonds].filter(([v]) => fromCall(v, calls));
-  if (!sites.length && !consumers.size && !returned.size && !keptDiamonds.length) {
-    return false;
+  if (!sites.length && !consumers.size && !returned.size) {
+    return rewrote;
   }
   const floatOf = new Map<Value, Value>();
   const float = (bits: number) => mkValue(bits > 32 ? T.f64() : T.f32());
-  for (const [v, d] of keptDiamonds) {
-    const u = float(32);
-    foldUnsignedFloat(fn, d, u);
-    floatOf.set(v, u);
-  }
   // the `fconst` each literal's `concat` becomes, and the ops computing the constant words only it read
   const literals = new Map<Op, Op>();
   const spent = new Set<Op>();
