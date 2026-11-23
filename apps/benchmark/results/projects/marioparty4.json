@@ -1335,7 +1335,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.18,
+        "rankSeconds": 0.32,
         "symbolsUsed": [
           {
             "name": "boardRandSeed"
@@ -2550,7 +2550,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 0.76,
+        "rankSeconds": 0.72,
         "symbolsUsed": [
           {
             "name": "BoardRandMod",
@@ -2993,7 +2993,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 1.03,
+        "rankSeconds": 0.74,
         "symbolsUsed": [
           {
             "name": "charSelProhibitF"
@@ -3366,7 +3366,7 @@
         },
         "fanNotCompiled": 3,
         "fanNotCompiledDigest": "3e3e2b20d97e7532",
-        "rankSeconds": 14.34,
+        "rankSeconds": 14.82,
         "source": "void ExecState(s32 *object) {\n    s32 *v0;\n    s32 v1;\n    v0 = (s32 *)object[23];\n    switch (object[4]) {\n        case 0:\n            object[4] = 1;\n        case 1:\n            WipeCreate(1, -1, 60);\n            object[4] = 2;\n            return;\n        case 2:\n            if ((WipeStatGet() & 0xff) != 0) break;\n            if (((s32 *)v0[0])[8] != 0) break;\n            OptionRoomExecModeSet(optionRoom, 1);\n            object[4] = 3;\n        case 3:\n            if (OptionRoomExecModeGet(optionRoom)) break;\n            object[4] = 4;\n        case 4:\n            OptionWinAnimIn((void *)v0[0]);\n            OptionWinMesSet((void *)v0[0], 3080359);\n            object[4] = 5;\n        case 5:\n            if (((s32 *)v0[0])[8] != 0) break;\n            OptionWinChoiceSet((void *)v0[0], 1);\n            object[4] = 6;\n        case 6:\n            if (((s32 *)v0[0])[8] == 0) {\n                OptionWinAnimOut((void *)v0[0]);\n                if (((s32 *)v0[0])[7] == 0) {\n                    v0[1] = 0;\n                    object[4] = 7;\n                    return;\n                } else {\n                    object[4] = 2;\n                    return;\n                }\n            }\n            break;\n        case 7:\n            object[4] = 8;\n            v0[1] = 0;\n        case 8:\n            if (((s32 *)v0[0])[8] == 0) {\n                v1 = v0[1];\n                v0[1] = v1 + 1;\n                if (v1 >= 60) {\n                    omSysExitReq = 1;\n                    return;\n                }\n            }\n            break;\n    }\n}\n",
         "score": null,
         "maxScore": null,
@@ -4604,7 +4604,7 @@
             "dropped": 1
           }
         },
-        "rankSeconds": 0.26,
+        "rankSeconds": 0.28,
         "source": "void fn_1_12D74(void) {\n    s32 i;\n    s32 v0;\n    s32 j;\n    v0 = lbl_1_bss_160;\n    i = 0;\n    while (i < 2) {\n        for (j = 0; j < 6; j = j + 1) {\n            espKill(*(s32 *)(v0 + ((j << 2) + 16)));\n        }\n        i = i + 1;\n        v0 = v0 + 192;\n    }\n}\n",
         "score": null,
         "maxScore": null,
@@ -6372,7 +6372,7 @@
             "candidates": 4
           }
         },
-        "rankSeconds": 0.63,
+        "rankSeconds": 0.5,
         "symbolsUsed": [],
         "outcome": "nonmatch",
         "source": "void fn_1_1F84(u8 *a0, s32 a1, s32 a2) {\n    s32 i;\n    u8 *v0;\n    if (a2 > 0) {\n        i = a2;\n        v0 = a0;\n        while (i != 0) {\n            *v0 = a1 & 0xff;\n            i = i + -1;\n            v0 = v0 + 1;\n        }\n    }\n    return;\n}\n",
@@ -6895,7 +6895,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.35,
+        "rankSeconds": 0.57,
         "symbolsUsed": [],
         "outcome": "nonmatch",
         "source": "s32 fn_1_233C(s16 *arg0) {\n    s32 i;\n    i = 0;\n    while (i < *arg0) {\n        if (*(s32 *)(s16 *)((u8 *)arg0 + ((i << 2) + 80)) != 0 && ((u32)*(u8 *)(*(s32 *)(s16 *)((u8 *)arg0 + ((i << 2) + 80)) + 76) >> 5 & 1 & 0xff) != 0) {\n            return 0;\n        } else {\n            i = i + 1;\n        }\n    }\n    return 1;\n}\n",
@@ -7889,7 +7889,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 0.93,
+        "rankSeconds": 0.85,
         "symbolsUsed": [
           {
             "name": "lbl_1_bss_28"
@@ -22184,7 +22184,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.13,
+        "rankSeconds": 0.24,
         "symbolsUsed": [],
         "outcome": "match",
         "source": "void fn_1_F4D4(s32 *a0, u16 a1, u16 a2) {\n    *a0 = *a0 & ~a1;\n    *a0 = *a0 | a2;\n}\n",
@@ -23586,7 +23586,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.36,
+        "rankSeconds": 0.19,
         "symbolsUsed": [],
         "outcome": "nonmatch",
         "source": "void fn_2_E66C(s32 *a0, s32 *a1) {\n    s32 *v0;\n    s32 v1;\n    v0 = (s32 *)a0[23];\n    v1 = a1[1];\n    v0[1] = a1[0];\n    v0[2] = v1;\n    v0[3] = a1[2];\n}\n",
@@ -25453,7 +25453,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 0.32,
+        "rankSeconds": 0.36,
         "symbolsUsed": [
           {
             "name": "hostPos"
@@ -26404,7 +26404,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.06,
+        "rankSeconds": 0.08,
         "symbolsUsed": [
           {
             "name": "minimumVcount"
@@ -30236,7 +30236,7 @@
             "candidates": 1
           }
         },
-        "rankSeconds": 0.25,
+        "rankSeconds": 0.3,
         "symbolsUsed": [],
         "outcome": "nonmatch",
         "source": "void OptionSelHide(s32 *object) {\n    static const u32 sprHideTbl[7] = { 0xc, 0, 1, 2, 3, 4, 5 };\n    s32 v0;\n    s32 i;\n    v0 = object[23];\n    for (i = 0; i < 7; i = i + 1) {\n        espDispOff(*(s16 *)(v0 + ((sprHideTbl[i] << 1) + 160)));\n    }\n}\n",
@@ -30634,7 +30634,7 @@
         },
         "fanNotCompiled": 1,
         "fanNotCompiledDigest": "8f7eb492adcb7cf8",
-        "rankSeconds": 1.43,
+        "rankSeconds": 1.61,
         "source": "void SceneMain(s32 *arg0) {\n    switch (arg0[4]) {\n        case 0:\n            arg0[4] = 1;\n        case 1:\n            if (omSysExitReq == 0) return;\n            arg0[4] = 2;\n        case 2:\n            WipeCreate(2, 0, 60);\n            HuAudFadeOut(1000);\n            arg0[4] = 3;\n            break;\n        case 3:\n            break;\n        default:\n            return;\n    }\n    if ((WipeStatGet() & 0xff) == 0) {\n        OptionStateKill(optionState);\n        if (rumbleF != (s8)((u8 *)&GWGameStat)[4]) {\n            omSysExitReq = 0;\n            KillScene();\n        }\n        omOvlReturnEx(1, 1);\n    }\n}\n",
         "score": null,
         "maxScore": null,
@@ -31156,7 +31156,7 @@
             "candidates": 2
           }
         },
-        "rankSeconds": 0.71,
+        "rankSeconds": 0.37,
         "symbolsUsed": [
           {
             "name": "CARDGetSerialNo",
