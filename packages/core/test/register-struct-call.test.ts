@@ -325,9 +325,11 @@ describe("mwcc: the struct's frame home is the local the call assigns", () => {
 describe('a struct with a floating member is read as its bits, only where they are stored as bits', () => {
   const fl = mk([{ name: 'a', type: 'float' }]);
   test('agbcc: `struct T { float a; }` in r0 stored to a global nothing declares copies the word', () => {
-    // `struct T s = mk(x); gV = s.a;`: the lift declares `gV` itself, as the word its access is
+    // `struct T s = mk(x); gV = s.a;`: nothing says what `gV` is, and the project's header may say
+    // `float gV`, where the bare `gV = *(s32 *)&mk_ret;` would convert the bits; its own cast cell
+    // copies them under any declaration of the word
     expect(decompile('c_f', agbcc('c_f', 'str'), ARMV4T_AGBCC, { prototypes: { mk: fl } }).source).toMatch(
-      /struct T mk_ret;\s+mk_ret = mk\(a0\);\s+gV = \*\(s32 \*\)&mk_ret;/,
+      /struct T mk_ret;\s+mk_ret = mk\(a0\);\s+\*\(s32 \*\)&gV = \*\(s32 \*\)&mk_ret;/,
     );
   });
 

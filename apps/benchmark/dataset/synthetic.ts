@@ -11628,12 +11628,12 @@ export const SYNTHETIC: SynthSpec[] = [
   //      sret2fwd the {u16} forwarded the same way, and sret2mod a {u16} modified before it is
   //      returned: on agbcc, which keeps the pad's bits, the call's local with its member written,
   //      `sm_ret.h = …; return sm_ret;` (frontend/own-struct-return.ts `liftModifiedCallImage`);
-  //      on mwcc, whose r3 below the {u16} is no object, it still declines; sretfl a {float}, whose member is read as its bits, `gF =
-  //      *(s32 *)&s;`, only because nothing declares gF and the lift's own declaration types it as
-  //      that word (structure.ts `floatBitsStoreTarget`), on agbcc's r0 and gcc's memory return
-  //      alike, and declining on mwcc's lfs and ido's lwc1; sretfld the same against a context that
-  //      declares the global `float`, stored through an integer cell, `*(s32 *)&gFd = …`, since the
-  //      bare name would convert the bits. A callee declared
+  //      on mwcc, whose r3 below the {u16} is no object, it still declines; sretfl a {float}, whose member is read as its bits and stored
+  //      through the global's own integer cell, `*(s32 *)&gF = *(s32 *)&s;`, which copies them
+  //      whatever the project declares gF as (structure.ts `floatBitsStoreTarget`), on agbcc's r0
+  //      and gcc's memory return alike, and declining on mwcc's lfs and ido's lwc1; sretfld the same
+  //      against a context that declares the global `float`, where the bare name would convert the
+  //      bits. A callee declared
   //      without its struct return stays a scalar call, as the same bytes from a scalar callee do;
   //      that control is a core test
   //      (packages/core/test/register-struct-call.test.ts), since as a row it would be sret1w
