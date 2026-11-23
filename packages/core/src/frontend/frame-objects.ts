@@ -1134,8 +1134,9 @@ interface AddressFlow {
   /** why one value may hold the address of two objects: a pointer into the one object at no one
    *  member, which only that answer declares (`chooseFrameModel`) */
   readonly merges: string | undefined;
-  /** the values `taint` gives a merge of two objects, or a phi of one: a pointer stepped through
-   *  the frame (`stepped`) where every value it carries is this frame's, and refused otherwise */
+  /** the values `taint` gives a merge of two objects, or a phi of one, and the phis over two objects
+   *  `steppedPointers` finds: a pointer stepped through the frame (`stepped`) where every value it
+   *  carries is this frame's, whose uses but an access refuse as the merge, and refused otherwise */
   readonly merged: ReadonlySet<Value>;
 }
 
@@ -1230,7 +1231,12 @@ function addressFlow(
       }
     }
   }
+  // a phi `steppedPointers` finds over two objects is merged too: its second object may arrive as
+  // an index sum (`c ? a : b + n`), which taint, seeing no exact value of `b`, does not call a merge
   const stepped = steppedPointers(irBlocks, objects, taint, incoming, facts);
+  for (const p of stepped.twoObjects) {
+    merged.add(p);
+  }
   return { taint, frameOnEveryPath, stepped: stepped.stepped, merges: merges ?? stepped.merges, merged };
 }
 
@@ -1248,8 +1254,10 @@ function addressFlow(
  *  A GREATEST FIXPOINT, because the step feeds the phi it steps: a phi or an `add`/`sub` is a
  *  candidate once one value it carries or moves names the object, and one is struck while an
  *  incoming value is no frame address — a pointer from outside the frame (`p = cnt ? cnt : a`), a
- *  load. A phi of two objects (`p = c ? a : b`) points into the lower one, and is named in `merges`:
- *  only the one object, where both are its bytes, declares it. A phi of one object on every path
+ *  load. A phi of two objects (`p = c ? a : b`, or `c ? a : b + n`) points into the lower one, is
+ *  named in `merges` — only the one object, where both are its bytes, declares it — and is returned
+ *  in `twoObjects`, which `addressFlow` adds to `merged`, so every use but an access refuses as
+ *  that merge. A phi of one object on every path
  *  (`mergedFrameAddresses`) is no stepped pointer but that object's address, whose constant move
  *  is named before the audit (`nameMergedFrameAddresses`). */
 function steppedPointers(
@@ -1258,7 +1266,7 @@ function steppedPointers(
   taint: ReadonlyMap<Value, number>,
   incoming: ReadonlyMap<Value, readonly Value[]>,
   { defOf, constOf }: LiteralAddresses,
-): { stepped: Map<Value, number>; merges: string | undefined } {
+): { stepped: Map<Value, number>; merges: string | undefined; twoObjects: ReadonlySet<Value> } {
   // the object values, and the phis that carry exactly one of them on every path
   const exact = new Map<Value, number>();
   for (const [off, ops] of objects) {
@@ -1355,15 +1363,18 @@ function steppedPointers(
       }
     }
   }
-  // …and the first phi that carries two objects, which only the one-object answer declares
+  // …and the phis that carry two objects, the first of which names the merge only the one-object
+  // answer declares
   let merges: string | undefined;
+  const twoObjects = new Set<Value>();
   for (const [v, off] of stepped) {
     const hi = defOf.has(v) ? off : Math.max(...incoming.get(v)!.map((a) => frameOf(a)!));
     if (hi !== off) {
       merges ??= `a phi merges the frame objects at [sp,#${off}] and [sp,#${hi}] — one value, two objects`;
+      twoObjects.add(v);
     }
   }
-  return { stepped, merges };
+  return { stepped, merges, twoObjects };
 }
 
 /** One fixed-offset access at an object's own address. */

@@ -1823,6 +1823,23 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(src).toContain('return *(s32 *)sp0 + ((s32 *)sp0)[3];');
     });
 
+    // …and a phi of one object and an index into the other is that merge too, though taint sees
+    // only one exact object meet it: its compare refuses as the merge, not as a stepped pointer.
+    // agbcc's own output for `u8 a[8], b[8], *p = c ? a : b + n; for (k = 0; k < 8; k++) { a[k] =
+    // k; b[k] = k * 2; } return p == b;`.
+    test('a compare of a phi of one object and an index into another refuses as the merge', () => {
+      const cmp =
+        'f:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x10\n\tcmp\tr0, #0\n\tbeq\t.L11\n\tmov\tr5, sp\n' +
+        '\tadd\tr3, sp, #0x8\n\tb\t.L12\n.L11:\n\tadd\tr0, sp, #0x8\n\tadd\tr5, r0, r1\n\tadd\tr3, r0, #0\n' +
+        '.L12:\n\tmov\tr2, #0x0\n\tadd\tr4, r3, #0\n.L16:\n\tmov\tr1, sp\n\tadd\tr0, r1, r2\n\tstrb\tr2, [r0]\n' +
+        '\tadd\tr1, r4, r2\n\tlsl\tr0, r2, #0x1\n\tstrb\tr0, [r1]\n\tadd\tr2, r2, #0x1\n\tcmp\tr2, #0x7\n' +
+        '\tble\t.L16\n\tmov\tr0, #0x0\n\tcmp\tr5, r3\n\tbne\t.L18\n\tmov\tr0, #0x1\n.L18:\n' +
+        '\tadd\tsp, sp, #0x10\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n';
+      expect(() => decompile('f', cmp, ARMV4T_AGBCC, { prototypes: selProto })).toThrow(
+        /a phi merges the frame objects at \[sp,#0\] and \[sp,#8\]/,
+      );
+    });
+
     // hand-written: the merged pointer meets a pointer from outside the frame (`i`), so it may be
     // neither object, and a member of the one object at its offset would be the wrong storage
     test('a phi of two objects and a pointer from outside the frame refuses', () => {
