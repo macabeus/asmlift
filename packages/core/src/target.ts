@@ -1304,8 +1304,10 @@ export interface LoadBehaviors {
   //              unrelated `if`, a `break`, a `return` or a `&&` in the condition; KMC: `while
   //              (*(vu32 *)A & 3) { ((s32 *)B)[1] = 5; s += *q++; }`, `B[1] = gV;` and `gW = a0;`
   //              beside that read, which KMC keeps in the loop without it). A value the loop
-  //              computes, a store under an `if`, two stores to two cells, and a call stay in it
-  //              on both.
+  //              computes, a store under an `if`, and a call stay in it on both. Beside a second
+  //              cell's store KMC keeps it, and IDO only where it cannot tell the two addresses
+  //              apart: `{ ((s32 *)B)[1] = a0; gW = a1; }` writes gW once ahead of the loop, and
+  //              `{ gW = a0; p[3] = a1; }` keeps both (contracts.ts `hoistedStore`).
   //   Either only where the level moves loop-invariant code (`keepsLoopInvariantReads` absent):
   //   gcc's loop pass runs from `-O1`, and agbcc `-O0` keeps the store in the loop.
   //

@@ -25,6 +25,8 @@
 //       while ((*(vu32 *)0xA4600010 & 3) || (*(vu32 *)0xA4600014 & 1)); }
 //     void i04(s32 a0) { while (*(vu32 *)0xA4600010 & 3) {
 //       ((vs32 *)0xA4000000)[5] = a0; ((vs32 *)0xA4000000)[5] = a0; } }
+//     void u4(s32 a0, s32 a1) { while (*(vu32 *)0xA4000010 & 3) { ((s32 *)0xA0001000)[1] = a0; gVA[2] = a1; } }
+//     void e6(s32 a0, s32 a1, s32 *p) { while (*(vu32 *)0xA4000010 & 3) { gW = a0; p[3] = a1; } }
 //   agbcc -mthumb-interwork -O2 -fhex-asm, again
 //     void e2(s32 *q) { while (*(vu16 *)0x3000100 != 50) { *(vu16 *)0x3000100 = 7; *q++ = 0; } }
 //     void e7(s32 *q) { while (*(vu8 *)0x3000100 != 50) { *(vu8 *)0x3000100 = 7; *q++ = 0; } }
@@ -644,6 +646,46 @@ const I04 = `
   3c:	nop
 `;
 
+const U4 = `
+00000000 <u4>:
+   0:	lui	v0,0xa400
+   4:	ori	v0,v0,0x10
+   8:	lw	t6,0(v0)
+   c:	lui	a2,0x0
+  10:	addiu	a2,a2,0
+  14:	andi	t7,t6,0x3
+  18:	beqz	t7,3c <u4+0x3c>
+  1c:	lui	v1,0xa000
+  20:	ori	v1,v1,0x1004
+  24:	sw	a0,0(v1)
+  28:	sw	a1,8(a2)
+  2c:	lw	t8,0(v0)
+  30:	andi	t9,t8,0x3
+  34:	bnezl	t9,28 <u4+0x28>
+  38:	sw	a0,0(v1)
+  3c:	jr	ra
+  40:	nop
+`;
+const E6 = `
+00000000 <e6>:
+   0:	lui	v0,0xa400
+   4:	ori	v0,v0,0x10
+   8:	lw	t6,0(v0)
+   c:	lui	v1,0x0
+  10:	addiu	v1,v1,0
+  14:	andi	t7,t6,0x3
+  18:	beqz	t7,38 <e6+0x38>
+  1c:	nop
+  20:	sw	a0,0(v1)
+  24:	sw	a1,12(a2)
+  28:	lw	t8,0(v0)
+  2c:	andi	t9,t8,0x3
+  30:	bnezl	t9,24 <e6+0x24>
+  34:	sw	a0,0(v1)
+  38:	jr	ra
+  3c:	nop
+`;
+
 /** The relocations the object file gives IDO's text: `gF`'s address and the call to `g`. */
 const relocs = (list: Array<[number, string, string]>): AsmData => ({
   sections: new Map(),
@@ -658,6 +700,14 @@ const I13_RELOCS = relocs([
   [0x30, 'R_MIPS_26', 'g'],
 ]);
 const H1_RELOCS = relocs([[0x44, 'R_MIPS_26', 'g']]);
+const U4_RELOCS = relocs([
+  [0xc, 'R_MIPS_HI16', 'gVA'],
+  [0x10, 'R_MIPS_LO16', 'gVA'],
+]);
+const E6_RELOCS = relocs([
+  [0xc, 'R_MIPS_HI16', 'gW'],
+  [0x10, 'R_MIPS_LO16', 'gW'],
+]);
 
 const AGBCC = targetFor('agbcc', ['-mthumb-interwork', '-O2', '-fhex-asm']).target;
 const prototypes = { g: { params: [], returnsVoid: true }, h: { params: ['u32'], returnsVoid: true } };
@@ -762,6 +812,13 @@ describe('a poll loop that stores is judged by how the compiler moves the store'
   test('IDO: control flow beside the store is no keep, and two stores to one cell are one', () => {
     expect(() => decompile('j13', J13, MIPS_IDO)).toThrow(SINKS);
     expect(() => decompile('i04', I04, MIPS_IDO)).toThrow(SINKS);
+  });
+
+  test("IDO: a symbol's store beside a constant address's is hoisted, beside a pointer's it is kept", () => {
+    expect(() => decompile('u4', U4, MIPS_IDO, { asmData: U4_RELOCS })).toThrow(SINKS);
+    const src = decompile('e6', E6, MIPS_IDO, { asmData: E6_RELOCS }).source;
+    expect(src).toContain('gW = a0;');
+    expect(src).toContain('a2[3] = a1;');
   });
 
   test('IDO: two stores keep each other, and the fused guard of their poll is credited', () => {

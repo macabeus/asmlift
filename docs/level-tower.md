@@ -1332,8 +1332,10 @@ localized _there_ instead of surfacing three stages later as mysterious wrong C.
   keeps the cell in a register for the loop and stores it once at the exit (`'sinks'`), unless a
   call, the loop's own control flow, an overlapping access one of whose two sides is a byte, or the
   store's own qualifier keeps it; IDO 7.1 and KMC gcc 2.7.2 write a lone store of an invariant value
-  once ahead of the loop (`'hoists'`), unless a call, a branch the store sits under, a second cell
-  stored, or a value the loop changes keeps it. A level that keeps loop-invariant code
+  once ahead of the loop (`'hoists'`), unless a call, a branch the store sits under, a value the
+  loop changes, or a second cell's write IDO cannot tell apart from it keeps it (a constant
+  address's beside any other, a symbol's only beside a pointer's, a pointer's beside any but one
+  through the same pointer). A level that keeps loop-invariant code
   (`keepsLoopInvariantReads`) moves neither.
 
 **What the effect contract counts is decided once, below it.** Whether an op must run where, and

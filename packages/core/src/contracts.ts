@@ -570,12 +570,25 @@ function sunkStore(
  *  a do-while, the store of a `for` nested in a poll — so the recompile writes it once, before the
  *  first test. Control flow beside it is no keep: IDO hoists it past an unrelated `if`, an `if (…)
  *  break;`, an early `return` and a `&&` in the condition, so only the loop's own statements outside
- *  every branch are candidates, and a write under an `if` is kept (measured on both). Each of these
- *  keeps it, measured on both: a value the loop computes (`x += …; B[5] = x;`) and a second store
- *  to another cell. Two stores to one cell are one, and hoisted. A memory read is no change: KMC
+ *  every branch are candidates, and a write under an `if` is kept (measured on both). A value the
+ *  loop computes keeps it (`x += …; B[5] = x;`, measured on both). A memory read is no change: KMC
  *  loads `B[1] = gV;`'s global once ahead of the loop and writes it there too, so only a local the
  *  loop assigns (anything but its one constant), a post-increment, a call or a qualified access (a
- *  declared global's included) moves a value or an address. */
+ *  declared global's included) moves a value or an address.
+ *
+ *  A second write to another cell keeps it only where IDO cannot tell the two apart, by what each
+ *  address is based on ({@link writeRoot}), COMPILED on IDO 7.1 at `-O2` with every store plain:
+ *   • a write at a constant address is kept beside any other cell's write (`{ B[1] = a0; C[2] =
+ *     a1; }`, `{ B[1] = a0; B[2] = a1; }`, `{ B[1] = a0; gW = a1; }`, `{ B[1] = a0; p[3] = a1; }`);
+ *   • a write through a symbol only beside one through a pointer, which may point at it (`{ gW =
+ *     a0; p[3] = a1; }`, `{ gPtr[1] = a0; gW = a1; }`): beside a constant address or another symbol
+ *     it is hoisted (`{ B[1] = a0; gW = a1; }` writes gW once, `{ gPA[1] = a0; gW = a1; }` and `{
+ *     gVA[1] = a0; gVA[2] = a1; }` write both once);
+ *   • a write through a pointer beside any other cell's write but one through the same pointer
+ *     (`{ p[3] = a0; q[2] = a1; }` keeps both, `{ p[3] = a0; p[5] = a1; }` writes both once).
+ *  A qualified write keeps by the same rule and is never itself moved. Two stores to one cell are
+ *  one, and hoisted. KMC keeps every two-cell shape above; the rule is IDO's, so on KMC it costs
+ *  a spelling only. */
 function hoistedStore(stmts: readonly Stmt[], assigned: ReadonlySet<string>, ctx: TreeContext): Write | undefined {
   const fixed = (e: Expr): boolean =>
     e.k !== 'call' &&
@@ -585,18 +598,69 @@ function hoistedStore(stmts: readonly Stmt[], assigned: ReadonlySet<string>, ctx
     exprChildren(e).every(fixed);
   // the loop's own statements on every path round it, past none of its branches
   const writes = stmts.filter((st): st is Write => st.k === 'store' || (st.k === 'assign' && !ctx.locals.has(st.name)));
-  const w = writes[0];
-  const oneCell = writes.every((x) =>
-    x.k === 'store' && w.k === 'store'
-      ? exprEquals(x.lval, w.lval)
-      : x.k === 'assign' && w.k === 'assign' && x.name === w.name,
+  const sameCell = (x: Write, y: Write): boolean =>
+    x.k === 'store' && y.k === 'store'
+      ? exprEquals(x.lval, y.lval)
+      : x.k === 'assign' && y.k === 'assign' && x.name === y.name;
+  const keeps = (w: Write, x: Write): boolean => {
+    const at = writeRoot(w, ctx);
+    const by = writeRoot(x, ctx);
+    switch (at.k) {
+      case 'const':
+        return by.k !== 'other';
+      case 'symbol':
+        return by.k === 'pointer';
+      case 'pointer':
+        return by.k !== 'other' && !(by.k === 'pointer' && exprEquals(by.base, at.base));
+      default:
+        return false;
+    }
+  };
+  return writes.find(
+    (w) =>
+      plainWrite(w, ctx) &&
+      fixed(w.value) &&
+      (w.k === 'assign' || ((w.lval.k === 'index' || w.lval.k === 'field') && exprChildren(w.lval).every(fixed))) &&
+      !writes.some((x) => !sameCell(x, w) && keeps(w, x)),
   );
-  if (w === undefined || !oneCell || !writes.every((x) => plainWrite(x, ctx))) {
-    return undefined;
+}
+
+/** What a write's address is based on, as IDO's alias analysis tells writes apart
+ *  ({@link hoistedStore}): a constant (a literal, or a local the function sets once to one), a
+ *  symbol (a global assigned by name, or an access whose address names one), a pointer (a local or
+ *  parameter, or a pointer read from memory, `base` the expression it is read from), or anything
+ *  else. */
+function writeRoot(
+  w: Write,
+  ctx: TreeContext,
+): { k: 'const' } | { k: 'symbol' } | { k: 'pointer'; base: Expr } | { k: 'other' } {
+  if (w.k === 'assign') {
+    return { k: 'symbol' };
   }
-  const at =
-    w.k === 'store' ? (w.lval.k === 'index' || w.lval.k === 'field') && exprChildren(w.lval).every(fixed) : true;
-  return at && writes.every((x) => fixed(x.value)) ? w : undefined;
+  const lval = w.lval;
+  if (lval.k !== 'index' && lval.k !== 'field') {
+    return { k: 'other' };
+  }
+  if (accessedObject(lval.base, ctx.addresses, lval.k === 'field' && fieldSpellsDot(lval)) !== null) {
+    return { k: 'symbol' };
+  }
+  let base = lval.base;
+  for (let n = 0; n < 16; n++) {
+    if (base.k === 'cast') {
+      base = base.e;
+    } else if (base.k === 'bin' && (base.op === '+' || base.op === '-') && base.r.k === 'const') {
+      base = base.l;
+    } else {
+      break;
+    }
+  }
+  if (base.k === 'const' || (base.k === 'var' && ctx.literalLocals.has(base.name))) {
+    return { k: 'const' };
+  }
+  if (base.k === 'var' || base.k === 'index' || base.k === 'field') {
+    return { k: 'pointer', base };
+  }
+  return { k: 'other' };
 }
 
 /** The reads the guard-fused loops in a tree stand for past their conditions' own renders, by key,
