@@ -43,16 +43,17 @@ import { foldUnsignedFloat, unsignedFloatDiamonds } from './unsigned-float';
  *     any other call, or carried across an edge;
  *   - a result NOTHING reads. Folded, it would be a dead float op, and `dce` would delete the
  *     arithmetic. Optimising (-O1, -O2), agbcc deletes a helper call whose result is dead
- *     (`s = a * b; g(); return 0;` calls no `__mulsf3`), so the result's one reader was a later call
- *     that took it in r0, and a guessed arity does not count a register a call wrote (frontend/call-arity.ts
- *     `fallbackArgc`, `trimClobberedCallArgs`): `g1(a * b)` with `g1` undeclared reads as
- *     `__mulsf3(); return g1();`, and folded would print `return g1();`. A double's pair refuses
- *     that shape at the frontend, naming the half the next call reads; a single is one word, so it
- *     reaches here. At -O0 the rule is not asked: agbcc stores the result to the frame, which reads
- *     it, and nothing folds there, its arguments being read from frame homes. A frontend that reads
- *     those homes must re-measure this. A result some other op ALSO reads is not refused:
- *     `s = a * b; g(s); return s;` and `s = a * b; g(); return s;` are the same bytes on agbcc, and
- *     a declaration of `g` closes the trim's `g()` reading (`trimClobberedCallArgs`).
+ *     (`s = a * b; g(); return 0;` calls no `__mulsf3`), so the frontend hands a helper's result
+ *     still in r0, and read by nothing else, to the guessed call after it as its first argument
+ *     (core target.ts `deletesDeadLibcalls`, frontend/call-plan.ts): `g1(a * b)` with `g1`
+ *     undeclared reads `g1(__mulsf3(a, b))`, which refuses here as a result passed to another call
+ *     — an undeclared callee is handed a `float` promoted to a `double`. Where the frontend does not
+ *     hand it on, it reaches here unread. At -O0 the rule is not asked: agbcc stores the result to
+ *     the frame, which reads it, and nothing folds there, its arguments being read from frame
+ *     homes. A frontend that reads those homes must re-measure this. A result some other op ALSO
+ *     reads is not refused: `s = a * b; g(s); return s;` and `s = a * b; g(); return s;` are the
+ *     same bytes on agbcc, and a declaration of `g` closes the trim's `g()` reading
+ *     (`trimClobberedCallArgs`).
  *  A call refused takes every call its result feeds or is fed by with it, so what folds is a closed
  *  set of floats and verify's float rule holds by construction.
  *

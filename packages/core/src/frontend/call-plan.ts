@@ -336,6 +336,9 @@ export function callDeclarations(
   const pairCallee = new Map<Value, string>();
   /** the value each call to a callee declared void left in the return register */
   const voidResults = new Set<Value>();
+  /** each word a runtime helper handed back in the return register: a pure function's result, which
+   *  the compiler deletes with its call where nothing reads it (`compilerBehaviors.deletesDeadLibcalls`) */
+  const helperResults = new Set<Value>();
   // The compiler's own runtime, off the TARGET (runtime-helpers.ts): which helpers a compiler
   // emits is a compiler fact, and reading one table for every ISA is how a scan for `__*di3`
   // reports zero on a compiler whose runtime spells them `__ll_*`.
@@ -1326,6 +1329,13 @@ export function callDeclarations(
     }
     const sret = returns.kind === 'memory-struct' ? returns.type : undefined;
     const res = mkValue(sret ?? T.unk(returns.kind === 'pair' ? 64 : 32));
+    if (
+      callee !== undefined &&
+      returns.kind === 'word' &&
+      lookupHelper(target.runtimeHelpers, callee)?.returns === 32
+    ) {
+      helperResults.add(res);
+    }
     // A DECLARED `double` IS TWO WORDS THAT ARE NOT A `long long`: its first word holds the
     // sign and exponent (`TargetDescription.doubleArgWords`), so the pair read as an integer
     // spells a different number — `g(1.5)` as `g(1073217536, 0)`. The call names the operands
@@ -1371,6 +1381,13 @@ export function callDeclarations(
     // as `g(); p();`, which compiles to the same bytes. Kept, it lifts as `p(g())`, which passes what
     // the machine passes — unless `g` is declared void, and its result names nothing.
     //
+    // A NAMED CALL IS PASSED A RUNTIME HELPER'S RESULT NOTHING ELSE READS, where the compiler deletes
+    // a helper call whose result is dead (`compilerBehaviors.deletesDeadLibcalls`, agbcc from `-O1`):
+    // the call is there, so something read its result, and the only reader left is the call after
+    // it, which finds it in argument 0. `g(a / b)` is `bl __divsi3; bl g`, and the trim would
+    // otherwise read it as `g();` with the division deleted. A result something else also reads
+    // (`s = a / b; g(); return s;`, the same bytes as `g(s)`) stays the trim's to read.
+    //
     // …AND WHAT THE TRIM CUTS IS LEFT OUT TOO, so the frontend is asked the `leftOut` question of it
     // as well: a guess of four the check above passed can still lose a frame address in r2 when
     // the trim cuts it back to the run below an unfresh r1 (`v = f64(); g(v, &s)` with neither
@@ -1381,7 +1398,11 @@ export function callDeclarations(
         call,
         bi,
         target,
-        indirect === undefined ? undefined : (r) => !voidResults.has(r),
+        indirect !== undefined
+          ? (r) => !voidResults.has(r)
+          : target.compilerBehaviors.deletesDeadLibcalls === true
+            ? (r) => helperResults.has(r) && ssa.onlyReadBy(r, call)
+            : undefined,
         leftOut === undefined
           ? undefined
           : (cut, kept) =>

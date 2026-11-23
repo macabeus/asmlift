@@ -252,6 +252,11 @@ export interface SsaBuilder {
    *  leaves alone, so the question is asked in `finish`, of the finished function. Its asker is the
    *  guessed-arity gap (frontend/call-plan.ts `decideGap`). */
   requireSoleReader(v: Value, op: Op, refuse: () => void): void;
+  /** Whether nothing but `op` reads `v` in the function as built so far — no other op, no edge, no
+   *  frame store (`frameWrites`), no op-less use — the question `requireSoleReader` asks in
+   *  `finish`, answered now. Asked from `finish` itself (a guessed call's `passesCalleeResult`),
+   *  where every block is filled. */
+  onlyReadBy(v: Value, op: Op): boolean;
   /** Require that something other than a `ret` reads `v` once the function is lifted — an op, a
    *  frame store or an op-less use, of `v` or of a join it reaches — or call `refuse`. Asked in
    *  `finish`, as `requireSoleReader` is, and by the same asker: a decided gap at the first argument
@@ -853,6 +858,15 @@ export function makeSsaBuilder(
   const staleByValue = new Map<Value, StaleRead[]>();
   /** The op-less uses `useOutsideOps` recorded, each at the op count of its block when it happened. */
   const usesOutsideOps: Array<{ value: Value; block: number; atOp: number }> = [];
+  const onlyReadBy = (value: Value, op: Op): boolean => {
+    const reads = (o: Op) =>
+      o !== op && (o.operands.includes(value) || o.successors.some((e) => e.args.includes(value)));
+    return !(
+      frameWrites.has(value) ||
+      usesOutsideOps.some((u) => u.value === value) ||
+      irBlocks.some((blk) => blk.ops.some(reads))
+    );
+  };
   /** The sole-reader obligations `requireSoleReader` recorded, checked in `finish`. */
   const soleReaders: Array<{ value: Value; op: Op; refuse: () => void }> = [];
   /** The reader obligations `requireReader` recorded, checked in `finish`. */
@@ -1926,6 +1940,7 @@ export function makeSsaBuilder(
       };
       return walk(b);
     },
+    onlyReadBy: (value: Value, op: Op) => onlyReadBy(value, op),
     requireSoleReader: (value: Value, op: Op, refuse: () => void) => {
       soleReaders.push({ value, op, refuse });
     },
@@ -2048,13 +2063,7 @@ export function makeSsaBuilder(
       // A SOLE-READER OBLIGATION (`requireSoleReader`), over the finished function: after both
       // prunes, so a join nothing reads is no reader.
       for (const { value, op, refuse } of soleReaders) {
-        const reads = (o: Op) =>
-          o !== op && (o.operands.includes(value) || o.successors.some((e) => e.args.includes(value)));
-        if (
-          frameWrites.has(value) ||
-          usesOutsideOps.some((u) => u.value === value) ||
-          irBlocks.some((blk) => blk.ops.some(reads))
-        ) {
+        if (!onlyReadBy(value, op)) {
           refuse();
         }
       }

@@ -2861,9 +2861,11 @@ export const SYNTHETIC: SynthSpec[] = [
   })),
   // agbcc's single-precision runtime (core runtime-helpers.ts AGBCC_RUNTIME_HELPERS): `__negsf2`
   // folds to a negation, `__fixsfsi` to the cast (`fconv`); and a helper whose result reaches only a
-  // GUESSED call declines. That call does not count r0, which the helper wrote, so `g1(a * b)`
-  // reads `__mulsf3(); return g1();` and, folded, `return g1();`, the product deleted
-  // (raise/floathelpers.ts). The conversions to and from a long long are the 64-bit side of a
+  // GUESSED call is that call's argument, agbcc from -O1 deleting a helper call nothing reads (core
+  // target.ts `deletesDeadLibcalls`): `divcall` lifts `gv(a0 / a1)`. `fcall`'s product handed to an
+  // undeclared `g1` still declines: an undeclared callee is handed a `float` promoted to a `double`,
+  // and the candidate declares a callee only from the prototypes it is given, so nothing prints the
+  // `float g1(float)` the bytes need (`fcallarg` is the row with it declared). The conversions to and from a long long are the 64-bit side of a
   // helper; `u2f` has none, agbcc open-coding `(float)u` around `__floatsisf` (gcc/optabs.c:3591-3622:
   // the negative half halved with its low bit kept, converted and doubled through `__addsf3`), which
   // the lift reads whole as `(float)(u32)x` (raise/unsigned-float.ts). agbcc only: the other
@@ -2920,6 +2922,13 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['float', 'arithmetic'],
     toolchains: ['agbcc'],
     ctx: 'float fcall(float,float);',
+  },
+  {
+    sym: 'divcall',
+    src: 'void gv();\nvoid divcall(int a,int b){ gv(a/b); }',
+    features: ['call', 'soft-div', 'signed'],
+    toolchains: ['agbcc'],
+    ctx: 'void divcall(int,int);',
   },
   // `fcall` with its callee declared: agbcc hands a declared `float` parameter its next one general
   // word (core proto.ts `declaredCallArgs` `singles`), here r0, which holds the product.

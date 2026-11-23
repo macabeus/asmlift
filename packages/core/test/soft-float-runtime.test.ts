@@ -8,7 +8,7 @@ import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
 import type { Prototypes } from '../src/proto';
-import { ARMV4T_AGBCC } from '../src/target';
+import { ARMV4T_AGBCC, targetFor } from '../src/target';
 
 const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-soft-float-rt.s'), 'utf8');
 const lift = (name: string) => decompile(name, asm, ARMV4T_AGBCC).source;
@@ -84,5 +84,40 @@ describe('a declared float parameter of an ordinary callee', () => {
   // A word loaded from memory is no float the ABI handed over whole; C would convert it at the call.
   test('a loaded word refuses', () => {
     expect(() => declared('fpassw')).toThrow("argument 2 of the call to 'h1' is a `float` its callee declares");
+  });
+});
+
+// agbcc from -O1 deletes a runtime helper call whose result nothing reads, so a word result still in
+// r0 at a guessed call, read by nothing else, is that call's argument (core target.ts
+// `deletesDeadLibcalls`, frontend/call-plan.ts).
+describe("a helper's result handed to the guessed call after it", () => {
+  test.each([
+    ['divcall', 'void divcall(s32 a0, s32 a1) {\n    gv(a0 / a1);\n}\n'],
+    ['modcall', 'void modcall(u32 a0, u32 a1) {\n    gv(a0 % a1);\n}\n'],
+  ])('%s: the operation is passed, not deleted', (name, source) => {
+    expect(lift(name)).toBe(source);
+  });
+
+  // `s = a / b; gv(); return s;` and `gv(s); return s;` are the same bytes: a result read elsewhere
+  // too stays the trim's leftover.
+  test('a result something else reads is not passed', () => {
+    expect(lift('divkeep')).toBe(
+      's32 divkeep(s32 a0, s32 a1) {\n    s32 v0;\n    v0 = a0 / a1;\n    gv();\n    return v0;\n}\n',
+    );
+  });
+
+  // At -O0 the dead call stays, so its result in r0 says nothing about the call after it.
+  test('not where the compiler keeps a dead helper call', () => {
+    const { deletesDeadLibcalls, ...kept } = ARMV4T_AGBCC.compilerBehaviors;
+    expect(deletesDeadLibcalls).toBe(true);
+    expect(decompile('divcall', asm, { ...ARMV4T_AGBCC, compilerBehaviors: kept }).source).toContain('gv();');
+    expect(targetFor('agbcc', ['-O0']).target.compilerBehaviors.deletesDeadLibcalls).toBeUndefined();
+    expect(targetFor('agbcc', ['-O1']).target.compilerBehaviors.deletesDeadLibcalls).toBe(true);
+  });
+
+  // A float handed to an undeclared callee: C would promote it to a double, so the product is no
+  // float any call here takes, and the helper stays gapped.
+  test('a float result into an undeclared callee refuses', () => {
+    expect(() => lift('fcallu')).toThrow("no model for the runtime helper '__mulsf3'");
   });
 });
