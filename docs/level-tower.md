@@ -1255,8 +1255,10 @@ of a return temp; structure spells an access that names one
 declared member exactly as that member (`sp0.a`), and an L1 pass, `raise/aggmembers.ts` in
 `PRE_RECOVERY_PASSES` after `structs`, splits a whole-word read of the temp — agbcc's only
 sp-relative load — into the member reads its uses take. A use through `+ - * & | ^ ~` takes the
-low member whose bits cover every bit its result can reach a reader with (its demanded bits, which
-a narrowing store or extension bounds and a shift moves): the low n bits of such a result are its
+low member whose bits cover every bit its result can reach a reader with (its demanded bits,
+`ir/bits.ts` `demandedBitsAt`, the same transfer `demandedBits` walks for a register-returned
+struct's word: a narrowing store or extension bounds them, a constant mask narrows them, a shift
+moves them, and a join passes on what its parameter's readers need): the low n bits of such a result are its
 operands' low n bits alone, so `(s.h & 0xf0) | 1` stored to a byte reads `s.h`, not the word.
 
 **A hidden pointer that reaches the call through a merge.** gcc rotates a loop that calls a

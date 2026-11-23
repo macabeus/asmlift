@@ -1685,13 +1685,8 @@ export function demandedBits(
   voidOwn: boolean,
   index: DemandedBitsIndex = demandedBitsIndex(fn),
 ): number {
-  const { defs, readers, params } = index;
+  const { readers, params } = index;
   const memo = new Map<Value, number>();
-  const constOf = (x: Value | undefined): number | undefined => {
-    const d = x === undefined ? undefined : defs.get(x);
-    return d?.opcode === 'const' && typeof d.attrs.value === 'number' ? d.attrs.value >>> 0 : undefined;
-  };
-  const upTo = (d: number): number => (d === 0 ? 0 : d >= 0x80000000 ? FULL : lowBits(32 - Math.clz32(d)));
   const of = (v: Value): number => {
     const known = memo.get(v);
     if (known !== undefined) {
@@ -1703,68 +1698,79 @@ export function demandedBits(
       need |= of(p);
     }
     for (const op of readers.get(v) ?? []) {
-      const out = () => (op.results.length === 1 ? of(op.results[0]) : FULL);
-      const imm = typeof op.attrs.imm === 'number' && op.operands.length === 1 ? op.attrs.imm : undefined;
-      const other = op.operands.length === 2 ? op.operands[op.operands[0] === v ? 1 : 0] : undefined;
-      // a shift's constant count, where `v` is only what it shifts
-      const count =
-        other === v || (op.operands.length === 2 && op.operands[1] === v) ? undefined : (imm ?? constOf(other));
-      const width = typeof op.attrs.width === 'number' ? op.attrs.width : undefined;
-      switch (op.opcode) {
-        case 'store':
-          need |= op.operands[0] === v || width === undefined || width >= 4 ? FULL : lowBits(8 * width);
-          break;
-        case 'ret':
-          need |= voidOwn ? 0 : FULL;
-          break;
-        case 'zext':
-          need |= width === undefined ? FULL : out() & lowBits(width);
-          break;
-        case 'sext': {
-          const d = out();
-          need |=
-            width === undefined || width < 1
-              ? FULL
-              : (d & lowBits(width)) | ((d & ~lowBits(width)) >>> 0 !== 0 ? 2 ** (width - 1) : 0);
-          break;
-        }
-        case 'and': {
-          const c = other === v ? undefined : (imm ?? constOf(other));
-          need |= c === undefined ? out() : out() & c;
-          break;
-        }
-        case 'or':
-        case 'xor':
-        case 'not':
-          need |= other === v ? FULL : out();
-          break;
-        case 'add':
-        case 'sub':
-        case 'mul':
-        case 'neg':
-          need |= other === v ? FULL : upTo(out());
-          break;
-        case 'shl':
-          need |= count === undefined || count >= 32 ? FULL : out() >>> count;
-          break;
-        case 'shr_u':
-          need |= count === undefined || count >= 32 ? FULL : (out() << count) >>> 0;
-          break;
-        case 'shr_s': {
-          const d = out();
-          need |=
-            count === undefined || count >= 32
-              ? FULL
-              : ((d << count) | (count > 0 && d >>> (32 - count) !== 0 ? 0x80000000 : 0)) >>> 0;
-          break;
-        }
-        default:
-          need |= FULL;
-      }
-      need >>>= 0;
+      need = (need | readerNeed(index, op, v, voidOwn, of)) >>> 0;
     }
     memo.set(v, need);
     return need;
   };
   return of(root);
+}
+
+/** The bits of `v` the one reader `op` needs — `demandedBits`' transfer through that reader, its
+ *  own readers' needs walked as `demandedBits` walks them. Asked where a rewrite replaces `v` in
+ *  that one reader alone: a declared struct local's whole-word read under arithmetic whose result
+ *  keeps only one member's bits (raise/aggmembers.ts). */
+export function demandedBitsAt(
+  fn: Fn,
+  op: Op,
+  v: Value,
+  voidOwn: boolean,
+  index: DemandedBitsIndex = demandedBitsIndex(fn),
+): number {
+  return readerNeed(index, op, v, voidOwn, (r) => demandedBits(fn, r, voidOwn, index));
+}
+
+/** The bits of `v` the reader `op` needs, given what its result's readers need (`out`). */
+function readerNeed({ defs }: DemandedBitsIndex, op: Op, v: Value, voidOwn: boolean, of: (r: Value) => number): number {
+  const constOf = (x: Value | undefined): number | undefined => {
+    const d = x === undefined ? undefined : defs.get(x);
+    return d?.opcode === 'const' && typeof d.attrs.value === 'number' ? d.attrs.value >>> 0 : undefined;
+  };
+  const upTo = (d: number): number => (d === 0 ? 0 : d >= 0x80000000 ? FULL : lowBits(32 - Math.clz32(d)));
+  const out = () => (op.results.length === 1 ? of(op.results[0]) : FULL);
+  const imm = typeof op.attrs.imm === 'number' && op.operands.length === 1 ? op.attrs.imm : undefined;
+  const other = op.operands.length === 2 ? op.operands[op.operands[0] === v ? 1 : 0] : undefined;
+  // a shift's constant count, where `v` is only what it shifts
+  const count = other === v || (op.operands.length === 2 && op.operands[1] === v) ? undefined : (imm ?? constOf(other));
+  const width = typeof op.attrs.width === 'number' ? op.attrs.width : undefined;
+  switch (op.opcode) {
+    case 'store':
+      return op.operands[0] === v || width === undefined || width >= 4 ? FULL : lowBits(8 * width);
+    case 'ret':
+      return voidOwn ? 0 : FULL;
+    case 'zext':
+      return width === undefined ? FULL : (out() & lowBits(width)) >>> 0;
+    case 'sext': {
+      if (width === undefined || width < 1) {
+        return FULL;
+      }
+      const d = out();
+      return ((d & lowBits(width)) | ((d & ~lowBits(width)) >>> 0 !== 0 ? 2 ** (width - 1) : 0)) >>> 0;
+    }
+    case 'and': {
+      const c = other === v ? undefined : (imm ?? constOf(other));
+      return c === undefined ? out() : (out() & c) >>> 0;
+    }
+    case 'or':
+    case 'xor':
+    case 'not':
+      return other === v ? FULL : out();
+    case 'add':
+    case 'sub':
+    case 'mul':
+    case 'neg':
+      return other === v ? FULL : upTo(out());
+    case 'shl':
+      return count === undefined || count >= 32 ? FULL : out() >>> count;
+    case 'shr_u':
+      return count === undefined || count >= 32 ? FULL : (out() << count) >>> 0;
+    case 'shr_s': {
+      const d = out();
+      return count === undefined || count >= 32
+        ? FULL
+        : ((d << count) | (count > 0 && d >>> (32 - count) !== 0 ? 0x80000000 : 0)) >>> 0;
+    }
+    default:
+      return FULL;
+  }
 }

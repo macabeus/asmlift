@@ -20,6 +20,7 @@
 //     argument, a call argument), or a shift whose uses are not all of one width;
 //   * a range names no declared member exactly (a straddle, padding, a bitfield, a nested
 //     aggregate) — the member must start at that byte and be an integer of that width.
+import { type DemandedBitsIndex, demandedBitsAt, demandedBitsIndex } from '../ir/bits';
 import { type Block, type Fn, type Op, type Value, mkOp, mkValue } from '../ir/core';
 import { qualified } from '../ir/discipline';
 import { type IrType, T, intFieldAt } from '../ir/types';
@@ -167,63 +168,12 @@ export function readDeclaredMembers(fn: Fn, littleEndian: boolean): number {
     },
   });
   const isShr = (op: Op): boolean => (op.opcode === 'shr_u' || op.opcode === 'shr_s') && op.operands.length === 1;
-  // DEMANDED BITS: the bits of the word a use's result can ever reach an observer with, as a mask.
-  // Through `+ - * & | ^ ~ neg` a result's low n bits are its operands' low n bits alone, so an
-  // arithmetic chain whose every end narrows to a member — `s.h += 1` is `(u16)(word + 1)`
-  // stored to two bytes — demands only that member's bits of the word, and reads the member. A
-  // value an edge carries, or any other op, demands every bit.
-  const ALL = 0xffffffff;
-  const lowTo = (d: number): number =>
-    d === 0 ? 0 : d >>> 0 >= 0x80000000 ? ALL : (2 ** (32 - Math.clz32(d)) - 1) >>> 0;
-  const demandOf = (w: Value, depth: number): number => {
-    if (branchArgs.has(w) || depth > 8) {
-      return ALL;
-    }
-    let d = 0;
-    for (const u of uses.get(w) ?? []) {
-      d = (d | useDemand(u, depth)) >>> 0;
-      if (d === ALL) {
-        break;
-      }
-    }
-    return d;
-  };
-  const useDemand = (u: Use, depth: number): number => {
-    const { op } = u;
-    const imm = op.operands.length === 1 ? (op.attrs.imm as number | undefined) : undefined;
-    const r = (): number => demandOf(op.results[0], depth + 1);
-    switch (op.opcode) {
-      case 'store':
-        return u.idx === 1 ? lowTo(2 ** ((op.attrs.width as number) * 8) - 1) : ALL;
-      case 'zext':
-      case 'sext':
-        return lowTo(2 ** (op.attrs.width as number) - 1);
-      case 'and':
-      case 'or':
-      case 'xor':
-      case 'not':
-        return r();
-      case 'add':
-      case 'sub':
-      case 'mul':
-      case 'neg':
-        return lowTo(r());
-      case 'shl':
-        return imm === undefined || imm < 0 || imm >= 32 ? ALL : r() >>> imm;
-      case 'shr_u':
-        return imm === undefined || imm < 0 || imm >= 32 ? ALL : (r() << imm) >>> 0;
-      case 'shr_s': {
-        if (imm === undefined || imm <= 0 || imm >= 32) {
-          return ALL;
-        }
-        const d = r();
-        // the bits shifted in are copies of bit 31
-        return ((d << imm) | (d >>> (32 - imm) !== 0 ? 0x80000000 : 0)) >>> 0;
-      }
-      default:
-        return ALL;
-    }
-  };
+  // DEMANDED BITS (ir/bits.ts `demandedBitsAt`): the bits of the word a use passes on to any
+  // reader, through that use and everything past it. Through `+ - * & | ^ ~ neg` a result's low n
+  // bits are its operands' low n bits alone, so an arithmetic chain whose every end narrows to a
+  // member — `s.h += 1` is `(u16)(word + 1)` stored to two bytes — demands only that member's bits
+  // of the word, and reads the member. The index is built afresh for each word asked about, since
+  // each rewrite below moves readers.
   const demandSite = (u: Use) => ({
     op: u.op,
     rewire: (m: Value): undefined => {
@@ -252,6 +202,7 @@ export function readDeclaredMembers(fn: Fn, littleEndian: boolean): number {
       // the byte a `width`-byte range `shift` bits up the word starts at
       const byteOf = (shift: number, width: number): number => (littleEndian ? shift / 8 : word - shift / 8 - width);
       const plan: MemberUse[] = [];
+      let index: DemandedBitsIndex | undefined;
       let ok = (uses.get(v) ?? []).length > 0;
       for (const u of uses.get(v) ?? []) {
         const width = narrowedTo(u);
@@ -261,7 +212,7 @@ export function readDeclaredMembers(fn: Fn, littleEndian: boolean): number {
         }
         if (['add', 'sub', 'mul', 'and', 'or', 'xor', 'not', 'neg'].includes(u.op.opcode)) {
           // the narrowest member at the word's low end that holds every bit the use demands
-          const d = useDemand(u, 0);
+          const d = demandedBitsAt(fn, u.op, v, false, (index ??= demandedBitsIndex(fn)));
           const kept = [1, 2].find(
             (w) => w < word && (d & ~(2 ** (w * 8) - 1)) === 0 && memberAt(st, at0 + byteOf(0, w), w) !== undefined,
           );
