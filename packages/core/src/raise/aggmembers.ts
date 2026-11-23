@@ -167,6 +167,70 @@ export function readDeclaredMembers(fn: Fn, littleEndian: boolean): number {
     },
   });
   const isShr = (op: Op): boolean => (op.opcode === 'shr_u' || op.opcode === 'shr_s') && op.operands.length === 1;
+  // DEMANDED BITS: the bits of the word a use's result can ever reach an observer with, as a mask.
+  // Through `+ - * & | ^ ~ neg` a result's low n bits are its operands' low n bits alone, so an
+  // arithmetic chain whose every end narrows to a member — `s.h += 1` is `(u16)(word + 1)`
+  // stored to two bytes — demands only that member's bits of the word, and reads the member. A
+  // value an edge carries, or any other op, demands every bit.
+  const ALL = 0xffffffff;
+  const lowTo = (d: number): number =>
+    d === 0 ? 0 : d >>> 0 >= 0x80000000 ? ALL : (2 ** (32 - Math.clz32(d)) - 1) >>> 0;
+  const demandOf = (w: Value, depth: number): number => {
+    if (branchArgs.has(w) || depth > 8) {
+      return ALL;
+    }
+    let d = 0;
+    for (const u of uses.get(w) ?? []) {
+      d = (d | useDemand(u, depth)) >>> 0;
+      if (d === ALL) {
+        break;
+      }
+    }
+    return d;
+  };
+  const useDemand = (u: Use, depth: number): number => {
+    const { op } = u;
+    const imm = op.operands.length === 1 ? (op.attrs.imm as number | undefined) : undefined;
+    const r = (): number => demandOf(op.results[0], depth + 1);
+    switch (op.opcode) {
+      case 'store':
+        return u.idx === 1 ? lowTo(2 ** ((op.attrs.width as number) * 8) - 1) : ALL;
+      case 'zext':
+      case 'sext':
+        return lowTo(2 ** (op.attrs.width as number) - 1);
+      case 'and':
+      case 'or':
+      case 'xor':
+      case 'not':
+        return r();
+      case 'add':
+      case 'sub':
+      case 'mul':
+      case 'neg':
+        return lowTo(r());
+      case 'shl':
+        return imm === undefined || imm < 0 || imm >= 32 ? ALL : r() >>> imm;
+      case 'shr_u':
+        return imm === undefined || imm < 0 || imm >= 32 ? ALL : (r() << imm) >>> 0;
+      case 'shr_s': {
+        if (imm === undefined || imm <= 0 || imm >= 32) {
+          return ALL;
+        }
+        const d = r();
+        // the bits shifted in are copies of bit 31
+        return ((d << imm) | (d >>> (32 - imm) !== 0 ? 0x80000000 : 0)) >>> 0;
+      }
+      default:
+        return ALL;
+    }
+  };
+  const demandSite = (u: Use) => ({
+    op: u.op,
+    rewire: (m: Value): undefined => {
+      u.op.operands[u.idx] = m;
+      return undefined;
+    },
+  });
   const frameOff = (v: Value): number | undefined => {
     const d = defs.get(v);
     return d?.opcode === 'laddr' ? (d.attrs.off as number) : undefined;
@@ -193,6 +257,19 @@ export function readDeclaredMembers(fn: Fn, littleEndian: boolean): number {
         const width = narrowedTo(u);
         if (width !== undefined && width < word) {
           plan.push({ byte: byteOf(0, width), width, sites: [narrowSite(u)] });
+          continue;
+        }
+        if (['add', 'sub', 'mul', 'and', 'or', 'xor', 'not', 'neg'].includes(u.op.opcode)) {
+          // the narrowest member at the word's low end that holds every bit the use demands
+          const d = useDemand(u, 0);
+          const kept = [1, 2].find(
+            (w) => w < word && (d & ~(2 ** (w * 8) - 1)) === 0 && memberAt(st, at0 + byteOf(0, w), w) !== undefined,
+          );
+          if (kept === undefined) {
+            ok = false;
+            break;
+          }
+          plan.push({ byte: byteOf(0, kept), width: kept, sites: [demandSite(u)] });
           continue;
         }
         // `(x << a) >> b`: bits [b - a, 32 - a) of the word, the middle members

@@ -831,7 +831,8 @@ declarations block and every name-keyed pass; the nameless inline kind carries n
 local is typed as the struct kind, every member a field at offset 0 (aggregate.ts
 `integerUnionType`), only where the members are integer scalars of distinct widths, so an access
 names at most one field by its offset and width, and the two readers that pick a field at an
-offset pick it by width (structure.ts `frameStructMember`, raise/aggmembers.ts `memberAt`).
+offset pick it by width through one helper (ir/types.ts `intFieldAt`, which structure.ts
+`frameStructMember` and raise/aggmembers.ts `memberAt` share).
 
 **A frame object is the second inhabitant.** The frame audit keeps a local area as one object in
 memory where a device or a callee holds its address, or where nothing escapes and the per-object
@@ -1174,7 +1175,8 @@ spelling, since the IR's own `union` kind is nameless and inline; a floating mem
 bits, `*(s32 *)&s`, spelled only where every reader stores them through an integer cell the lift
 types, a bare global's own `*(s32 *)&gF` included, since any float reader would convert them, and a
 float at any depth of the member a read covers counts, `{ float f[1]; }` too; a float inside a
-nested struct or union, which has no field to say so, gives no local, aggregate.ts `nestsFloat`), the call
+nested struct or union, which has no field to say so, gives no local, aggregate.ts `nestsFloat`),
+the call
 writes the return register as its value, marked `REGISTER_STRUCT`, and the frontend reads that
 word as it reads any call's; a guessed arity after the call still does not take it (ssa.ts
 `noteStructImage`), since the bytes do not say whether a callee nothing declares is handed the
@@ -1211,8 +1213,10 @@ mwcc wrote a home (`return mk_ret;`, which `struct T s = mk(1); return s;` compi
 mk(1);` does not). On agbcc, which rounds a `{u8}` or `{u16}` to a word whose pad bits are the
 object's, a call's struct of the same type handed back with its member written — every `ret` an
 `or` of a member-wide value and the call's image masked past the member, straight from the insert
-idiom — is that call's local with the member stored, `mk_ret.h = …; return mk_ret;`
-(own-struct-return.ts `liftModifiedCallImage`). Any other own return that is a word the own side
+idiom — is that call's local with the member stored, `mk_ret.h = (u16)(mk_ret.h + 1); return
+mk_ret;` (own-struct-return.ts `liftModifiedCallImage`), the value's read of the image the member
+because only the member's bits reach the store (`aggmembers` demanded bits, below). Any other own
+return that is a word the own side
 cannot spell as the struct (`liftOwnRegisterStruct`: a member written on one branch and joined,
 mwcc's r3, any other `{u8}` or `{u16}`) in a function that reads any call's register struct
 refuses: the word may be computed from that struct through a frame slot as well as an op (an
@@ -1248,7 +1252,10 @@ capture's access inside it and an `laddr` strictly inside it that is only access
 of a return temp; structure spells an access that names one
 declared member exactly as that member (`sp0.a`), and an L1 pass, `raise/aggmembers.ts` in
 `PRE_RECOVERY_PASSES` after `structs`, splits a whole-word read of the temp — agbcc's only
-sp-relative load — into the member reads its uses take.
+sp-relative load — into the member reads its uses take. A use through `+ - * & | ^ ~` takes the
+low member whose bits cover every bit its result can reach a reader with (its demanded bits, which
+a narrowing store or extension bounds and a shift moves): the low n bits of such a result are its
+operands' low n bits alone, so `(s.h & 0xf0) | 1` stored to a byte reads `s.h`, not the word.
 
 **A hidden pointer that reaches the call through a merge.** gcc rotates a loop that calls a
 struct-returning function, so `addiu a0,sp,16` runs once ahead of the loop and once in the delay

@@ -319,6 +319,24 @@ describe("mwcc: the struct's frame home is the local the call assigns", () => {
   });
 });
 
+describe("a struct local's word read through arithmetic is the member whose bits reach its readers", () => {
+  const HG = mk([
+    { name: 'h', type: 'u16' },
+    { name: 'g', type: 'u16' },
+  ]);
+  test('agbcc: only the low member reaches a halfword store, so the read is that member', () => {
+    // `struct T s = mk(x); gV = s.h + 1;` with `u16 gV`
+    expect(
+      decompile('c_d', agbcc('c_d', 'strh', '\tadd\tr0, r0, #0x1\n'), ARMV4T_AGBCC, { prototypes: { mk: HG } }).source,
+    ).toMatch(/gV = mk_ret\.h \+ 1;|gV = sp0\.h \+ 1;/);
+  });
+  test('hand-edited: a whole-word store of the sum reads every bit, and keeps the word', () => {
+    expect(
+      decompile('c_d', agbcc('c_d', 'str', '\tadd\tr0, r0, #0x1\n'), ARMV4T_AGBCC, { prototypes: { mk: HG } }).source,
+    ).toMatch(/gV = \*\(s32 \*\)&(?:mk_ret|sp0) \+ 1;/);
+  });
+});
+
 describe('a struct with a floating member is read as its bits, only where they are stored as bits', () => {
   const fl = mk([{ name: 'a', type: 'float' }]);
   test('agbcc: `struct T { float a; }` in r0 stored to a global nothing declares copies the word', () => {
@@ -401,7 +419,7 @@ describe("a function returning what a call returned returns the call's struct", 
       'f:\n\tpush\t{lr}\n\tbl\tmk\n\tadd\tr2, r0, #0\n\tadd\tr0, r2, #0x1\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n' +
       '\tldr\tr1, .L3\n\tand\tr1, r1, r2\n\torr\tr0, r0, r1\n\tpop\t{r1}\n\tbx\tr1\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t-0x10000\n';
     expect(decompile('f', mod, ARMV4T_AGBCC, { prototypes: { ...ownT('f'), mk: T16 } }).source).toMatch(
-      /mk_ret = mk\(a0\);\s+mk_ret\.a = \(u16\)\(\*\(s32 \*\)&mk_ret \+ 1\);\s+return mk_ret;/,
+      /mk_ret = mk\(a0\);\s+mk_ret\.a = \(u16\)\(mk_ret\.a \+ 1\);\s+return mk_ret;/,
     );
     // hand-edited: a mask that keeps a bit of the member, or a value wider than the member, is no
     // image with only the member replaced
