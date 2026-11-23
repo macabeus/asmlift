@@ -69,8 +69,8 @@ describe('the integer side is any integer', () => {
   });
 
   // agbcc -O2 deletes a helper call whose result nothing reads, so the conversion's result still in
-  // r0 at the guessed call after it is that call's argument (frontend/call-plan.ts
-  // `deletesDeadLibcalls`), and the conversion is kept.
+  // r0 at the guessed call after it is that call's argument (target.ts
+  // `deletesDeadLibcalls`, frontend/call-plan.ts), and the conversion is kept.
   test('an integer result handed to the call after it', () => {
     expect(lift('f2ipass')).toBe('s32 f2ipass(float a0) {\n    s32 v0;\n    v0 = (s32)a0;\n    return g1(v0);\n}\n');
   });

@@ -1,7 +1,7 @@
-// agbcc's single-precision runtime where a float crosses something other than a helper: an argument
-// the function hands back, an unsigned word converted, and a callee's declared `float` parameter
-// (`raise/floathelpers.ts`). The corpus is compiled at agbcc -O2 from the
-// sources its header lists.
+// agbcc's soft-float runtime where a value crosses something other than a helper's own operands: an
+// argument the function hands back, an unsigned word converted, a callee's declared `float`
+// parameter (`raise/floathelpers.ts`), and a helper's result handed to the guessed call after it
+// (frontend/call-plan.ts). The corpus is compiled at agbcc -O2 from the sources its header lists.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
@@ -28,7 +28,8 @@ describe('an argument the function returns', () => {
 });
 
 // `(float)u` as agbcc open-codes it (gcc/optabs.c:3591-3622): `__floatsisf` where the word fits a
-// signed one, else `(u & 1) | (u >> 1)` converted and doubled through `__addsf3` (raise/unsigned-float.ts).
+// signed one, else `(u & 1) | (u >> 1)` converted and doubled through `__addsf3`
+// (raise/unsigned-float.ts).
 describe('an unsigned word converted to a single', () => {
   test('the diamond is the unsigned conversion', () => {
     expect(lift('u2f')).toBe('float u2f(s32 a0) {\n    return (float)(u32)a0;\n}\n');
@@ -57,7 +58,7 @@ describe('an unsigned word converted to a single', () => {
 });
 
 // A callee declared to take a `float` is handed it in the next one general word (proto.ts
-// `declaredCallArgs` `singles`), and the soft-float boundary reads that word as the float or refuses.
+// `declaredCallArgs` `floats`), and the soft-float boundary reads that word as the float or refuses.
 describe('a declared float parameter of an ordinary callee', () => {
   const prototypes: Prototypes = {
     h1: { params: ['int', 'float'], returnsVoid: true },

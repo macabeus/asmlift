@@ -3,10 +3,9 @@
 // Four things cross it. A runtime helper whose op computes on floats (`isFloatHelper`) — the peer of
 // `raise/widehelpers.ts`, gated by the target's runtime table rather than a hardware capability.
 // A parameter an ordinary callee declares `double` or `float` (the operands the frontend names on
-// the call, `FLOATS_ATTR`). The
-// result of an ordinary callee declared to return a floating type (its `floatReturn`). And a
-// double literal, two constant words, where the target states their order
-// (`TargetDescription.doubleArgWords`) and its compiler reads a literal back
+// the call, `FLOATS_ATTR`). The result of an ordinary callee declared to return a floating type
+// (its `floatReturn`). And a double literal, two constant words, where the target states their
+// order (`TargetDescription.doubleArgWords`) and its compiler reads a literal back
 // (`compilerBehaviors.roundTripsDoubleLiterals`). What sets all four apart from the integer
 // helpers is the value's KIND: the words are bits in integer registers, and the pass re-types them
 // as floats, which only data flow may justify — see the function below.
@@ -24,7 +23,8 @@ import { rewriteUnsignedFloatDiamonds } from './unsigned-float';
 
 /** Rewrite the float-arithmetic helper calls to the float ops, in place, each value at the width its
  *  helper's signature states, and hand a parameter the callee declares `double` or `float` (the
- *  operands the frontend names on the call, `FLOATS_ATTR`) a float of that width. Returns whether anything changed.
+ *  operands the frontend names on the call, `FLOATS_ATTR`) a float of that width. Returns whether
+ *  anything changed.
  *
  *  A SOFT-FLOAT VALUE IS BITS IN INTEGER REGISTERS, AND ONLY DATA FLOW MAY READ THEM AS A FLOAT. A
  *  single travels in one register; a double in the pair a long long travels in, which the frontend
@@ -33,7 +33,7 @@ import { rewriteUnsignedFloatDiamonds } from './unsigned-float';
  *  the value whole keeps it right, so a float may come only from where the ABI hands one over
  *  whole — this function's argument slot, or two consecutive ones for a double, or another of these
  *  helpers' results — and may go only into another of them, the return, or a parameter a callee
- *  declares `double`. Anything else refuses, and the call stays for `refuseUnmodelledHelpers` to
+ *  declares `double` or `float`. Anything else refuses, and the call stays for `refuseUnmodelledHelpers` to
  *  gap:
  *   - an operand built from a load or two unrelated words, whose halves the int64 naming would put
  *     in the wrong order. Two CONSTANT words are the exception: they are a literal, read in the
@@ -43,10 +43,10 @@ import { rewriteUnsignedFloatDiamonds } from './unsigned-float';
  *   - a result read as a word or a half (`*(int *)&c` is a double's HIGH word, in r0), passed to
  *     any other call, or carried across an edge;
  *   - a result NOTHING reads. Folded, it would be a dead float op, and `dce` would delete the
- *     arithmetic. Optimising (-O1, -O2), agbcc deletes a helper call whose result is dead
- *     (`s = a * b; g(); return 0;` calls no `__mulsf3`), so the frontend hands a helper's result
- *     still in r0, and read by nothing but guessed calls, to the guessed call after it as its first argument
- *     (core target.ts `deletesDeadLibcalls`, frontend/call-plan.ts): `g1(a * b)` with `g1`
+ *     arithmetic. Optimising (-O1 and above), agbcc deletes a helper call whose result is
+ *     dead (`s = a * b; g(); return 0;` calls no `__mulsf3`), so the frontend hands a helper's
+ *     result still in r0, and read by nothing but guessed calls, to each such call as its first
+ *     argument (core target.ts `deletesDeadLibcalls`, frontend/call-plan.ts): `g1(a * b)` with `g1`
  *     undeclared reads `g1(__mulsf3(a, b))`, which refuses here as a result passed to another call
  *     — an undeclared callee is handed a `float` promoted to a `double`. Where the frontend does not
  *     hand it on, it reaches here unread. At -O0 the rule is not asked: agbcc stores the result to
@@ -279,8 +279,8 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription, self?: 
   // A DECLARED DOUBLE OR FLOAT HAS NO FALLBACK. A helper the fold refuses stays a call for
   // `refuseUnmodelledHelpers` to gap, but an ordinary callee is no helper, and its words handed on
   // as integers are the wrong number, C converting them at the call — so a floating parameter
-  // nothing here can hand a float of its width refuses the function. It counts arguments as the source does: an `sret` call's operand 0, the
-  // hidden pointer, is not one.
+  // nothing here can hand a float of its width refuses the function. It counts arguments as the
+  // source does: an `sret` call's operand 0, the hidden pointer, is not one.
   for (const [op, at] of consumers) {
     for (const [i, width] of at) {
       if (!source(op.operands[i], calls)) {
