@@ -1840,6 +1840,40 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       );
     });
 
+    // …and so is every pointer stepped or moved from that phi, which carries both objects too: a
+    // loop phi it feeds, or the phi plus a constant, passed to a call refuses as the merge, not as a
+    // stepped pointer. agbcc's own output, with `void fill(u8 *); void take8(u8 *);`, for `u8 a[8],
+    // b[8], *p; fill(a); fill(b);` then `p = c ? a : b + n; for (i = 0; i < m; i++) { take8(p); p++; }
+    // return a[0];` (loop) and `p = c ? a : b; take8(p + 1); return a[0];` (move).
+    const fillProto = {
+      fill: { params: ['u8 *'], returnsVoid: true },
+      take8: { params: ['u8 *'], returnsVoid: true },
+    };
+    test.each([
+      [
+        'a loop phi it feeds',
+        'f:\n\tpush\t{r4, r5, r6, r7, lr}\n\tadd\tsp, sp, #-16\n\tadd\tr6, r0, #0\n\tadd\tr7, r1, #0\n' +
+          '\tadd\tr5, r2, #0\n\tmov\tr0, sp\n\tbl\tfill\n\tadd\tr4, sp, #8\n\tadd\tr0, r4, #0\n\tbl\tfill\n' +
+          '\tadd\tr4, r4, r5\n\tcmp\tr6, #0\n\tbeq\t.L11\n\tmov\tr4, sp\n.L11:\n\tcmp\tr7, #0\n\tble\t.L14\n' +
+          '\tadd\tr5, r7, #0\n.L16:\n\tadd\tr0, r4, #0\n\tbl\ttake8\n\tadd\tr4, r4, #1\n\tsub\tr5, r5, #1\n' +
+          '\tcmp\tr5, #0\n\tbne\t.L16\n.L14:\n\tmov\tr0, sp\n\tldrb\tr0, [r0]\n\tadd\tsp, sp, #16\n' +
+          '\tpop\t{r4, r5, r6, r7}\n\tpop\t{r1}\n\tbx\tr1\n',
+        ['s32', 's32', 's32'],
+      ],
+      [
+        'a constant move of it',
+        'f:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-16\n\tadd\tr4, r0, #0\n\tmov\tr0, sp\n\tbl\tfill\n' +
+          '\tadd\tr5, sp, #8\n\tadd\tr0, r5, #0\n\tbl\tfill\n\tmov\tr0, sp\n\tcmp\tr4, #0\n\tbne\t.L20\n' +
+          '\tadd\tr0, r5, #0\n.L20:\n\tadd\tr0, r0, #1\n\tbl\ttake8\n\tmov\tr0, sp\n\tldrb\tr0, [r0]\n' +
+          '\tadd\tsp, sp, #16\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n',
+        ['s32'],
+      ],
+    ])('%s, passed to a call, refuses as the merge of the two objects', (_, asm, params) => {
+      expect(() =>
+        decompile('f', asm, ARMV4T_AGBCC, { prototypes: { ...fillProto, f: { params, returns: 's32' } } }),
+      ).toThrow(/a phi merges the frame objects at \[sp,#0\] and \[sp,#8\]/);
+    });
+
     // hand-written: the merged pointer meets a pointer from outside the frame (`i`), so it may be
     // neither object, and a member of the one object at its offset would be the wrong storage
     test('a phi of two objects and a pointer from outside the frame refuses', () => {

@@ -1231,8 +1231,9 @@ function addressFlow(
       }
     }
   }
-  // a phi `steppedPointers` finds over two objects is merged too: its second object may arrive as
-  // an index sum (`c ? a : b + n`), which taint, seeing no exact value of `b`, does not call a merge
+  // a pointer `steppedPointers` finds over two objects is merged too: its second object may arrive
+  // as an index sum (`c ? a : b + n`), which taint, seeing no exact value of `b`, does not call a
+  // merge, and it may be a loop phi or a move of the phi that merges them, which taint does not follow
   const stepped = steppedPointers(irBlocks, objects, taint, incoming, facts);
   for (const p of stepped.twoObjects) {
     merged.add(p);
@@ -1254,10 +1255,11 @@ function addressFlow(
  *  A GREATEST FIXPOINT, because the step feeds the phi it steps: a phi or an `add`/`sub` is a
  *  candidate once one value it carries or moves names the object, and one is struck while an
  *  incoming value is no frame address — a pointer from outside the frame (`p = cnt ? cnt : a`), a
- *  load. A phi of two objects (`p = c ? a : b`, or `c ? a : b + n`) points into the lower one, is
- *  named in `merges` — only the one object, where both are its bytes, declares it — and is returned
- *  in `twoObjects`, which `addressFlow` adds to `merged`, so every use but an access refuses as
- *  that merge. A phi of one object on every path
+ *  load. A phi of two objects (`p = c ? a : b`, or `c ? a : b + n`) points into the lower one, and
+ *  so does every pointer stepped or moved from it, each carrying the higher one too: such a value
+ *  is named in `merges` — only the one object, where both are its bytes, declares it — and is
+ *  returned in `twoObjects`, which `addressFlow` adds to `merged`, so every use but an access
+ *  refuses as that merge. A phi of one object on every path
  *  (`mergedFrameAddresses`) is no stepped pointer but that object's address, whose constant move
  *  is named before the audit (`nameMergedFrameAddresses`). */
 function steppedPointers(
@@ -1363,16 +1365,31 @@ function steppedPointers(
       }
     }
   }
-  // …and the phis that carry two objects, the first of which names the merge only the one-object
-  // answer declares
+  // …and the HIGHEST object each surviving value may carry, raised through the same phis and moves
+  // the lowest went down through: a value whose highest is not its lowest holds two objects — the
+  // phi `p = c ? a : b + n` itself, the loop phi it feeds, `p + 1` of it — and names the merge
+  // only the one-object answer declares
+  const highest = new Map<Value, number>();
+  const highOf = (a: Value): number | undefined => highest.get(a) ?? exactOf(a) ?? indexSum(a);
+  for (let raised = true; raised;) {
+    raised = false;
+    for (const [v, off] of stepped) {
+      const d = defOf.get(v);
+      const hi = Math.max(
+        off,
+        ...(d === undefined ? incoming.get(v)!.map((a) => highOf(a) ?? off) : [highOf(moved(d)!.from) ?? off]),
+      );
+      if (hi > (highest.get(v) ?? off)) {
+        highest.set(v, hi);
+        raised = true;
+      }
+    }
+  }
   let merges: string | undefined;
   const twoObjects = new Set<Value>();
-  for (const [v, off] of stepped) {
-    const hi = defOf.has(v) ? off : Math.max(...incoming.get(v)!.map((a) => frameOf(a)!));
-    if (hi !== off) {
-      merges ??= `a phi merges the frame objects at [sp,#${off}] and [sp,#${hi}] — one value, two objects`;
-      twoObjects.add(v);
-    }
+  for (const [v, hi] of highest) {
+    merges ??= `a phi merges the frame objects at [sp,#${stepped.get(v)}] and [sp,#${hi}] — one value, two objects`;
+    twoObjects.add(v);
   }
   return { stepped, merges, twoObjects };
 }

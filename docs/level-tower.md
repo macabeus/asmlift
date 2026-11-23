@@ -842,7 +842,9 @@ at a time; or a pointer that holds either of two locals, `p = c ? a : b` or `c ?
 which names no one of them, read as a pointer into the lower one at no one displacement, which only
 the one object declares (frame-objects.ts `addressFlow` `merges`); `chooseFrameModel` offers it
 before any shape is judged). A pointer that may also hold an address from outside the frame, or that
-escapes, still refuses with the merge. A POINTER STEPPED THROUGH THE FRAME is read in either model:
+escapes, still refuses with the merge, and so does one stepped or moved from it (a loop phi it feeds,
+`p + 1`), which carries both objects too (`steppedPointers` raises each value's highest object
+beside its lowest). A POINTER STEPPED THROUGH THE FRAME is read in either model:
 a loop over a local array that the compiler strength-reduces carries the array's address in a loop
 phi moved each trip (kmc `addiu s1,sp,16 … addiu s1,s1,4`, mwcc `addi r31,r1,8 … addi r31,r31,4`,
 agbcc `mov r5, sp / ldmia r5!, {r0}`), and `u16 *p = buf + n; *p-- = v` starts one at a runtime index.
