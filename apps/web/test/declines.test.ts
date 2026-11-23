@@ -927,6 +927,10 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     // (`tst`, arithmetic flags, a call) is hand-written asm.
     'non-compare-flags',
     'pool-word-shape',
+    // `sretfl`'s float member is stored as its bits into a global the lift declares, or through
+    // its integer cell; a float reader (an own float return) declines, pinned in
+    // packages/core/test/register-struct-call.test.ts.
+    'struct-float-member',
     'structs',
     'tu-scoped-name',
     'unread-data-directive',
