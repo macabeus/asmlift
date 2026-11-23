@@ -11630,8 +11630,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //      `sm_ret.h = (u16)(sm_ret.h + 1); return sm_ret;` (frontend/own-struct-return.ts
   //      `liftModifiedCallImage`), the member read off the image word because only its bits reach
   //      the store (raise/aggmembers.ts demanded bits), and sretmsk that read through a mask into
-  //      a narrower store; on mwcc, whose r3 below the {u16} is no object, sret2mod still
-  //      declines; sretfl a {float}, whose member is read as its bits and stored
+  //      a narrower store; on mwcc, whose r3 below the {u16} is no object, and on IDO, which
+  //      writes the returned object, sret2mod declines; sretfl a {float}, whose member is read as its bits and stored
   //      through the global's own integer cell, `*(s32 *)&gF = *(s32 *)&s;`, which copies them
   //      whatever the project declares gF as (structure.ts `floatBitsStoreTarget`), on agbcc's r0
   //      and gcc's memory return alike, and declining on mwcc's lfs and ido's lwc1; sretfld the same
