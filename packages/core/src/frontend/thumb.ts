@@ -5582,8 +5582,10 @@ function frameAddressesAt(
 // A CALL hands over the argument registers its callee's DECLARATION reads — one per 32-bit word,
 // so `g(void)` is handed nothing — and every argument register where nothing declares it. A call
 // through a register (`blx r3`, a `_call_via_r3` thunk) branches THROUGH that register; it does not
-// pass it. "Every register" is wider than what the lift passes an undeclared callee — a guessed
-// count, or the bound of a call through an argument register — and the two agree on a frame address
+// pass it, and through argument register rK it hands over r0..r(K-1) alone, the bound the lowering
+// reads it at (agbcc's `*call_indirect` puts the address in a register no argument is live in, and
+// fills the arguments from r0 up). "Every register" is wider than what the lift passes an
+// undeclared callee — a guessed count — and the two agree on a frame address
 // only because the lowering refuses to leave one out (`lowerCall`'s `leftOut`, over
 // `frameAddressesAt`, which holds at each call a superset of what the walks here hold) — of
 // the registers its guess leaves out, of those the trim cuts afterwards (`GuessedCallSite.
@@ -5619,7 +5621,11 @@ function frameAddressReceivers(
   if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
     const targetReg = calleeRegister(ins, target);
     const declared = targetReg === null ? calls.declaredCall(ins.ops[0] ?? '?') : null;
-    const words = declared?.widths.reduce((n, w) => n + Math.ceil(w / 32), 0) ?? target.argRegs.length;
+    // …and through argument register rK, r0..r(K-1) alone: the lowering reads no more
+    // (`THUMB_CALL_LOWERING.argRegisterBoundsArity`), and agbcc passes no more (`_call_via_rK`)
+    const through = typeof targetReg === 'string' ? target.argRegs.indexOf(targetReg) : -1;
+    const words =
+      declared?.widths.reduce((n, w) => n + Math.ceil(w / 32), 0) ?? (through < 0 ? target.argRegs.length : through);
     return target.argRegs.slice(0, words).filter((r) => r !== targetReg);
   }
   if (ins.mnemonic !== 'str') {
@@ -8017,10 +8023,10 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
     // definition test). A count that leaves out a register holding one lifts the call without the
     // address, and the object's reads come back as a local nothing wrote (`func(p0, p1, p2, &d[1])`
     // as `func()`, then `*data = sp1`). A GUESSED count leaves one out only past a register it did
-    // not set, which is a gap the guess refuses first (`guess` below); what reaches here is a call
-    // through r1, which stops at the bound r1 sets and leaves r2 out (`CallDeclarations.lower`'s
-    // KNOWN GAP), and the `/setup-args` cut (`asksEveryCut`). Which count is right the register
-    // file cannot say, so this refuses.
+    // not set, which is a gap the guess refuses first (`guess` below); what reaches here is the
+    // `/setup-args` cut (`asksEveryCut`) and the trim (`GuessedCallSite.trimmed`). Which count is
+    // right the register file cannot say, so this refuses. A call through argument register rK is
+    // not asked: no register at or past rK is an argument of it (`frameAddressReceivers`).
     //
     // …UNLESS A REGISTER IT DOES PASS HOLDS THE SAME ADDRESS, in the call's own block: the callee is
     // handed the object either way, and agbcc leaves a capture it addressed through in r3 beside

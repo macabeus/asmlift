@@ -4768,6 +4768,24 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'extern void (*gfp)(int);\nextern int gy, gz;\nvoid h();\nvoid callvia_body(int *p, int b);',
     proto: { callvia_body: { returnsVoid: true }, h: { returnsVoid: true } },
   },
+  // A FRAME ADDRESS LEFT AT OR PAST THE REGISTER A CALL GOES THROUGH IS NO ARGUMENT OF IT
+  // (frontend/call-plan.ts, the `leftOut` question; frontend/thumb.ts `frameAddressReceivers`).
+  // agbcc stores `c` through `mov r3, sp` (strh has no sp form) and calls `gfp2` through r2 with
+  // r3 still holding the frame address. `bl _call_via_r2` takes r0 and r1 at most, so `take` alone
+  // is handed `&s`; asked whether the arity leaves out a frame address, the lift used to decline
+  // (kl2dct sub_0800E8A0, whose `add r3, sp, #8` reaches its `_call_via_r2` calls). agbcc only.
+  {
+    sym: 'callvia_frame',
+    src:
+      'typedef unsigned short u16;\nextern void (*gfp2)(int, int);\nextern void take(u16 *);\n' +
+      'void callvia_frame(int a, int b, u16 c)\n{\n    u16 s;\n    s = c;\n    gfp2(a, b);\n    take(&s);\n}',
+    features: ['call', 'fnptr', 'stack-addr'],
+    toolchains: ['agbcc'],
+    ctx:
+      'typedef unsigned short u16;\nextern void (*gfp2)(int, int);\nextern void take(u16 *);\n' +
+      'void callvia_frame(int a, int b, u16 c);',
+    proto: { callvia_frame: { returnsVoid: true }, take: { params: ['u16 *'], returnsVoid: true } },
+  },
   // `spillarg` is `spill10` with a genuine outgoing argument under the spills: `five(i, 1, 2, 3,
   // v0)` stages argument 5 at [sp,#0] before every call and agbcc moves the spills above it, to
   // [sp,#4]..[sp,#0x20]. Several reach `bl five` unread, so the declaration (`five` takes one stack

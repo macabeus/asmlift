@@ -1228,13 +1228,16 @@ export function callDeclarations(
       }
     }
     // WHAT THE ARITY LEFT OUT, where no declaration stated it: an argument register past a guessed
-    // count, or past the bound a call through an argument register sets, that a value reaches.
-    // The gap refusal has already fired on any such register past a guess; past the bound, the
-    // register leaves the call silently, and the frontend says whether it knows that one to be an
-    // argument all the same. A register at or past what the callee's own body reads is no
-    // argument of it whatever it holds, so it is not asked: read only where the count already asked
-    // the body, the one place the bound left a register out (`fallbackArgc`'s `bound`).
-    if (site.leftOut !== undefined && (widths === null || bound >= 0)) {
+    // count that a value reaches. The gap refusal has already fired on any such register; the
+    // frontend says whether it knows that one to be an argument all the same. A register at or past
+    // what the callee's own body reads is no argument of it whatever it holds, so it is not asked:
+    // read only where the count already asked the body, the one place the bound left a register out
+    // (`fallbackArgc`'s `bound`). Nor is a register at or past the one a call goes through where the
+    // lowering states that it bounds the arity (`argRegisterBoundsArity`): that statement is that
+    // none of them is an argument, so a frame address left in one is not handed to the callee
+    // (agbcc's `_call_via_r2` takes r0 and r1 at most, and an `add r3, sp, #k` left over is no
+    // argument of it).
+    if (site.leftOut !== undefined && widths === null) {
       const readTo = bodyMemo?.words ?? target.argRegs.length;
       site.leftOut(
         target.argRegs
