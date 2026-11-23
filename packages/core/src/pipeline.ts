@@ -1045,9 +1045,11 @@ export interface RaiseHooks {
  *  @param hooks per-stage observers; see {@link RaiseHooks}. Each fires after that stage's verify.
  *  @param self  this function's own prototype, where the caller has one — what the pre-recovery
  *               passes read to type the parameters they are narrowing.
- *  @param pre   per-caller PRE-RECOVERY options. One shipped user: rank.ts's `/connective`
- *               candidate, which passes `{ shortCircuit: { foldTreeOwned: true } }` to take the
- *               fold the comparison-tree refusal owns (raise/shortcircuit.ts). */
+ *  @param pre   per-caller PRE-RECOVERY options ({@link PreRecoveryOptions}). Every shipped lift
+ *               passes `ownContext`, the context's own entry for this function, which the
+ *               soft-float boundary reads (raise/floathelpers.ts); rank.ts's `/connective` candidate
+ *               also passes `{ shortCircuit: { foldTreeOwned: true } }` to take the fold the
+ *               comparison-tree refusal owns (raise/shortcircuit.ts). */
 export function raiseRecovered(
   fn: Fn,
   target: TargetDescription,
