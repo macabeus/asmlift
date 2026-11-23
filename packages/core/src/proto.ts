@@ -866,14 +866,14 @@ export const PRELUDE_TYPEDEFS: ReadonlyMap<string, string> = new Map([
  *  A candidate's prelude does not declare them: a candidate spells a float with the keyword
  *  (backend/cfamily.ts), so a project context that typedefs them cannot collide with it. They are
  *  read to tell that a declared spelling is floating. */
-/** An FPU with no registers, which `validatePrototypes` hands `spellableProto` to ask about a table
- *  for no target: with it, neither floating type takes a general word. */
-const NO_GENERAL_FLOATS: NonNullable<TargetDescription['fpu']> = { argRegs: [], returnReg: '', slots: 'separate' };
-
 const FLOAT_TYPEDEFS: ReadonlyMap<string, string> = new Map([
   ['f32', 'float'],
   ['f64', 'double'],
 ]);
+
+/** An FPU with no registers, which `validatePrototypes` hands `spellableProto` to ask about a table
+ *  for no target: with it, neither floating type takes a general word. */
+const NO_GENERAL_FLOATS: NonNullable<TargetDescription['fpu']> = { argRegs: [], returnReg: '', slots: 'separate' };
 
 /** The C89 integer bases, which need no declaration anywhere. `signed`/`unsigned` is stripped
  *  before the lookup, exactly as {@link declaredWidth} strips it. */
