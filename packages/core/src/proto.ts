@@ -262,46 +262,68 @@ export function calleeDeclaration(callee: string, prototypes: Prototypes, helper
  *  The COUNT form is the user's word for argument REGISTERS and says so at its declaration, so it
  *  expands to that many words and can never abstain. It is the way past a header this cannot size.
  *
- *  A `double` IS A TARGET FACT. Where it crosses a call in general argument words
- *  (`TargetDescription.doubleArgWords`) it is 64 bits of words and its index is in `doubles`, so a
- *  reader can tell it from a `long long`, whose bits are the same words in another order; on a
- *  target that states no such words the list abstains. A `float` on such a target is the next ONE
- *  general word, wherever it falls — agbcc -O2 passes `(int, float)` in r0, r1, `(double, float)`
- *  in r0:r1, r2, `(float, double)` in r0, r1:r2, and a fifth argument `float` in the first stack
- *  word — and its index is in `singles`. That word is a float only to a callee whose declaration
- *  the candidate prints (`spellableProto` prints the keyword, as it prints `double`): an undeclared
- *  callee is handed a `float` promoted to a `double`, two words. A `long double` states no layout,
- *  and a known spelling with no layout is not the unsized abstention, so on a target with no FPU a
- *  call to such a declaration refuses rather than guess (frontend/call-plan.ts
- *  `refuseUnplacedFloat`). */
+ *  A FLOATING PARAMETER IS A TARGET FACT, and `floats` maps the index of each one laid out to its
+ *  width, so a reader can tell it from the integer whose words it shares. A `double` is 64 bits of
+ *  words where it crosses a call in general argument words (`TargetDescription.doubleArgWords`),
+ *  which is no `long long`: the same words in another order. A `float` is the next ONE general word,
+ *  wherever it falls, on a target with no FPU (`fpu` absent: the soft-float ABI has no other
+ *  register to put it in) — agbcc -O2 passes `(int, float)` in r0, r1, `(double, float)` in r0:r1,
+ *  r2, `(float, double)` in r0, r1:r2, and a fifth argument `float` in the first stack word. Either
+ *  is read off its spelling, keyword or project typedef (`floatingSpelling`: `f32` is a `float`).
+ *  The word is a float only to a callee whose declaration the candidate prints (`spellableProto`
+ *  prints the keyword): an undeclared callee is handed a `float` promoted to a `double`, two words.
+ *  Anywhere else the list abstains. A `long double` states no layout, and a known spelling with no
+ *  layout is not the unsized abstention, so on a target with no FPU a call to such a declaration
+ *  refuses rather than guess (frontend/call-plan.ts `refuseUnplacedFloat`). */
 export function declaredCallArgs(
   p: FnProto | undefined,
-  target: Pick<TargetDescription, 'doubleArgWords'>,
-): { widths: readonly number[]; doubles: ReadonlySet<number>; singles: ReadonlySet<number> } | undefined {
+  target: Pick<TargetDescription, 'doubleArgWords' | 'fpu'>,
+): DeclaredArgs | undefined {
   if (typeof p?.params === 'number') {
-    return { widths: Array.from({ length: p.params }, () => 32), doubles: new Set(), singles: new Set() };
+    return { widths: Array.from({ length: p.params }, () => 32), floats: new Map() };
   }
   if (!Array.isArray(p?.params)) {
     return undefined;
   }
   const widths: number[] = [];
-  const doubles = new Set<number>();
-  const singles = new Set<number>();
+  const floats = new Map<number, FloatWidth>();
   for (const [i, t] of p.params.entries()) {
     const w = declaredWidth(t) ?? (paramClassOf(p, p.params, i) === 'word' ? 32 : undefined);
+    const f = w === undefined ? floatArgWidth(t, target) : undefined;
     if (w !== undefined) {
       widths.push(w);
-    } else if (target.doubleArgWords !== undefined && isDoubleSpelling(t)) {
-      doubles.add(i);
-      widths.push(64);
-    } else if (target.doubleArgWords !== undefined && isSingleSpelling(t)) {
-      singles.add(i);
-      widths.push(32);
+    } else if (f !== undefined) {
+      floats.set(i, f);
+      widths.push(f);
     } else {
       return undefined;
     }
   }
-  return { widths, doubles, singles };
+  return { widths, floats };
+}
+
+/** The width of a floating parameter, by index, where the target lays one out in general words. */
+export type FloatWidth = 32 | 64;
+
+/** A declaration's argument words (`declaredCallArgs`): each parameter's width, and the floating
+ *  ones among them by index. */
+export interface DeclaredArgs {
+  readonly widths: readonly number[];
+  readonly floats: ReadonlyMap<number, FloatWidth>;
+}
+
+/** The general-word width a floating spelling crosses a call in on `target` (`declaredCallArgs`),
+ *  or undefined where it states none there. */
+function floatArgWidth(
+  t: ParamType,
+  target: Pick<TargetDescription, 'doubleArgWords' | 'fpu'>,
+): FloatWidth | undefined {
+  const f = floatingSpelling(t);
+  return f === 'double' && target.doubleArgWords !== undefined
+    ? 64
+    : f === 'float' && target.fpu === undefined
+      ? 32
+      : undefined;
 }
 
 /** WHAT ONE DECLARED PARAMETER IS, as far as where a caller places it goes — the one reading every
@@ -591,10 +613,6 @@ function ownParamWidths(
   return widths;
 }
 
-/** Whether a declared type is `double`, qualifiers aside. */
-const isDoubleSpelling = (t: ParamType): boolean => t.replace(/\b(?:const|volatile)\b/g, ' ').trim() === 'double';
-const isSingleSpelling = (t: ParamType): boolean => t.replace(/\b(?:const|volatile)\b/g, ' ').trim() === 'float';
-
 /** The floating type a declared type is, qualifiers aside — a C keyword, or a typedef of one every
  *  project declares (`FLOAT_TYPEDEFS`) — or undefined for any other type. */
 export const floatingSpelling = (t: ParamType): 'float' | 'double' | 'long double' | undefined => {
@@ -848,6 +866,10 @@ export const PRELUDE_TYPEDEFS: ReadonlyMap<string, string> = new Map([
  *  A candidate's prelude does not declare them: a candidate spells a float with the keyword
  *  (backend/cfamily.ts), so a project context that typedefs them cannot collide with it. They are
  *  read to tell that a declared spelling is floating. */
+/** An FPU with no registers, which `validatePrototypes` hands `spellableProto` to ask about a table
+ *  for no target: with it, neither floating type takes a general word. */
+const NO_GENERAL_FLOATS: NonNullable<TargetDescription['fpu']> = { argRegs: [], returnReg: '', slots: 'separate' };
+
 const FLOAT_TYPEDEFS: ReadonlyMap<string, string> = new Map([
   ['f32', 'float'],
   ['f64', 'double'],
@@ -953,13 +975,13 @@ export function spellableType(t: ParamType): boolean {
  *  TYPE, nothing carries it yet, and a project that wants the prototype emitted spells it. */
 export function spellableProto(
   p: FnProto | undefined,
-  target: Pick<TargetDescription, 'doubleArgWords'>,
+  target: Pick<TargetDescription, 'doubleArgWords' | 'fpu'>,
   returned?: IrType,
   byValue?: ReadonlySet<number>,
 ): { readonly params: readonly ParamType[]; readonly returns: ParamType } | undefined {
-  // A `float` return prints on a target that hands one back as its bits in the return register
-  // (`doubleArgWords`, the soft-float ABI): the lift reads that call's result as the float or
-  // refuses (raise/floathelpers.ts `floatReturn`), so the candidate must declare it — an implicit
+  // A `float` return prints, as its keyword, on a target that hands one back as its bits in the
+  // return register (no `fpu`, the soft-float ABI): the lift reads that call's result as the float
+  // or refuses (raise/floathelpers.ts `floatReturn`), so the candidate must declare it — an implicit
   // declaration returns an `int`, which C would convert.
   // A struct returned through memory prints as the headers spell the struct the lift typed its call
   // as (`returned`), which the declarations block defines beside this prototype (declare.ts). With
@@ -968,16 +990,18 @@ export function spellableProto(
   // standing for `void`: the struct is defined only beside it, and the local the lift passes is of
   // that type, so without it the candidate cannot declare its own local.
   const passesStruct = byValue !== undefined && byValue.size > 0;
-  const returns =
+  const spelled =
     returned?.kind === 'struct'
       ? (returned.declared ?? `struct ${returned.name}`)
       : (p?.returns ?? (passesStruct && p?.returnsVoid === true ? 'void' : undefined));
+  const singleReturn = target.fpu === undefined && spelled !== undefined && floatingSpelling(spelled) === 'float';
+  const returns = singleReturn ? 'float' : spelled;
   if (
     p === undefined ||
     returns === undefined ||
     (returned === undefined &&
       !(passesStruct && returns.trim() === 'void') &&
-      !(target.doubleArgWords !== undefined && isSingleSpelling(returns)) &&
+      !singleReturn &&
       (!spellableType(returns) || declaredWidth(returns) === undefined))
   ) {
     return undefined;
@@ -986,24 +1010,26 @@ export function spellableProto(
     return { params: [], returns };
   }
   // A parameter prints where the frontend lays it out (`declaredCallArgs`): a type this spells, or a
-  // `double` or `float` the target gives general words, which as a C keyword needs no typedef — or a struct
-  // the lift passed by value (`byValue`, by parameter index), which the declarations block defines
-  // beside this prototype from its `byValueLayouts`, as it defines a returned one.
+  // floating one the target gives general words, printed as its C keyword, which needs no typedef
+  // (a candidate's prelude declares no `f32`, and a context that does makes it the same type) — or a
+  // struct the lift passed by value (`byValue`, by parameter index), which the declarations block
+  // defines beside this prototype from its `byValueLayouts`, as it defines a returned one.
+  const keyword = (laid: DeclaredArgs) => (t: ParamType, i: number) => (laid.floats.has(i) ? floatingSpelling(t)! : t);
   if (Array.isArray(p.params) && byValue !== undefined && passesStruct) {
     const params = p.params;
     const rest = params.map((t, i) => (byValue.has(i) ? 'u32' : t));
     const laid = declaredCallArgs({ ...p, params: rest }, target);
     return laid !== undefined &&
       [...byValue].every((i) => p.byValueLayouts !== undefined && Object.hasOwn(p.byValueLayouts, i)) &&
-      rest.every((t, i) => laid.doubles.has(i) || laid.singles.has(i) || spellableType(t))
-      ? { params, returns }
+      rest.every((t, i) => laid.floats.has(i) || spellableType(t))
+      ? { params: params.map((t, i) => (byValue.has(i) ? t : keyword(laid)(t, i))), returns }
       : undefined;
   }
   const laid = declaredCallArgs(p, target);
   return Array.isArray(p.params) &&
     laid !== undefined &&
-    p.params.every((t, i) => laid.doubles.has(i) || laid.singles.has(i) || spellableType(t))
-    ? { params: p.params, returns }
+    p.params.every((t, i) => laid.floats.has(i) || spellableType(t))
+    ? { params: p.params.map(keyword(laid)), returns }
     : undefined;
 }
 
@@ -1210,11 +1236,12 @@ export function validatePrototypes(value: unknown): string[] {
       typeof returns === 'string' && (params === undefined || countOk || listOk)
         ? { ...(params === undefined ? {} : { params: params as number | ParamType[] }), returns }
         : undefined;
-    // A table is checked for no target, so a `double` parameter counts as one no target lays out.
+    // A table is checked for no target, so a floating parameter counts as one no target lays out:
+    // checked as for a target with an FPU and no general words for a double, where none takes one.
     if (
       shaped !== undefined &&
       (declaredWidth(shaped.returns!) ?? 0) > 32 &&
-      spellableProto(shaped, {}) === undefined
+      spellableProto(shaped, { fpu: NO_GENERAL_FLOATS }) === undefined
     ) {
       problems.push(
         `${sym}: "returns": ${JSON.stringify(shaped.returns)} is wider than a register, and the pair it ` +

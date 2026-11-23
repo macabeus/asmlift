@@ -2949,6 +2949,43 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'float g1(float); float fcallarg(float,float);',
     proto: { g1: { params: ['float'], returns: 'float' } },
   },
+  // …spelled through a project's typedef of `float` (core proto.ts `floatingSpelling`), which the
+  // candidate declares with the keyword: a candidate's prelude has no `f32`.
+  {
+    sym: 'fcallf32',
+    src: 'typedef float f32;\nf32 g2(f32);\nf32 fcallf32(f32 a,f32 b){ return g2(a-b); }',
+    features: ['float', 'arithmetic'],
+    toolchains: ['agbcc'],
+    ctx: 'typedef float f32; f32 g2(f32); f32 fcallf32(f32,f32);',
+    proto: { g2: { params: ['f32'], returns: 'f32' } },
+  },
+  // …and beside a struct passed by value, the word after the struct's (core aggregate.ts
+  // `byValueCallArgs` carries `floats` as `declaredCallArgs` does).
+  {
+    sym: 'bvfloat',
+    src: 'struct W { u32 x; };\nvoid takeWF(struct W w, float f);\nextern struct W gW;\nvoid bvfloat(float f){ takeWF(gW, f); }',
+    features: ['float', 'global', 'multi-arg'],
+    toolchains: ['agbcc'],
+    ctx: 'struct W { u32 x; };\nvoid takeWF(struct W w, float f);\nvoid bvfloat(float f);',
+    proto: {
+      takeWF: {
+        params: ['struct W', 'float'],
+        byValueLayouts: { 0: { kind: 'struct', members: [{ name: 'x', type: 'u32' }] } },
+        returnsVoid: true,
+      },
+    },
+  },
+  // A function whose own declaration types an argument an integer is handed no float, whatever the
+  // callee it passes the word to takes: `bl pf` alone is also `void fpun(float x){ pf(x); }`, which
+  // conflicts with the header. A correct decline, pinned (core raise/floathelpers.ts `ownIntegerWords`).
+  {
+    sym: 'fpun',
+    src: 'void pf(float);\nvoid fpun(int x){ pf(*(float *)&x); }',
+    features: ['float', 'cast'],
+    toolchains: ['agbcc'],
+    ctx: 'void pf(float); void fpun(int);',
+    proto: { pf: { params: ['float'], returnsVoid: true }, fpun: { params: ['int'], returnsVoid: true } },
+  },
   {
     sym: 'dadd',
     src: 'double dadd(double a,double b){ return a+b; }',

@@ -179,7 +179,7 @@ function probedSource(
     // this probe is taken, so they are NOT re-run here). The probe's scoreDeltas are REPORTED,
     // so it is verifier-gated like every other path: a corrupt clone yields `undefined`, never
     // a garbage delta.
-    raiseRecovered(clone, target, {}, self);
+    raiseRecovered(clone, target, {}, self, { ownContext: ownContextProto });
     // …structured with the SAME SYMBOL FACTS the main path uses, which is TWO dictionaries and
     // not one: the project's own map AND the derived array shapes (raise/globalshape.ts), asked
     // in that order, exactly as `decompileTraced` asks them. Either one missing here measures the

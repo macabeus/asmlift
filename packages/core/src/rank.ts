@@ -2421,6 +2421,7 @@ export function enumerateCandidates(
                 },
               },
               displaced: { keepStores: liftSetting.keepStores },
+              ownContext: ownContext.ownContextProto,
             },
           );
         } catch (e) {

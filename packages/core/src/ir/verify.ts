@@ -9,7 +9,7 @@
 //      into a block parameter of its own type; an `fconst` is a double, sixteen hex digits into an f64
 //   5. side data: a fn that carries a write-order record carries one for EVERY block, with every
 //      ordinal inside that block's own write count (ir/core.ts `WriteOrder`)
-import { Block, Fn, Op, Value, dominators } from './core';
+import { Block, Fn, Op, Value, dominators, floatOperands } from './core';
 import { isDoubleBits } from './float-bits';
 import { FLOAT_COMPUTING, FLOAT_OPS, FLOAT_RESIZE, FLOAT_TO_INT, INT_TO_FLOAT, WIDE_BITS, opSig } from './opcodes';
 import { type IrType, T, intWidth, typeEquals, typeToString } from './types';
@@ -17,21 +17,17 @@ import { type IrType, T, intWidth, typeEquals, typeToString } from './types';
 export class VerifyError extends Error {}
 
 /** A call hands a float only to a parameter its callee is declared to take a `double` or a `float`
- *  in — the operands the frontend lists in `doubles` and `singles` — and returns one only where its callee is declared to
- *  return a `float` (`floatReturn`), as that single. */
+ *  in — the operands the frontend names in `FLOATS_ATTR`, at that width — and returns one only where
+ *  its callee is declared to return a `float` (`floatReturn`), as that single. */
 function floatsDeclared(op: Op): boolean {
-  const at = Array.isArray(op.attrs.doubles) ? op.attrs.doubles : [];
-  const one = Array.isArray(op.attrs.singles) ? op.attrs.singles : [];
+  const at = floatOperands(op);
   return (
     op.opcode === 'call' &&
     op.results.every(
       (r) => r.type.kind !== 'float' || (op.attrs.floatReturn === 'float' && typeEquals(r.type, T.f32())),
     ) &&
     op.operands.every(
-      (o, i) =>
-        o.type.kind !== 'float' ||
-        (at.includes(i) && typeEquals(o.type, T.f64())) ||
-        (one.includes(i) && typeEquals(o.type, T.f32())),
+      (o, i) => o.type.kind !== 'float' || (at.has(i) && typeEquals(o.type, at.get(i) === 64 ? T.f64() : T.f32())),
     )
   );
 }

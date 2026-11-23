@@ -338,6 +338,7 @@ function traceTower(
         }),
     },
     prototypes[name],
+    { ownContext: ownContext.ownContextProto },
   );
 
   // (4) structure → neutral AST; boundary contract: no unresolved value leaked (strict) or

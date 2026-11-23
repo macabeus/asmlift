@@ -288,7 +288,7 @@ function runTower(
 
   // (2.35–3.5) pre-recovery recognizers → type recovery → return-sinking, the ONE shared spine
   // (`raiseRecovered`) that trace.ts and the cli's rank.ts/report.ts also run.
-  raiseRecovered(fn, target, {}, prototypes[name]);
+  raiseRecovered(fn, target, {}, prototypes[name], { ownContext: own.ownContextProto });
   const recovered = print(fn, { writeOrder: true });
 
   // (4) structure: IR → neutral AST; boundary contract: no unresolved value leaked (strict), or

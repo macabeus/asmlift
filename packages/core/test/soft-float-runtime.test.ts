@@ -85,6 +85,51 @@ describe('a declared float parameter of an ordinary callee', () => {
   test('a loaded word refuses', () => {
     expect(() => declared('fpassw')).toThrow("argument 2 of the call to 'h1' is a `float` its callee declares");
   });
+
+  // `f32` is a project's typedef of `float` (proto.ts `floatingSpelling`): laid out as the keyword is.
+  test('a parameter and a return spelled through a float typedef', () => {
+    const g2: Prototypes = { g2: { params: ['f32'], returns: 'f32' } };
+    expect(decompile('fcallf32', asm, ARMV4T_AGBCC, { prototypes: g2 }).source).toBe(
+      'float fcallf32(float a0, float a1) {\n    float v0;\n    v0 = a0 - a1;\n    return g2(v0);\n}\n',
+    );
+  });
+
+  // A float beside a struct passed by value is the next word after the struct's (aggregate.ts
+  // `byValueCallArgs` carries `floats` as `declaredCallArgs` does).
+  test('beside a struct passed by value', () => {
+    const takeWF: Prototypes = {
+      takeWF: {
+        params: ['struct W', 'float'],
+        byValueLayouts: { 0: { kind: 'struct', members: [{ name: 'x', type: 'u32' }] } },
+        returnsVoid: true,
+      },
+    };
+    expect(decompile('bvfloat', asm, ARMV4T_AGBCC, { prototypes: takeWF }).source).toBe(
+      'void bvfloat(float a0) {\n    takeWF(gWs, a0);\n}\n',
+    );
+  });
+
+  // THE FUNCTION'S OWN DECLARATION is what the candidate is compiled against: a word it types an
+  // integer is no float it was handed (`void fpun(int x){ pf(*(float *)&x); }` is `bl pf` alone),
+  // and a return it types an integer takes no float (`int fpunret(void)` returning `rf()`'s bits).
+  test('an argument or a return the own declaration types an integer refuses', () => {
+    const pf: Prototypes = { pf: { params: ['float'], returnsVoid: true }, rf: { params: [], returns: 'float' } };
+    const own = (name: string, self: Prototypes[string]) =>
+      decompile(name, asm, ARMV4T_AGBCC, { prototypes: { ...pf, [name]: self } }).source;
+    expect(() => own('fpun', { params: ['int'], returnsVoid: true })).toThrow(
+      "argument 1 of the call to 'pf' is a `float` its callee declares",
+    );
+    expect(() => own('fpunret', { params: [], returns: 'int' })).toThrow("'rf' is declared to return float");
+    // …and the header's own entry, read beside the table (proto-context.ts `ownContextEntry`)
+    expect(() =>
+      decompile('fpun', asm, ARMV4T_AGBCC, { prototypes: pf, ownContextProto: { params: ['int'], returnsVoid: true } }),
+    ).toThrow("argument 1 of the call to 'pf' is a `float` its callee declares");
+    // CONTROL: declared as the float it is, or not declared, it lifts
+    expect(own('fpun', { params: ['float'], returnsVoid: true })).toBe('void fpun(float a0) {\n    pf(a0);\n}\n');
+    expect(decompile('fpun', asm, ARMV4T_AGBCC, { prototypes: pf }).source).toBe(
+      'void fpun(float a0) {\n    pf(a0);\n}\n',
+    );
+  });
 });
 
 // agbcc from -O1 deletes a runtime helper call whose result nothing reads, so a word result still in

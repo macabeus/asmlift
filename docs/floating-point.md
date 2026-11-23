@@ -364,8 +364,10 @@ open-coded around `__floatsisf` (`gcc/optabs.c:3591-3622`, the negative half hal
 kept and doubled through `__addsf3`), and `raise/unsigned-float.ts` reads that exact diamond as one
 `uitofp`, `(float)(u32)x` (`u2f`). Still declined on agbcc: `(double)u` (`optabs.c:3633-3655`, a
 conditional `__adddf3` of 2^32 that joins a 64-bit pair across the diamond, which the Thumb frontend
-refuses), a single-precision literal word, a float loaded from or stored to memory, and a float
-result handed to an undeclared callee.
+refuses), a single-precision literal word, a float loaded from or stored to memory, a float
+result handed to an undeclared callee, and a float carried to the return across an edge — the
+join of `return a < b ? b : a`, or an argument returned with no float use of its own beside one
+that has (`if (a < b) return c; return a;`).
 
 **The crossings on an FPU.** The MIPS frontend decodes `trunc.w.{s,d}`, `cvt.{s,d}.w`, `mfc1`/`mtc1` of
 an integer word and `c.{eq,lt,le}.{s,d}` with `bc1t`/`bc1f`; PowerPC decodes `fcmpo`/`fcmpu` with the

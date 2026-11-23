@@ -368,6 +368,25 @@ export function foldWriteOrder(order: WriteOrder | undefined, from: Block, into:
  *  its `off` means nothing. */
 export const OWN_RETURN_OBJECT = 'returned';
 
+/** The `call` attribute that names the operands a callee's declaration types floating, as flat
+ *  (operand, width) pairs — `[1, 64, 2, 32]` for a `double` second and a `float` third — on a target
+ *  that passes them in general words (frontend/call-plan.ts; `proto.ts` `declaredCallArgs`).
+ *  `raise/floathelpers.ts` reads each operand as the float of that width or refuses, and verify
+ *  admits a float operand only where it is named here at its width. Read with {@link floatOperands}. */
+export const FLOATS_ATTR = 'floats';
+
+/** Each operand {@link FLOATS_ATTR} names, to its width; empty on a call that names none. */
+export function floatOperands(op: Op): ReadonlyMap<number, number> {
+  const at = op.attrs[FLOATS_ATTR];
+  const out = new Map<number, number>();
+  if (Array.isArray(at)) {
+    for (let k = 0; k + 1 < at.length; k += 2) {
+      out.set(at[k], at[k + 1]);
+    }
+  }
+  return out;
+}
+
 /** The `call` attribute of L1 that says its result is the IMAGE of a struct its callee is declared
  *  to return in the return register (frontend/call-plan.ts `registerStructLocal`): a word the
  *  frontend reads as any call's, which `liftRegisterStructCalls` (frontend/register-struct-call.ts)

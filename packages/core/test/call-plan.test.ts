@@ -31,7 +31,7 @@ describe('callDeclarations', () => {
     const { declaredCall } = thumbCalls({
       g: { params: ['s32', 's32', 's32', 'long long'] },
     });
-    expect(declaredCall('g')).toEqual({ widths: [32, 32, 32, 64], doubles: new Set(), singles: new Set(), params: 4 });
+    expect(declaredCall('g')).toEqual({ widths: [32, 32, 32, 64], floats: new Map(), params: 4 });
   });
 
   test('puts the hidden pointer of a struct returned through memory first', () => {
@@ -69,8 +69,7 @@ describe('callDeclarations.plan', () => {
     expect(() => calls.declaredCall('__muldi3')).toThrow(/through a hidden pointer in r0/);
     expect(calls.plan('__muldi3')).toEqual({
       widths: [64, 64],
-      doubles: new Set(),
-      singles: new Set(),
+      floats: new Map(),
       returns: { kind: 'pair' },
       clobbers: pairClobbers(calls),
       declaredVoid: false,
@@ -101,7 +100,7 @@ describe('callDeclarations.plan', () => {
   test('plans the doubles its declaration types', () => {
     expect(thumbCalls({ g: { params: ['s32', 'double'] } }).plan('g')).toMatchObject({
       widths: [32, 64],
-      doubles: new Set([1]),
+      floats: new Map([[1, 64]]),
     });
   });
 
@@ -118,8 +117,7 @@ describe('callDeclarations.plan', () => {
     expect(calls.declaredCall('mv')).toBeNull();
     expect(calls.plan('mv')).toEqual({
       widths: null,
-      doubles: new Set(),
-      singles: new Set(),
+      floats: new Map(),
       returns: { kind: 'register-struct', image: false },
       clobbers: [...calls.callClobbers, 'r0'],
       declaredVoid: false,
@@ -258,8 +256,7 @@ describe('callDeclarations.plan for a lowering with no pair, no memory return an
     const calls = ppcCalls({});
     expect(calls.plan('__div2i')).toEqual({
       widths: null,
-      doubles: new Set(),
-      singles: new Set(),
+      floats: new Map(),
       returns: { kind: 'word' },
       clobbers: calls.callClobbers,
       declaredVoid: false,
@@ -495,23 +492,31 @@ describe('callDeclarations.plan for a callee declared with a float', () => {
   });
 
   // …and a `float` parameter there is the next one general word (`proto.ts` `declaredCallArgs`),
-  // named in `singles` as a double is in `doubles`
+  // named in `floats` at 32 as a double is at 64
   test('lays a float parameter out in one general word', () => {
     const plan = thumbCalls({ g: { params: ['double', 'float', 's32'], returns: 'float' } }).plan('g');
     expect(plan.widths).toEqual([64, 32, 32]);
-    expect(plan.doubles).toEqual(new Set([0]));
-    expect(plan.singles).toEqual(new Set([1]));
+    expect(plan.floats).toEqual(
+      new Map([
+        [0, 64],
+        [1, 32],
+      ]),
+    );
   });
 
-  // Where the target states no general words for a floating value, a `float` parameter is a
-  // spelling with no layout, and the arity guess that would stand in for it drops a trailing
-  // argument passed through unchanged
-  test('refuses a float parameter where the target lays out no float argument word', () => {
+  // A `float`'s word is a fact of the soft-float ABI (no `fpu`), not of a double's word order: a
+  // target that states no `doubleArgWords` still lays one out. A `long double` states no layout, and
+  // the arity guess that would stand in for it drops a trailing argument passed through unchanged
+  test('lays a float out wherever the target has no FPU, and refuses a long double', () => {
     const { doubleArgWords: _, ...none } = ARMV4T_AGBCC;
+    const plan = callDeclarations('f', none, { g: { params: ['s32', 'float'], returns: 'float' } }, EVERY, fail).plan(
+      'g',
+    );
+    expect(plan.floats).toEqual(new Map([[1, 32]]));
     expect(() =>
-      callDeclarations('f', none, { g: { params: ['s32', 'float'], returns: 'float' } }, EVERY, fail).plan('g'),
+      callDeclarations('f', none, { g: { params: ['s32', 'long double'], returns: 's32' } }, EVERY, fail).plan('g'),
     ).toThrow(
-      /^cannot lift 'f': `g` is declared to take 'float' as its parameter 2, which this target passes in general argument words that are not laid out here/,
+      /^cannot lift 'f': `g` is declared to take 'long double' as its parameter 2, which this target passes in general argument words that are not laid out here/,
     );
   });
 });

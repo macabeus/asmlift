@@ -566,11 +566,11 @@ describe('declaredCallArgs on a double', () => {
     const five = declaredCallArgs({ params: ['s32', 's32', 's32', 's32', 'double'] }, soft)!;
     expect(five.widths).toEqual([32, 32, 32, 32, 64]);
     expect(wordsOf(five.widths, soft)).toBe(6);
-    expect([...five.doubles]).toEqual([4]);
+    expect([...five.floats]).toEqual([[4, 64]]);
     // qualifiers aside, and a `long long` beside it is 64 bits and no double
     const mixed = declaredCallArgs({ params: ['s32', 'const double', 'long long'] }, soft)!;
     expect(mixed.widths).toEqual([32, 64, 64]);
-    expect([...mixed.doubles]).toEqual([1]);
+    expect([...mixed.floats]).toEqual([[1, 64]]);
   });
 
   // What the frontend lays out is what a candidate may declare, so the printer asks the same reader.
@@ -586,8 +586,7 @@ describe('declaredCallArgs on a double', () => {
     expect(declaredCallArgs({ params: ['s32', 'double'] }, PPC_MWCC)).toBeUndefined();
     expect(declaredCallArgs({ params: ['s32', 's32'] }, PPC_MWCC)).toEqual({
       widths: [32, 32],
-      doubles: new Set(),
-      singles: new Set(),
+      floats: new Map(),
     });
   });
 
@@ -597,7 +596,10 @@ describe('declaredCallArgs on a double', () => {
   test('a float is one marked word, a long double states no layout, and a count is that many words', () => {
     const laid = declaredCallArgs({ params: ['double', 'const float', 's32'] }, soft)!;
     expect(laid.widths).toEqual([64, 32, 32]);
-    expect([...laid.singles]).toEqual([1]);
+    expect([...laid.floats]).toEqual([
+      [0, 64],
+      [1, 32],
+    ]);
     expect(spellableProto({ params: ['s32', 'float'], returns: 'int' }, soft)).toEqual({
       params: ['s32', 'float'],
       returns: 'int',
@@ -611,10 +613,22 @@ describe('declaredCallArgs on a double', () => {
     expect(declaredReturnWidth({ params: [], returns: 'float' }, soft)).toBeUndefined();
     expect(declaredCallArgs({ params: ['s32', 'float'] }, PPC_MWCC)).toBeUndefined();
     expect(declaredCallArgs({ params: ['long double'] }, soft)).toBeUndefined();
+    // a project's typedef of either is laid out as the type it stands for, and printed as its keyword
+    expect([...declaredCallArgs({ params: ['f32', 'f64'] }, soft)!.floats]).toEqual([
+      [0, 32],
+      [1, 64],
+    ]);
+    expect(spellableProto({ params: ['f32', 'f64'], returns: 'f32' }, soft)).toEqual({
+      params: ['float', 'double'],
+      returns: 'float',
+    });
+    // a `float`'s word is the soft-float ABI's (no `fpu`), not a double's word order
+    const { doubleArgWords: _, ...noDoubleWords } = soft;
+    expect([...declaredCallArgs({ params: ['float'] }, noDoubleWords)!.floats]).toEqual([[0, 32]]);
+    expect(declaredCallArgs({ params: ['double'] }, noDoubleWords)).toBeUndefined();
     expect(declaredCallArgs({ params: 5 }, soft)).toEqual({
       widths: [32, 32, 32, 32, 32],
-      doubles: new Set(),
-      singles: new Set(),
+      floats: new Map(),
     });
   });
 });
