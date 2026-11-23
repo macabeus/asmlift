@@ -1553,8 +1553,9 @@ export function registerStructLocal(
  *    symbol's own address too, and `take(gQs)` is a type error against the header that declares
  *    it (`bareStructRefusal`).
  *
- *  - THE POINTEE OF ONE POINTER — word loads at consecutive words from byte 0 of one value that is
- *    no address op's (a parameter, a loaded pointer) and that nothing else in the function reads.
+ *  - THE POINTEE OF ONE POINTER — word loads at consecutive words from byte 0 of one incoming
+ *    parameter that nothing else in the function reads (never a computed or loaded pointer, which
+ *    prints as its own expression rather than as the name the retyping types).
  *    The value is retyped a pointer to the struct, the operand becomes it, and the call names it in
  *    `byValuePointee` (by declared parameter), which structure.ts spells `*p`. A pointer read
  *    anywhere else keeps the type its other reads give it, so that one declines.
@@ -1680,14 +1681,19 @@ export function foldByValueArgs(
           }
         }
         // THE POINTEE OF ONE POINTER, read whole: word loads at consecutive words from byte 0 of one
-        // value no address op defines (a parameter, a loaded pointer), which nothing else in the
-        // function reads, so the value is that struct's pointer and nothing else — typed so, it is
-        // passed as `*p` (structure.ts). A base read anywhere else keeps its own type and declines.
+        // incoming parameter, which nothing else in the function reads, so the parameter is that
+        // struct's pointer and nothing else — typed so, it is passed as `*p` (structure.ts). ONLY A
+        // PARAMETER: retyping the value retypes only the name it prints as, and a parameter prints
+        // as its own name. A computed pointer (`p[i]`'s `add`, a `gaddr` plus an offset) or a
+        // loaded one (`**pp`) prints as its defining expression, typed from that expression's own
+        // operands, so `*` would dereference an integer or a `u8 *` — C that does not compile. A
+        // base read anywhere else keeps its own type and declines.
         if (
           object === undefined &&
           loaded &&
           base0 !== undefined &&
-          baseDef?.opcode !== 'gaddr' &&
+          baseDef === undefined &&
+          irBlocks[0]!.params.includes(base0) &&
           loads.every((d, i) => wordAt(d, i, base0)) &&
           settled(loads as Op[]) &&
           onlyReadBy(irBlocks, base0, loads as Op[])
@@ -1704,8 +1710,8 @@ export function foldByValueArgs(
         if (object === undefined) {
           throw new FrontendUnsupportedError(
             `cannot lift '${name}': the call to \`${callee ?? 'a function pointer'}\` passes ${structSpelling(type)} ` +
-              'by value, and its words are not one frame object, one global or the pointee of one pointer nothing ' +
-              'else reads, read whole just before the call — a struct passed from anywhere else is not modelled',
+              'by value, and its words are not one frame object, one global or the pointee of one pointer parameter ' +
+              'nothing else reads, read whole just before the call — a struct passed from anywhere else is not modelled',
           );
         }
         blk.ops.splice(at, 0, object);
