@@ -3442,9 +3442,9 @@ function structureRanked(
   // a whole-struct copy lowered to words, `((s32 *)&gV3)[1] = ((s32 *)&s)[1];`, passes the bits
   // through. Any other reader (a named global, a declared member, a call, a return, a join)
   // declines. A store of bits into such a member is the bits, and keeps the cast. The float may sit
-  // at any depth of the member the read covers (`floatBytesIn`): `{ float f[1]; }`, `{ struct {
-  // float f; } in; }` and `{ union { float f; u32 w; } u; }` hand back the same word as `{ float f;
-  // }`, and `gF = *(s32 *)&s;` converts it the same way under the project's `float gF`.
+  // anywhere in the field the read covers (`floatBytesIn`): `{ float f[1]; }` hands back the same
+  // word as `{ float f; }`. A float inside a nested struct or union has no field here, so such a
+  // struct gets no local (aggregate.ts `nestsFloat`).
   const floatMemberBits = (op: Op): { name: string; width: number } | null => {
     if (op.opcode !== 'load') {
       return null;

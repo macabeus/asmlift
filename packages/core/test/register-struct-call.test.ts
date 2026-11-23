@@ -74,7 +74,7 @@ describe('agbcc: a struct of one member comes back in r0', () => {
       decompile('c_un', mw, TOOLCHAIN_TARGETS.mwcc_233_163n.description, { prototypes: { ...own('c_un'), mk: wh } })
         .source,
     ).toMatch(/union T mk_ret;\s+mk_ret = mk\(a0\);\s+gV = mk_ret\.h;/);
-    // a member that is no integer, or two of one width, names no single member: no local, as before
+    // a member that is no integer, or two of one width, names no single member: no local
     for (const members of [
       [
         { name: 'w', type: 'u32' },
