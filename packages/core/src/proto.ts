@@ -957,6 +957,10 @@ export function spellableProto(
   returned?: IrType,
   byValue?: ReadonlySet<number>,
 ): { readonly params: readonly ParamType[]; readonly returns: ParamType } | undefined {
+  // A `float` return prints on a target that hands one back as its bits in the return register
+  // (`doubleArgWords`, the soft-float ABI): the lift reads that call's result as the float or
+  // refuses (raise/floathelpers.ts `floatReturn`), so the candidate must declare it — an implicit
+  // declaration returns an `int`, which C would convert.
   // A struct returned through memory prints as the headers spell the struct the lift typed its call
   // as (`returned`), which the declarations block defines beside this prototype (declare.ts). With
   // no such call it is a return this cannot print.
@@ -973,6 +977,7 @@ export function spellableProto(
     returns === undefined ||
     (returned === undefined &&
       !(passesStruct && returns.trim() === 'void') &&
+      !(target.doubleArgWords !== undefined && isSingleSpelling(returns)) &&
       (!spellableType(returns) || declaredWidth(returns) === undefined))
   ) {
     return undefined;

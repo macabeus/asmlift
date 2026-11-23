@@ -602,6 +602,13 @@ describe('declaredCallArgs on a double', () => {
       params: ['s32', 'float'],
       returns: 'int',
     });
+    // …and a `float` return, which the soft-float ABI hands back as its bits in r0
+    expect(spellableProto({ params: ['float'], returns: 'float' }, soft)).toEqual({
+      params: ['float'],
+      returns: 'float',
+    });
+    expect(spellableProto({ params: [], returns: 'float' }, PPC_MWCC)).toBeUndefined();
+    expect(declaredReturnWidth({ params: [], returns: 'float' }, soft)).toBeUndefined();
     expect(declaredCallArgs({ params: ['s32', 'float'] }, PPC_MWCC)).toBeUndefined();
     expect(declaredCallArgs({ params: ['long double'] }, soft)).toBeUndefined();
     expect(declaredCallArgs({ params: 5 }, soft)).toEqual({

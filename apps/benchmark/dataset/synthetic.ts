@@ -2926,18 +2926,19 @@ export const SYNTHETIC: SynthSpec[] = [
   {
     sym: 'divcall',
     src: 'void gv();\nvoid divcall(int a,int b){ gv(a/b); }',
-    features: ['call', 'soft-div', 'signed'],
+    features: ['arithmetic', 'signed'],
     toolchains: ['agbcc'],
     ctx: 'void divcall(int,int);',
   },
   // `fcall` with its callee declared: agbcc hands a declared `float` parameter its next one general
-  // word (core proto.ts `declaredCallArgs` `singles`), here r0, which holds the product.
+  // word (core proto.ts `declaredCallArgs` `singles`), here r0, which holds the difference.
   {
     sym: 'fcallarg',
-    src: 'float g1(float);\nfloat fcallarg(float a,float b){ return g1(a*b); }',
-    features: ['float', 'arithmetic', 'call'],
+    src: 'float g1(float);\nfloat fcallarg(float a,float b){ return g1(a-b); }',
+    features: ['float', 'arithmetic'],
     toolchains: ['agbcc'],
     ctx: 'float g1(float); float fcallarg(float,float);',
+    proto: { g1: { params: ['float'], returns: 'float' } },
   },
   {
     sym: 'dadd',
