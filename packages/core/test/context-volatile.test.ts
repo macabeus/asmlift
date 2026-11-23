@@ -50,10 +50,12 @@ describe('a context-declared volatile aggregate the map does not describe', () =
     );
   });
 
-  test('withheld, the volatility leaves a plain cast — the spelling the compiler may hoist', () => {
+  // The machine re-reads it each time round a loop that stores nothing, which a plain read would not
+  // be (frontend/poll-reads.ts): the poll-read pin qualifies it wherever the declarations do not.
+  test('withheld, the volatility is still read off the poll', () => {
     expect(
       decompile('vpoll', VPOLL, ARMV4T_AGBCC, { prototypes: VOID, contextGlobals: AGGREGATES_ONLY }).source,
-    ).toContain('*(u16 *)&gV == 0');
+    ).toContain('*(volatile u16 *)&gV == 0');
   });
 
   test('two reads of one member stay two qualified reads', () => {
@@ -89,7 +91,10 @@ describe('a context-declared volatile aggregate the map does not describe', () =
       ],
     ]);
     const src = decompile('vpollb', VPOLLB, ARMV4T_AGBCC, { symbols: map, contextGlobals: CTX }).source;
-    expect(src).not.toContain('volatile');
+    // the member the map lays out plain is not qualified by the context; the poll-read pin
+    // qualifies the read the loop makes each time round, through a cast
+    expect(src).not.toContain('gV.b');
+    expect(src).toContain('((volatile u16 *)&gV)[1]');
   });
 
   test('an array subscripted through its own name keeps it: the declaration already qualifies the element', () => {
@@ -248,10 +253,11 @@ describe('a context-declared pointer to volatile', () => {
   test('an access through its value reads through a qualified cast, and the pointer read stays plain', () => {
     const src = decompile('pvq', PVQ, ARMV4T_AGBCC, { prototypes: VOIDQ, contextGlobals: ctx }).source;
     expect(src).toContain('while (((volatile u16 *)gQ)[1] == 0)');
-    // the context's volatility withheld: a plain read the compiler hoists out of the loop
+    // the context's volatility withheld: the poll-read pin still qualifies the read the loop makes
+    // each time round, which the compiler would hoist out of the loop were it plain
     const none: ContextGlobals = { ...ctx, pointeeVolatiles: new Set() };
     expect(decompile('pvq', PVQ, ARMV4T_AGBCC, { prototypes: VOIDQ, contextGlobals: none }).source).toContain(
-      'while (((u16 *)gQ)[1] == 0)',
+      'while (((volatile u16 *)gQ)[1] == 0)',
     );
   });
 });

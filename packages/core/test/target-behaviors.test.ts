@@ -12,6 +12,8 @@ import type { CompilerBehaviors, TargetDescription } from '../src/target';
 // flags are not here; codegen-flags.test.ts pins those (`FLAG_MADE`).
 const BEHAVIORS: Record<string, CompilerBehaviors> = {
   ARMV4T_AGBCC: {
+    pollStoreMotion: 'sinks',
+    strictAliasing: true,
     // ControlFlowBehaviors
     coalesceLoopInit: false,
     preserveDivergentBranchSense: true,
@@ -69,6 +71,8 @@ const BEHAVIORS: Record<string, CompilerBehaviors> = {
     staticLayout: { aggregateAlign: 1, stringAlign: 4, zeroScalar: 'data' },
   },
   MIPS_IDO: {
+    pollStoreMotion: 'hoists',
+    movesReadsPastBranches: true,
     // ControlFlowBehaviors
     coalesceLoopInit: true,
     preserveDivergentBranchSense: true,
@@ -102,6 +106,7 @@ const BEHAVIORS: Record<string, CompilerBehaviors> = {
     largestAlignment: 8,
   },
   MIPS_GCC: {
+    pollStoreMotion: 'hoists',
     // ControlFlowBehaviors
     coalesceLoopInit: true,
     preserveDivergentBranchSense: true,
@@ -136,6 +141,7 @@ const BEHAVIORS: Record<string, CompilerBehaviors> = {
     largestAlignment: 8,
   },
   PPC_MWCC: {
+    keepsInvariantReadsBesideStores: true,
     // ControlFlowBehaviors
     coalesceLoopInit: false,
     preserveDivergentBranchSense: true,
@@ -173,6 +179,7 @@ const BEHAVIORS: Record<string, CompilerBehaviors> = {
     },
   },
   PPC_MWCC_233: {
+    keepsInvariantReadsBesideStores: true,
     // ControlFlowBehaviors
     coalesceLoopInit: false,
     preserveDivergentBranchSense: true,
@@ -210,6 +217,7 @@ const BEHAVIORS: Record<string, CompilerBehaviors> = {
     },
   },
   PPC_MWCC_247: {
+    keepsInvariantReadsBesideStores: true,
     // ControlFlowBehaviors
     coalesceLoopInit: false,
     preserveDivergentBranchSense: true,

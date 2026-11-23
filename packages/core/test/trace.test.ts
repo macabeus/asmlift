@@ -56,8 +56,10 @@ test('trace: the report names the toolchain and the profile of the flags the fun
     expect(report.target.cflags).toEqual(flags);
     expect(report.target.profile).toEqual({ slots: { '-mthumb-interwork': 'on', O: '1', '-fhex-asm': 'on' } });
   }
-  // every flag set of a toolchain decompiles against its one description
-  expect(traced.report.target.compilerBehaviors).toEqual(ARMV4T_AGBCC.compilerBehaviors);
+  // every flag set of a toolchain decompiles against its one description, save what the level
+  // changes: `-O1` keeps no alias sets (target.ts `strictAliasingAt`)
+  const { strictAliasing: _o2, ...declared } = ARMV4T_AGBCC.compilerBehaviors;
+  expect(traced.report.target.compilerBehaviors).toEqual(declared);
   expect(traced.source).toBe(decompileTraced('half', HALF_ASM, AGBCC).source);
 });
 

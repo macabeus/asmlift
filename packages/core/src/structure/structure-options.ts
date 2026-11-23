@@ -46,6 +46,12 @@ import type { SwitchBoundCase } from './switch-recover';
 // DEFAULT this pass owns (the edge-copy ordering, `spellDeclaredSubscripts`) do belong here.
 export interface StructureOptions extends ArithCompilerFacts {
   returnsVoid?: boolean;
+  // The compiler behaviours the effect contract reads (contracts.ts `assertEffectsPreserved`),
+  // spread in by `structureOptionsFor` with the rest and read by no structuring pass: how the
+  // compiler moves a plain store out of a poll loop, and whether the level moves loop-invariant
+  // code at all (target.ts, the fields).
+  pollStoreMotion?: 'sinks' | 'hoists';
+  keepsLoopInvariantReads?: boolean;
   coalesceLoopInit?: boolean;
   preserveDivergentBranchSense?: boolean;
   // Spell a JOINED two-armed if with the negated condition and swapped arms: the asm branched

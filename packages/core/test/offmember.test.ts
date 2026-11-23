@@ -196,7 +196,8 @@ describe('every gate is load-bearing', () => {
     // the cost this pins: the qualifier the cell wants is not in the spelling, and no gate here
     // objects — `/volatile` is the sibling candidate that carries it, and it never composes with
     // this one because `non-leaf-base` refuses the cast it wraps the base in
-    expect(out).not.toContain('volatile');
+    // (the poll's read is qualified by the poll-read pin, frontend/poll-reads.ts, not by the member)
+    expect(out).not.toMatch(/volatile[^\n]*->m8/);
   });
 });
 

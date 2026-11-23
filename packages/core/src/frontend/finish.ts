@@ -1,7 +1,7 @@
 /** THE END OF ONE LIFT, shared by the Thumb, MIPS and PPC frontends: what runs on the finished SSA
  *  once each frontend's own refusals have been asked. The call objects are folded and named, the
  *  frame-object audit judges every `laddr` (and may ask for the relift, `liftWithRelift`), the
- *  device and dead-read pins are stamped, and the entry parameters are put in ABI order.
+ *  device, poll-read and dead-read pins are stamped, and the entry parameters are put in ABI order.
  *
  *  ONE SEQUENCE, ONE ORDER. The three `liftOnce`s ran these steps by hand, in this order, and had
  *  drifted: PPC skipped three of them (no-ops there, as its caller says), and each handed the audit and the dead-read pin its own
@@ -31,6 +31,7 @@ import {
   refuseSretOutsideFrame,
 } from './frame-objects';
 import type { LocalStatics } from './local-object';
+import { pinPollReads } from './poll-reads';
 import { type ArgSlots, type SsaBuilder, abiSortEntryParams } from './ssa';
 
 /** What only the frontend measures of its frame, for the audit: the partition, the slots it keyed
@@ -123,6 +124,9 @@ export function finishLift(f: LiftFinish): Fn | FrameObjectRelift {
   if (f.memoryReturn) {
     refuseSretOutsideFrame(name, irBlocks, target);
   }
+  // A read a store-free, call-free loop makes each time round at an invariant address was
+  // `volatile` in the source, wherever the frame audit pinned nothing (frontend/poll-reads.ts).
+  pinPollReads(irBlocks, target);
   pinDeadReads(irBlocks, target, {
     name,
     own: f.own,

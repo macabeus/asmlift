@@ -1261,6 +1261,71 @@ export interface LoadBehaviors {
   // ABSENT ⇒ false: the compiler deletes every plain read nobody uses, so one still in the target
   // was qualified.
   keepsUnusedReads?: boolean;
+  // Does this compiler, AT THESE FLAGS, leave a plain read at a loop-invariant address in a loop
+  // that stores nothing and calls nothing, where an optimizing level moves it out ahead of the
+  // loop? A FLAG fact, like `keepsUnusedReads`: `targetFor` sets it from the optimisation level
+  // (`keepsLoopInvariantReadsAt`), never a description. Where it holds, a read the machine makes
+  // each time round says nothing about `volatile`, and the poll-read pin (frontend/poll-reads.ts)
+  // stamps none.
+  //
+  // ABSENT ⇒ false: the compiler moves such a read, so one still made each time round was
+  // `volatile` in the source, and the pin stamps it.
+  keepsLoopInvariantReads?: boolean;
+  // Does this compiler leave a plain read at a loop-invariant address in a loop that also STORES,
+  // at a level that moves it out of a loop that does not (`keepsLoopInvariantReads` absent)?
+  // COMPILED, mwcc 2.4.2, 2.3.3 and 2.4.7 at `-O4,p`: a store in the loop keeps the plain poll read
+  // in it in every probe (`while (*(s32 *)A & 3) ((s32 *)B)[5] = a0;`, a global store, a
+  // do-while). agbcc, IDO 7.1 and KMC gcc 2.7.2 move it in some of those shapes (agbcc and IDO by
+  // alias analysis the lift cannot see), so they leave it absent, and the poll-read pin
+  // (frontend/poll-reads.ts) stamps such a loop's tested reads.
+  //
+  // ABSENT ⇒ false: a store does not keep the read, and the pin stamps it.
+  keepsInvariantReadsBesideStores?: boolean;
+  // DOES A STORE KEEP A READ IN ITS LOOP ONLY WHERE THEIR TYPES MAY ALIAS? Strict aliasing: agbcc
+  // at `-O2` and `-Os` (toplev.c:3616, `optimize >= 2`; `-Os` forces 2) takes two accesses in
+  // disjoint alias sets for apart whatever their addresses (alias.c `true_dependence`,
+  // `DIFFERENT_ALIAS_SETS_P`), so a store through a stepped pointer keeps a read at a fixed address
+  // only where one of the two is a byte (`while (*(u16 *)0x4000006 != 160) *p++ = 0;` with `s32 *p`
+  // loads the register once, ahead of the loop). Read by the poll-read pin (frontend/poll-reads.ts
+  // `keptBesideMoving`).
+  //
+  // ABSENT ⇒ a store at an address the loop moves keeps every read beside it: agbcc at `-O1`, KMC
+  // gcc 2.7.2 (which has no alias sets), and IDO 7.1, measured at `-O2` with a `u16`, a `u8` and an
+  // `s32` read beside an `s32` and a `u16` stepped store.
+  strictAliasing?: boolean;
+  // HOW THIS COMPILER MOVES a plain store at a loop-invariant address out of a poll loop (a loop
+  // whose test reads memory at a fixed address, pinned `volatile`), which the effect contract
+  // refuses to print plain (contracts.ts `sunkPollStore`). COMPILED at the canonical flags:
+  //   'sinks'  — agbcc: loop.c `load_mems` keeps the cell in a register and writes it once after
+  //              the loop, unless an access the alias pass cannot tell apart from it keeps it;
+  //   'hoists' — IDO 7.1 and KMC gcc 2.7.2 at `-O2`: a lone store of a value the loop does not
+  //              change, made each time round, is written once ahead of the loop (IDO: `while
+  //              (*(vu32 *)A & 3) ((s32 *)B)[5] = a0;`, a global store, a do-while, and past an
+  //              unrelated `if`, a `break`, a `return` or a `&&` in the condition; KMC: `while
+  //              (*(vu32 *)A & 3) { ((s32 *)B)[1] = 5; s += *q++; }`, `B[1] = gV;` and `gW = a0;`
+  //              beside that read, which KMC keeps in the loop without it). A value the loop
+  //              computes, a store under an `if`, and a call stay in it on both. Beside a second
+  //              cell's store KMC keeps it, and IDO only where it cannot tell the two addresses
+  //              apart: `{ ((s32 *)B)[1] = a0; gW = a1; }` writes gW once ahead of the loop, and
+  //              `{ gW = a0; p[3] = a1; }` keeps both (contracts.ts `hoistedStore`).
+  //   Either only where the level moves loop-invariant code (`keepsLoopInvariantReads` absent):
+  //   gcc's loop pass runs from `-O1`, and agbcc `-O0` keeps the store in the loop.
+  //
+  // ABSENT ⇒ the store stays in the loop: mwcc kept it in every probe, those shapes KMC moves
+  // included (mwcc 2.4.2 `-O4,p`).
+  pollStoreMotion?: 'sinks' | 'hoists';
+  // DOES THIS COMPILER MOVE a plain read at a loop-invariant address out of a loop from PAST one
+  // of the loop's branches? COMPILED at `-O2`: IDO 7.1 loads `do { ((s32 *)A)[5] = a0; } while
+  // ((*(vu32 *)B & 3) || (*(u32 *)C & 1));`'s C once ahead of the loop; agbcc keeps it
+  // (`maybe_never` and Thumb's `may_trap_p`, loop.c), and so do KMC gcc 2.7.2 and mwcc 2.4.2 at
+  // `-O4,p`. Read by the poll-read pin (frontend/poll-reads.ts), which then pins a read the loop's
+  // exit tests wherever in the loop it is. KMC is left absent on that probe and on
+  // `synthetic:retpost_tail`'s plain loop bound, though it moves the read of `while (s < 100) {
+  // …; if ((*(u32 *)A & 3) == 0) break; }` (KNOWN GAP: setting it costs that row its match).
+  //
+  // ABSENT ⇒ false: past the loop's header, only a rotated poll's read and a tested read of a cell
+  // the loop's entry reads are the pin's.
+  movesReadsPastBranches?: boolean;
   // WHERE DOES THIS COMPILER PUT A READ NOBODY USES, at a level that keeps a plain one
   // (`keepsUnusedReads`)? The register a `volatile` read with no consumer is loaded into, and no
   // plain local is ever homed in. COMPILED at the keeping levels, one statement per line:
@@ -1623,6 +1688,10 @@ export const ARMV4T_AGBCC: TargetDescription = {
     },
   },
   compilerBehaviors: {
+    // a plain in-loop store no access provably keeps is written once after the loop (the field)
+    pollStoreMotion: 'sinks',
+    // under `-O2`'s alias sets; cleared below it (`strictAliasingAt`)
+    strictAliasing: true,
     coalesceLoopInit: false,
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,
@@ -1822,6 +1891,10 @@ export const MIPS_IDO: TargetDescription = {
   // `switchAllowsNeqCase: false` — IDO's switch dispatch uses `==`/`<`, never `!=` cases;
   // leaving it permissive mis-recognises `!=`-rooted if-else chains as switches.
   compilerBehaviors: {
+    // a plain store of an invariant value in a poll loop is written once ahead of it (the field)
+    pollStoreMotion: 'hoists',
+    // and a read past one of the loop's branches is loaded once ahead of it (the field)
+    movesReadsPastBranches: true,
     plainCharSigned: false,
     contractsFloatProducts: false,
     coalesceLoopInit: true,
@@ -1956,6 +2029,10 @@ export const MIPS_GCC: TargetDescription = {
   fpu: O32_FPU,
   capabilities: { endianness: 'big', hwDivide: true, hwFloat: true, flags: false },
   compilerBehaviors: {
+    // a plain store of an invariant value in a poll loop is written once ahead of it (the field),
+    // COMPILED on KMC gcc 2.7.2; Mario Party 3's gcc 2.7.2 is unmeasured, and refusing the store
+    // there costs a lift, never a wrong one
+    pollStoreMotion: 'hoists',
     plainCharSigned: true,
     contractsFloatProducts: false,
     coalesceLoopInit: true,
@@ -2103,6 +2180,8 @@ export const PPC_MWCC: TargetDescription = {
   compilerBehaviors: {
     plainCharSigned: true,
     contractsFloatProducts: true,
+    // a store in a loop keeps its plain poll read in it (the field; poll probes on all three builds)
+    keepsInvariantReadsBesideStores: true,
     // MEASURED on all three builds in C: an integer, a pointer and a `u16 *` passed to an `s32 *`,
     // `u32` and `s32 *` parameter each fail to compile, and each compiles once cast (see the field).
     strictPointerConversions: true,
@@ -2366,6 +2445,34 @@ export function keepsUnusedReadsAt(family: FlagFamily, level: string | undefined
   return n === '0' || (family === 'ido' && n === '1');
 }
 
+/** Does a compiler of `family`, at optimisation level `level` (the profile's `O` slot), leave a plain
+ *  read at a loop-invariant address in a loop that stores nothing and calls nothing
+ *  (`compilerBehaviors.keepsLoopInvariantReads`)? COMPILED, `while (*(s32 *)A & 3) ; g();` and
+ *  `while (gF == 0) ; g();`, the loop a branch to itself where the read moved: agbcc and KMC gcc
+ *  2.7.2 at `-O1` and `-O2` (gcc's loop pass runs from `-O1`), IDO 7.1 at `-O2` and `-O3`, mwcc
+ *  2.4.2 at `-O3` and `-O4,p` move it; IDO at `-O1` (its default) and mwcc at `-O1` and `-O2` re-read
+ *  it each time round, as every one of them does at `-O0`.
+ *
+ *  A LEVEL NO FLAG NAMES (`undefined`) KEEPS, and so does a level word the table does not read
+ *  (`-Os`). The cost runs the other way from `keepsUnusedReadsAt`'s: answering "moves" where the
+ *  compiler keeps the read pins a `volatile` the source never wrote, while answering "keeps" leaves
+ *  the read plain. */
+export function keepsLoopInvariantReadsAt(family: FlagFamily, level: string | undefined): boolean {
+  const n = level === undefined ? undefined : /^\d/.exec(level)?.[0];
+  return n === undefined || Number(n) < (family === 'mwcc' ? 3 : family === 'ido' ? 2 : 1);
+}
+
+/** Does agbcc at optimisation level `level` (the profile's `O` slot) keep alias sets
+ *  (`compilerBehaviors.strictAliasing`)? From `-O2`, and at `-Os`, which forces `optimize` to 2
+ *  (toplev.c:3576-3577, :3616); not at `-O0` or `-O1`. `flag` is the `-fstrict-aliasing` slot, which
+ *  `-fno-strict-aliasing` sets `off` and overrides the level. A profile with no `O` slot is `-O0`. */
+export function strictAliasingAt(level: string | undefined, flag: string | undefined): boolean {
+  if (flag === 'on' || flag === 'off') {
+    return flag === 'on';
+  }
+  return level !== undefined && (level === 's' || Number(/^\d+/.exec(level)?.[0] ?? 0) >= 2);
+}
+
 /** The level `keepsUnusedReadsAt` judges a profile at: its `O` slot, or none where a word the table
  *  does not read may set it too — mwcc's `-opt off` and `-opt level=0` compile at `-O0`, and the
  *  table reads neither, so a profile that spells one has a level nothing here knows. */
@@ -2383,6 +2490,16 @@ export function targetFor(toolchain: ToolchainId, cflags: readonly string[]): Re
   let target: TargetDescription = cpp ? { ...t.description, dialect: 'c++' } : t.description;
   if (keepsUnusedReadsAt(t.family, unusedReadLevel(profile))) {
     target = { ...target, compilerBehaviors: { ...target.compilerBehaviors, keepsUnusedReads: true } };
+  }
+  if (keepsLoopInvariantReadsAt(t.family, unusedReadLevel(profile))) {
+    target = { ...target, compilerBehaviors: { ...target.compilerBehaviors, keepsLoopInvariantReads: true } };
+  }
+  if (
+    target.compilerBehaviors.strictAliasing === true &&
+    !strictAliasingAt(profile.slots.O, profile.slots['-fstrict-aliasing'])
+  ) {
+    const { strictAliasing: _set, ...behaviors } = target.compilerBehaviors;
+    target = { ...target, compilerBehaviors: behaviors };
   }
   if (profile.slots['-fshort-enums'] === 'on') {
     // every enum is the smallest integer its values fit (c-decl.c:6064-6065, :6123; compiled,

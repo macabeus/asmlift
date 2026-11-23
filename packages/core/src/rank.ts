@@ -2801,7 +2801,7 @@ export function enumerateCandidates(
                 assertNoOrphanedLocals(sfn, made);
                 assertLocalStorageStaysInteger(sfn, made);
                 assertFrameUnionsViewed(made);
-                assertEffectsPreserved(fn, made);
+                assertEffectsPreserved(fn, made, structOpts);
                 // A backend refusal on this REWRITTEN tree is not a refusal of the row's own
                 // tree, so it never becomes the row's stated cause: `TreeSources.emit` is dropped
                 // here and only the call over the row's own tree above records one.

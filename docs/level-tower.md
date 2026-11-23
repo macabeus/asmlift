@@ -1323,13 +1323,20 @@ localized _there_ instead of surfacing three stages later as mysterious wrong C.
   `fusedGuard`, an L3 field that is never printed: the guard's test as its kept form would render
   it, and the guard's site. The dropped rule counts that test's pinned reads as made, since the
   loop's first test is the guard's, capped at what the loop's own condition renders, once per
-  guard however many copies of the loop the tree holds, and not at all for a loop that writes
-  memory plain. A pass that rebuilds such a loop carries the field, and one that
-  re-spells the condition's addresses re-spells the test with it (`mapFusedGuardTests`), or the
-  credit is lost and the lift declines. And a loop that polls a pinned read and stores, plain, at
-  an address it never changes, with no call and no access that may alias the store, is refused:
-  agbcc keeps that cell in a register for the loop and stores it once at the exit, where the
-  machine stored it every time round.
+  guard however many copies of the loop the tree holds. A pass that rebuilds such a loop carries
+  the field, and one that re-spells the condition's addresses re-spells the test with it
+  (`mapFusedGuardTests`), or the credit is lost and the lift declines. And a loop that polls a
+  pinned read and stores, plain, at an address it never changes is refused unless the compiler's
+  own rule provably keeps the store in the loop (`sunkPollStore`, an allowlist): by how the
+  target's loop pass moves such a store (`compilerBehaviors.pollStoreMotion`). agbcc's `load_mems`
+  keeps the cell in a register for the loop and stores it once at the exit (`'sinks'`), unless a
+  call, the loop's own control flow, an overlapping access one of whose two sides is a byte, or the
+  store's own qualifier keeps it; IDO 7.1 and KMC gcc 2.7.2 write a lone store of an invariant value
+  once ahead of the loop (`'hoists'`), unless a call, a branch the store sits under, a value the
+  loop changes, or a second cell's write IDO cannot tell apart from it keeps it (a constant
+  address's beside any other, a symbol's only beside a pointer's, a pointer's beside any but one
+  through the same pointer). A level that keeps loop-invariant code
+  (`keepsLoopInvariantReads`) moves neither.
 
 **What the effect contract counts is decided once, below it.** Whether an op must run where, and
 as often as, the asm ran it is a fact about the OP, and
@@ -1337,12 +1344,16 @@ as often as, the asm ran it is a fact about the OP, and
 the one pass that knew it: `call` is its own opcode; `helper` is the stamp
 [`runtime-helpers.ts`](../packages/core/src/runtime-helpers.ts) `helperOp` puts on a value the asm
 computed by calling a runtime routine; `device` is the `volatile` a frontend puts on a memory
-access, decided by two pins: the device pin
+access, decided by three pins: the device pin
 ([`frontend/device-pins.ts`](../packages/core/src/frontend/device-pins.ts)), for an access of a
-device register, and the dead-read pin
-([`frontend/dead-reads.ts`](../packages/core/src/frontend/dead-reads.ts)), for a read at any
-address — a RAM global, a pointer parameter, a literal — whose value the lifted function never
-uses, since a compiler deletes every plain read nobody uses. That pin is the ONE decider of the
+device register; the poll-read pin
+([`frontend/poll-reads.ts`](../packages/core/src/frontend/poll-reads.ts)), for a read a call-free
+loop makes each time round at an address it never changes, which a level that moves loop-invariant
+code would load once ahead of the loop were it plain — read off the target's
+`keepsLoopInvariantReads`, `keepsInvariantReadsBesideStores` and `strictAliasing`; and the
+dead-read pin ([`frontend/dead-reads.ts`](../packages/core/src/frontend/dead-reads.ts)), for a read
+at any address — a RAM global, a pointer parameter, a literal — whose value the lifted function
+never uses, since a compiler deletes every plain read nobody uses. That pin is the ONE decider of the
 claim: it does not count the `ret` operand of a function declared void as a use, so the read-back a
 void function ends on is stamped there too, its refusals are a reported gate table (`DEAD_READ_GATES`:
 a level that keeps unused reads, a declaration that says plain, a value the lift lost the consumer
