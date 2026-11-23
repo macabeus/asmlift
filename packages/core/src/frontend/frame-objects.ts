@@ -1368,9 +1368,11 @@ function steppedPointers(
   // …and the HIGHEST object each surviving value may carry, raised through the same phis and moves
   // the lowest went down through: a value whose highest is not its lowest holds two objects — the
   // phi `p = c ? a : b + n` itself, the loop phi it feeds, `p + 1` of it — and names the merge
-  // only the one-object answer declares
+  // only the one-object answer declares; a value not raised carries its one object, so a phi over
+  // pointers each stepped through its own object (`p = a; do p++` on one path, `p = b` on the other)
+  // holds both
   const highest = new Map<Value, number>();
-  const highOf = (a: Value): number | undefined => highest.get(a) ?? exactOf(a) ?? indexSum(a);
+  const highOf = (a: Value): number | undefined => highest.get(a) ?? frameOf(a);
   for (let raised = true; raised;) {
     raised = false;
     for (const [v, off] of stepped) {

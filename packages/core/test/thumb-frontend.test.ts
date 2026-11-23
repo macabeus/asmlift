@@ -1874,6 +1874,27 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       ).toThrow(/a phi merges the frame objects at \[sp,#0\] and \[sp,#8\]/);
     });
 
+    // …and so does a phi whose every incoming value is a pointer stepped over ONE object, one over
+    // each: agbcc's own output, with `void sink(u32 *, u32 *); void take(u32 *);`, for `u32 a[4],
+    // b[4], *p; sink(a, b); if (c) { p = a; do p++; while (*p); } else { p = b; do p++; while (*p); }
+    // take(p); return 0;`
+    test('a phi of two pointers each stepped over its own object, passed to a call, refuses as the merge', () => {
+      const asm =
+        'f:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x20\n\tadd\tr4, r0, #0\n\tadd\tr5, sp, #0x10\n' +
+        '\tmov\tr0, sp\n\tadd\tr1, r5, #0\n\tbl\tsink\n\tcmp\tr4, #0\n\tbeq\t.L3\n\tmov\tr1, sp\n.L4:\n' +
+        '\tadd\tr1, r1, #0x4\n\tldr\tr0, [r1]\n\tcmp\tr0, #0\n\tbne\t.L4\n\tb\t.L9\n.L3:\n\tadd\tr1, r5, #0\n' +
+        '.L10:\n\tadd\tr1, r1, #0x4\n\tldr\tr0, [r1]\n\tcmp\tr0, #0\n\tbne\t.L10\n.L9:\n\tadd\tr0, r1, #0\n' +
+        '\tbl\ttake\n\tmov\tr0, #0x0\n\tadd\tsp, sp, #0x20\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n';
+      const prototypes = {
+        sink: { params: ['u32 *', 'u32 *'], returnsVoid: true },
+        take: { params: ['u32 *'], returnsVoid: true },
+        f: { params: ['s32'], returns: 'u32' },
+      };
+      expect(() => decompile('f', asm, ARMV4T_AGBCC, { prototypes })).toThrow(
+        /a phi merges the frame objects at \[sp,#0\] and \[sp,#16\] — one value, two objects/,
+      );
+    });
+
     // hand-written: the merged pointer meets a pointer from outside the frame (`i`), so it may be
     // neither object, and a member of the one object at its offset would be the wrong storage
     test('a phi of two objects and a pointer from outside the frame refuses', () => {
