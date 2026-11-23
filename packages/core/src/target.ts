@@ -1323,7 +1323,8 @@ export interface LoadBehaviors {
   // `synthetic:retpost_tail`'s plain loop bound, though it moves the read of `while (s < 100) {
   // …; if ((*(u32 *)A & 3) == 0) break; }` (KNOWN GAP: setting it costs that row its match).
   //
-  // ABSENT ⇒ false: past the loop's header, only a rotated poll's read is the pin's.
+  // ABSENT ⇒ false: past the loop's header, only a rotated poll's read and a tested read of a cell
+  // the loop's entry reads are the pin's.
   movesReadsPastBranches?: boolean;
   // WHERE DOES THIS COMPILER PUT A READ NOBODY USES, at a level that keeps a plain one
   // (`keepsUnusedReads`)? The register a `volatile` read with no consumer is loaded into, and no

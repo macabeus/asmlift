@@ -32,6 +32,8 @@
 //     void e7(s32 *q) { while (*(vu8 *)0x3000100 != 50) { *(vu8 *)0x3000100 = 7; *q++ = 0; } }
 //     void o6(s32 a0) { while (*(vu8 *)0x4000108 & 1) { *(u16 *)0x4000104 = a0; *(u8 *)0x4000105 = a0; } }
 //     void k16c(s32 a0) { s32 s = 0; while (s < 100 && (*(vu32 *)0x4000104 & 3)) { s++; } }
+//     s32 b4v(s32 s) { if (*(vu32 *)0x4000104 & 1) return 0;
+//       do { s += 3; if (s > 200) return 1; } while (!(*(vu32 *)0x4000104 & 1)); return s; }
 //   agbcc -mthumb-interwork -O1 -fhex-asm
 //     s32 m15(s32 a0, s32 *q) { s32 s = 0; while (*(volatile s32 *)0x4000104 & 3) {
 //       ((volatile s32 *)0x3001000)[1] = a0; s += *q++; } return s; }
@@ -685,6 +687,41 @@ const E6 = `
   38:	jr	ra
   3c:	nop
 `;
+const B4V = `
+b4v:
+	push	{lr}
+	add	r2, r0, #0
+	ldr	r3, .L11
+	ldr	r0, [r3]
+	mov	r1, #0x1
+	and	r0, r0, r1
+	cmp	r0, #0
+	beq	.L3	@cond_branch
+	mov	r0, #0x0
+	b	.L10
+.L12:
+	.align	2, 0
+.L11:
+	.word	0x4000104
+.L3:
+	mov	r1, #0x1
+.L4:
+	add	r2, r2, #0x3
+	cmp	r2, #0xc8
+	bgt	.L6	@cond_branch
+	ldr	r0, [r3]
+	and	r0, r0, r1
+	cmp	r0, #0
+	beq	.L4	@cond_branch
+	add	r0, r2, #0
+	b	.L10
+.L6:
+	mov	r0, #0x1
+.L10:
+	pop	{r1}
+	bx	r1
+.Lfe1:
+`;
 
 /** The relocations the object file gives IDO's text: `gF`'s address and the call to `g`. */
 const relocs = (list: Array<[number, string, string]>): AsmData => ({
@@ -729,6 +766,12 @@ describe('a poll read the compiler would move out of its loop is pinned volatile
     expect(decompile('w7', W7, AGBCC, { prototypes }).source).toContain('} while (*(u16 *)67108870 != 3);');
     // the body's read the loop's test is passed, a rotated poll's, which `gcse` deletes plain
     expect(decompile('k16c', K16C, AGBCC).source).toMatch(/v\d = \*\(volatile s32 \*\)67109124;/);
+  });
+
+  test("agbcc: a tested read past a branch of a cell the loop's entry reads is pinned, which cse deletes plain", () => {
+    const src = decompile('b4v', B4V, AGBCC).source;
+    expect(src).toContain('v0 = v0 + 3;\n            if ((*(volatile s32 *)67109124 & 1) != 0) {');
+    expect(src).not.toContain('(*(s32 *)67109124');
   });
 
   test('IDO: a read past a branch of the loop that its exit tests is pinned', () => {

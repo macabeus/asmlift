@@ -49,7 +49,7 @@
  *     moves. Not on a compiler that keeps the read beside any store (target.ts
  *     `keepsInvariantReadsBesideStores`: mwcc, in every probe);
  *   • the read is in the loop's header, the block every time round starts with, ahead of every
- *     branch the loop takes, or one of two reads past a branch below. A read past a branch is
+ *     branch the loop takes, or one of the reads past a branch below. A read past a branch is
  *     `maybe_never` to agbcc's loop pass (loop.c, under a label or a conditional jump), which on
  *     Thumb, where any load may trap (rtlanal.c `may_trap_p`), leaves it in the loop, and so do
  *     KMC gcc 2.7.2 and mwcc, COMPILED (`for (i = 0; i < gCount; i++) { if (gTab[i] == x) …; }`,
@@ -57,9 +57,14 @@
  *     itself passed as the block argument the loop's test reads, is the read ahead of the loop
  *     again with no store between, which agbcc's `gcse` deletes: `v1 = *(s32 *)0x4000104; while
  *     ((v1 & 3) != 0) { if (v0 + 1 > 99) break; v0++; v1 = *(s32 *)0x4000104; }` reads REG once.
- *     And on IDO 7.1, which moves a read from past a branch (target.ts `movesReadsPastBranches`:
- *     `do { … } while ((*(vu32 *)A & 3) || (*(u32 *)B & 1));` loads B once ahead of the loop when
- *     B is plain), every read the loop's exit tests;
+ *     So is a read the loop's exit tests of a cell the loop's entry reads, its guard or the
+ *     straight-line blocks between (`sameRead`), whichever block argument it is passed as: agbcc
+ *     and KMC gcc 2.7.2 delete it as the entry's read again, COMPILED — `if (REG & 1) v0 = 0; else
+ *     { v0 = a0; while (v0 + 3 <= 200) { v0 += 3; if (REG & 1) return v0; } v0 = 1; }` tests a
+ *     constant in the loop when REG is plain. Only in a loop that stores nothing, in it or where
+ *     its exits go (`storesNearLoop`, a KNOWN GAP beside a store). And on IDO 7.1, which moves a read from past a
+ *     branch (target.ts `movesReadsPastBranches`: `do { … } while ((*(vu32 *)A & 3) || (*(u32 *)B
+ *     & 1));` loads B once ahead of the loop when B is plain), every read the loop's exit tests;
  *   • its address is invariant: every value it is computed from is a constant, a symbol's address,
  *     or a value defined outside the loop, through pure arithmetic — no read, no block argument of
  *     a loop block;
@@ -192,9 +197,32 @@ export function pinPollReads(irBlocks: readonly Block[], target: TargetDescripti
           ((d.opcode === 'add' || d.opcode === 'sub') && d.operands.some((o) => fromFrame(o, depth + 1))))
       );
     };
-    // and, past one of the loop's branches, a rotated poll's read, and on a compiler that moves
-    // one from there every read the loop's exit tests
-    const past = target.compilerBehaviors.movesReadsPastBranches === true ? decided.tested : decided.rotated;
+    // The blocks ahead of the loop its entry runs: its guard and the straight-line blocks between
+    // (a preheader), as the guard twin below walks them.
+    const entry: Block[] = [];
+    for (let guard of loop.forwardPreds) {
+      entry.push(guard);
+      for (let n = 0; terminator(guard)?.opcode === 'br' && (preds.get(guard) ?? []).length === 1 && n < 8; n++) {
+        guard = (preds.get(guard) ?? [])[0];
+        entry.push(guard);
+      }
+    }
+    const entryReads = entry
+      .filter((b) => !loop.body.has(b))
+      .flatMap((b) => b.ops)
+      .filter((op) => op.opcode === 'load' || op.opcode === 'aload');
+    // and, past one of the loop's branches, a rotated poll's read, a tested read of a cell the
+    // loop's entry reads, and on a compiler that moves one from there every read the loop's exit
+    // tests
+    const past =
+      target.compilerBehaviors.movesReadsPastBranches === true
+        ? decided.tested
+        : [
+            ...decided.rotated,
+            ...(storesNearLoop(loop)
+              ? []
+              : [...decided.tested].filter((op) => entryReads.some((e) => sameRead(op, e, defOf, true)))),
+          ];
     const candidates = [...new Set([...loop.header.ops, ...past])];
     const pinned: Op[] = [];
     for (const op of candidates) {
@@ -256,11 +284,13 @@ export function pinPollReads(irBlocks: readonly Block[], target: TargetDescripti
 }
 
 /** Do two reads read one cell: one opcode, width and displacement, through addresses that are one
- *  value or one constant computed alike. */
-function sameRead(a: Op, b: Op, defOf: ReadonlyMap<Value, Op>): boolean {
+ *  value or one constant computed alike. `a` is the pinned one, or with `either` either may be
+ *  plain. */
+function sameRead(a: Op, b: Op, defOf: ReadonlyMap<Value, Op>, either = false): boolean {
   return (
     a.opcode === b.opcode &&
-    JSON.stringify(a.attrs) === JSON.stringify({ ...b.attrs, volatile: true }) &&
+    JSON.stringify(either ? { ...a.attrs, volatile: true } : a.attrs) ===
+      JSON.stringify({ ...b.attrs, volatile: true }) &&
     a.operands.length === b.operands.length &&
     a.operands.every((o, i) => sameValue(o, b.operands[i], defOf))
   );
@@ -377,6 +407,22 @@ function keptBesideMoving(
     );
     return (written ? ops : stores).some(conflicts);
   };
+}
+
+/** Does the loop, or a block one of its exits goes to, store? Where it does, a tested read past
+ *  a branch of a cell the loop's entry reads is left as it was: a KNOWN GAP, not a proof the
+ *  compiler keeps it. agbcc's and KMC gcc 2.7.2's `cse` take that read for the entry's again
+ *  along the path through the loop, and whether a store on the way stops it is decided by the
+ *  shape of that path, COMPILED with the read plain: `for (i = 0; i < gCount; i++) { if (gTab[i]
+ *  == x) { *out = r; return; } } gMiss = 1; *out = r;` keeps its `u8` bound in the loop
+ *  (`synthetic:retpost_tail`, which matches with it plain and loses the match on agbcc, KMC and
+ *  gcc 2.7.2 when it is pinned), while `for (i = 0; i < REG; i++) { if (i * 3 == x) { *out = 1;
+ *  return 5; } } return 2;` with an `s32` REG, and `if (REG & 1) return 0; do { s += 3; if (s >
+ *  200) { *p = s; return 1; } } while (!(REG & 1));`, do not, with a byte store or a word one. */
+function storesNearLoop(loop: NaturalLoop): boolean {
+  return [...loop.body, ...loop.exitEdges.map((e) => e.to)]
+    .flatMap((b) => b.ops)
+    .some((op) => op.opcode === 'store' || op.opcode === 'astore');
 }
 
 /** The loop's reads a branch that leaves the loop, or goes round it again, decides on: the ops
