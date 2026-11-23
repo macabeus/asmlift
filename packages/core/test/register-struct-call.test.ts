@@ -7,16 +7,13 @@ import { describe, expect, test } from 'vitest';
 
 import { renderDeclarations } from '../src/declare';
 import { decompile } from '../src/pipeline';
-import type { FnProto } from '../src/proto';
+import type { AggregateMember, FnProto } from '../src/proto';
 import { globalsFromContext } from '../src/proto-context';
 import { enumerateCandidates } from '../src/rank';
 import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '../src/target';
 
-const mk = (
-  members: { name: string; type: string; bits?: number }[],
-  kind: 'struct' | 'union' = 'struct',
-): FnProto => ({
+const mk = (members: AggregateMember[], kind: 'struct' | 'union' = 'struct'): FnProto => ({
   params: ['s32'],
   returns: 'struct T',
   returnLayout: { kind, members },
@@ -339,6 +336,32 @@ describe('a struct with a floating member is read as its bits, only where they a
     expect(
       decompile('c_f', agbcc('c_f', 'str'), ARMV4T_AGBCC, { prototypes: { mk: fl }, contextGlobals }).source,
     ).toMatch(/mk_ret = mk\(a0\);\s+\*\(s32 \*\)&gV = \*\(s32 \*\)&mk_ret;/);
+  });
+
+  test('a float in an array member is its bits too, and one in a nested aggregate has no local', () => {
+    // `{ float a[1]; }` hands back the word `{ float a; }` does: stored bare to an undeclared `gV`,
+    // a project's `float gV` would convert it
+    const arr = mk([{ name: 'a', type: 'float', dims: [1] }]);
+    expect(decompile('c_f', agbcc('c_f', 'str'), ARMV4T_AGBCC, { prototypes: { mk: arr } }).source).toMatch(
+      /mk_ret = mk\(a0\);\s+\*\(s32 \*\)&gV = \*\(s32 \*\)&mk_ret;/,
+    );
+    // `{ struct { float f; } in; }` and `{ union { float f; u32 w; } u; }`: the nested member has
+    // no field to say its bytes are a float's, so r0 stays the callee's
+    for (const type of [
+      { kind: 'struct' as const, members: [{ name: 'f', type: 'float' }] },
+      {
+        kind: 'union' as const,
+        members: [
+          { name: 'f', type: 'float' },
+          { name: 'w', type: 'u32' },
+        ],
+      },
+    ]) {
+      const nested = mk([{ name: 'in', type }]);
+      expect(() => decompile('c_f', agbcc('c_f', 'str'), ARMV4T_AGBCC, { prototypes: { mk: nested } })).toThrow(
+        /r0 is read on a path where a call has destroyed it/,
+      );
+    }
   });
 
   test('a reader that takes a float declines: the bits would be converted', () => {

@@ -103,6 +103,18 @@ export function aggregateType(
   return { kind: 'struct', name, fields, size: placed.size, declared: spelling };
 }
 
+/** Whether a member `aggregateType` gives no field — a nested struct or union — holds a float at
+ *  any depth. Its bytes are then read untyped, as the word, and nothing downstream sees the float
+ *  that `*(s32 *)&s` would convert under a float reader (structure.ts `floatMemberBits` sees only
+ *  the fields), so a caller that hands such bits out declines it here. */
+export function nestsFloat(layout: AggregateLayout): boolean {
+  const holdsFloat = (l: AggregateLayout): boolean =>
+    (l.members ?? []).some((m) =>
+      typeof m.type === 'string' ? scalarType(m.type)?.kind === 'float' : holdsFloat(m.type),
+    );
+  return (layout.members ?? []).some((m) => typeof m.type !== 'string' && holdsFloat(m.type));
+}
+
 /** A declared UNION OF INTEGERS as a local of it is typed: every member a field at offset 0, which
  *  a read names by its own width (structure.ts `frameStructMember`), at the size this target lays
  *  the union out at and spelled as the headers spell it, `union Un`. The IR has no named union
