@@ -22,7 +22,7 @@
 //     aggregate) — the member must start at that byte and be an integer of that width.
 import { type Block, type Fn, type Op, type Value, mkOp, mkValue } from '../ir/core';
 import { qualified } from '../ir/discipline';
-import { type IrType, T } from '../ir/types';
+import { type IrType, T, intFieldAt } from '../ir/types';
 
 type StructType = Extract<IrType, { kind: 'struct' }>;
 
@@ -37,11 +37,8 @@ function frameStructOf(defs: ReadonlyMap<Value, Op>, base: Value): StructType | 
 
 /** The declared integer member at exactly `[byte, byte + width)`: its signedness, or undefined. */
 function memberAt(st: StructType, byte: number, width: number): boolean | undefined {
-  // a union of integers sets every member at byte 0 (aggregate.ts `integerUnionType`): the one of
-  // this width
-  const at = st.fields.filter((m) => m.off === byte);
-  const f = at.find((m) => m.type.kind === 'int' && m.type.width === width * 8) ?? at[0];
-  return f !== undefined && f.type.kind === 'int' && f.type.width === width * 8 ? f.type.signed : undefined;
+  const f = intFieldAt(st, byte, width)?.type;
+  return f?.kind === 'int' ? f.signed : undefined;
 }
 
 interface Use {
