@@ -977,14 +977,16 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   //
   // THE THUMB OUTGOING PAIR is the stack-argument licence's refusal inside the Thumb sp-as-data throw:
   // "stack pointer used as data — … it may be an outgoing stack argument …", and the named cause wins.
-  // All five markers are agbcc controls of an undeclared call nothing sizes: `stkbody_more` (the
+  // Five markers are agbcc controls of an undeclared call nothing sizes: `stkbody_more` (the
   // body loads fewer words than are staged), `stkbody_none` (no body), and the indexed-read
   // controls `stkidx_below`, `stkidx_byval` and `stkidx_fpspill`, whose read clears no staged word.
+  // Two are agbcc's `stkwalk_up` and `stkwalk_call`, whose `ldmia r5!` through a stepped frame
+  // pointer is no read of [sp,#0] to the licence.
   const OVERLAPS: [chain: string, markers: number][] = [
     ['indirect-call > branch-form', 10],
     ['address-taken-local > outgoing-stack-args', 8],
+    ['outgoing-stack-args > stack-frames', 7],
     ['address-taken-local > stack-frames', 5],
-    ['outgoing-stack-args > stack-frames', 5],
   ];
 
   test('every marker that more than one class matches is attributed by a listed ordering', () => {
