@@ -8,7 +8,7 @@ import type { ContextGlobals } from '../proto-context';
 import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
-import type { CalleeBodyBound, CalleeStackWords, EntryStackWords } from './callee-body';
+import type { CalleeBodyBound, CalleeReturnsNoHiddenPointer, CalleeStackWords, EntryStackWords } from './callee-body';
 import type { AsmTextFormat } from './format';
 
 export interface Frontend {
@@ -39,6 +39,11 @@ export interface Frontend {
    *  frontend's input format, loads (frontend/callee-body.ts `CalleeStackWords`), asked of a callee
    *  whose body does not lift; absent where this frontend reads no entry */
   entryStackWords?: EntryStackWords;
+  /** whether some return of a callee, in a text of this frontend's input format, that its entry
+   *  reaches branches through the return register, which then holds the return address and no value
+   *  (frontend/callee-body.ts `CalleeReturnsNoHiddenPointer`), asked of a callee whose body does not
+   *  lift; absent where no return of this ISA can */
+  returnsThroughReturnReg?: (callee: string, text: string, target: TargetDescription) => boolean;
 }
 
 /** THE FUNCTION'S OWN DECLARATION, as a call lowering reads it (frontend/call-plan.ts
@@ -109,6 +114,10 @@ export interface LiftOptions {
    *  (frontend/callee-body.ts `CalleeStackWords`), asked of a call no declaration lays out that
    *  stages words in the outgoing area. pipeline.ts `liftStamped` supplies it on every lift. */
   calleeStackWords?: CalleeStackWords;
+  /** Whether a callee's own body, in the input or handed in, proves it returns no struct through a
+   *  hidden pointer (frontend/callee-body.ts `CalleeReturnsNoHiddenPointer`), asked of a callee no
+   *  declaration answers it for. pipeline.ts `liftStamped` supplies it on every lift. */
+  calleeReturnsNoHiddenPointer?: CalleeReturnsNoHiddenPointer;
   /** Told of each call nothing declares that the lift laid out at every argument register and the
    *  stack words its callee's body loads (`calleeStackWords`), with that word count. */
   stackSized?: (callee: string, words: number) => void;

@@ -8,7 +8,7 @@
 import { describe, expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
-import { type CalleeBodies, calleeBodyBounds } from '../src/frontend/callee-body';
+import { type CalleeBodies, calleeBodyBounds, calleeBodyReads } from '../src/frontend/callee-body';
 import { frontendFor } from '../src/frontend/registry';
 import { decompile, liftStamped } from '../src/pipeline';
 import type { Prototypes } from '../src/proto';
@@ -414,6 +414,95 @@ describe('the argument words a callee body handed in from outside the input read
     expect(decompile('f', `${rd0}${f}`, t).source).toContain('rd0()');
     expect(decompile('f', f, t, { calleeBodies: { rd0: { kind: 'listing', text: rd0 } } }).source).toBe(
       decompile('f', `${rd0}${f}`, t).source,
+    );
+  });
+});
+
+// A CALLEE'S BODY PROVES IT TAKES NO HIDDEN STRUCT-RETURN POINTER where its compiler hands the pointer
+// back at every return of a struct return (`structReturnHandsBackPointer`): a return that hands back
+// nothing, or a constant, is no return of one. agbcc's `pop {r0}; bx r0` holds the return address;
+// compiled, `struct R mk(int *)` returns through `pop {r1}; bx r1` with r0 the pointer at -O0..-Os.
+describe('a callee body that proves it is no struct return through a hidden pointer', () => {
+  const noPointer = (asm: string, target: TargetDescription, asmData?: AsmData, prototypes: Prototypes = {}) =>
+    calleeBodyReads(
+      'f',
+      asm,
+      target,
+      prototypes,
+      (callee, table, entryReadCalls, text) =>
+        liftStamped(callee, text, target, table, text === asm ? asmData : undefined, undefined, undefined, {
+          calleeBodyBound: () => undefined,
+          calleeStackWords: () => undefined,
+          calleeReturnsNoHiddenPointer: () => false,
+          entryReadCalls,
+        }),
+      undefined,
+      frontendFor(target),
+    ).returnsNoHiddenPointer;
+  const bodies = (fns: Array<[string, string]>) =>
+    `\t.code\t16\n\t.text\n${fns.map(([n, b]) => `\t.thumb_func\n${n}:\n${b}`).join('')}`;
+  const thumbBodies = bodies([
+    ['vd', '\tpush\t{lr}\n\tbl\th\n\tpop\t{r0}\n\tbx\tr0\n'],
+    ['cst', '\tstr\tr1, [r0]\n\tmov\tr0, #0x0\n\tbx\tlr\n'],
+    // a leaf hands r0 back untouched, and a value-returning epilogue keeps r0: either may be the pointer
+    ['leaf', '\tstr\tr1, [r0]\n\tbx\tlr\n'],
+    ['kp', '\tpush\t{lr}\n\tbl\th\n\tpop\t{r1}\n\tbx\tr1\n'],
+    // a body the lift refuses (an instruction it does not model) still returns through r0
+    ['unmodelled', '\tpush\t{lr}\n\tswi\t#0x5\n\tpop\t{r0}\n\tbx\tr0\n'],
+    // `bx r0` after `pop {r1}` jumps to no lr: no return, so nothing is proved
+    ['jump', '\tpush\t{lr}\n\tbl\th\n\tpop\t{r1}\n\tbx\tr0\n'],
+  ]);
+  test('agbcc: a return through r0 or of a constant proves it, a return of r0 does not', () => {
+    const t = TOOLCHAIN_TARGETS.agbcc.description;
+    const answer = noPointer(thumbBodies, t);
+    expect(
+      Object.fromEntries(['vd', 'cst', 'leaf', 'kp', 'unmodelled', 'jump', 'absent'].map((n) => [n, answer(n)])),
+    ).toEqual({ vd: true, cst: true, leaf: false, kp: false, unmodelled: true, jump: false, absent: false });
+  });
+  test('a callee declared to return a struct is not asked', () => {
+    const members = ['a', 'b', 'c'].map((name) => ({ name, type: 's32' }));
+    const big: Prototypes = { vd: { returns: 'struct Big', returnLayout: { kind: 'struct', members } } };
+    expect(noPointer(thumbBodies, TOOLCHAIN_TARGETS.agbcc.description, undefined, big)('vd')).toBe(false);
+  });
+  // O32's struct return is `move v0, a0`: a return no path wrote v0 for is none
+  test.each(['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'] as const)(
+    '%s: a return of nothing or of a constant proves it',
+    (id) => {
+      const t = TOOLCHAIN_TARGETS[id].description;
+      const head = '\ncorpus.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n';
+      const text =
+        `${head}00000000 <st>:\n   0:\tjr\tra\n   4:\tsw\ta1,0(a0)\n` +
+        '00000008 <cst>:\n   8:\tsw\ta1,0(a0)\n   c:\tjr\tra\n  10:\tmove\tv0,zero\n' +
+        '00000014 <cp>:\n  14:\tsw\ta1,0(a0)\n  18:\tjr\tra\n  1c:\tmove\tv0,a0\n';
+      const answer = noPointer(text, t);
+      expect([answer('st'), answer('cst'), answer('cp')]).toEqual([true, true, false]);
+    },
+  );
+  // mwcc reloads r3 from a frame word before the `blr` of a struct return: nothing it returns proves it
+  test.each(['mwcc_242_81', 'mwcc_247_107'] as const)('%s: a constant return proves nothing', (id) => {
+    const t = TOOLCHAIN_TARGETS[id].description;
+    expect(noPointer('00000000 <cst>:\n   0:\tstw     r4,0(r3)\n   4:\tli      r3,0\n   8:\tblr\n', t)('cst')).toBe(
+      false,
+    );
+  });
+  // agbcc's own output for `void g(u8 *d, u8 *s, int n) { while (n-- > 0) *d++ = *s++; h(); } void
+  // f(u8 *src) { u8 b[16]; g(b, src, 16); }`: `b` is handed to `g` at argument 0 and never read here
+  test('decompile: the frame a body proves no struct return is handed is that body`s out-parameter', () => {
+    const t = TOOLCHAIN_TARGETS.agbcc.description;
+    const g =
+      '\t.thumb_func\ng:\n\tpush\t{lr}\n\tadd\tr3, r0, #0\n\tb\t.L7\n.L5:\n\tldrb\tr0, [r1]\n\tstrb\tr0, [r3]\n' +
+      '\tadd\tr1, r1, #0x1\n\tadd\tr3, r3, #0x1\n.L7:\n\tadd\tr0, r2, #0\n\tsub\tr2, r2, #0x1\n\tcmp\tr0, #0\n' +
+      '\tbgt\t.L5\n\tbl\th\n\tpop\t{r0}\n\tbx\tr0\n';
+    const f =
+      '\t.thumb_func\nf:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x10\n\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tmov\tr2, #0x10\n' +
+      '\tbl\tg\n\tadd\tsp, sp, #0x10\n\tpop\t{r0}\n\tbx\tr0\n';
+    const head = '\t.code\t16\n\t.text\n';
+    expect(() => decompile('f', head + f, t)).toThrow(
+      /`g` takes it at argument 0 and nothing says what that callee returns/,
+    );
+    expect(decompile('f', head + g + f, t).source).toContain('    u8 sp0[16];\n    g(sp0, a0, 16);\n');
+    expect(decompile('f', head + f, t, { calleeBodies: { g: { kind: 'listing', text: head + g } } }).source).toBe(
+      decompile('f', head + g + f, t).source,
     );
   });
 });

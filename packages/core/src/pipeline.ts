@@ -17,6 +17,7 @@ import { returnedStruct, structLocalType } from './frontend/call-plan';
 import {
   type CalleeBodies,
   type CalleeBodyBound,
+  type CalleeReturnsNoHiddenPointer,
   type CalleeStackWords,
   calleeBodyReads,
 } from './frontend/callee-body';
@@ -500,7 +501,9 @@ export function liftStamped(
   // that body as a call to it is first lowered (frontend/callee-body.ts); the callee's own lift reads
   // no bodies, and, off the same lift, what each one loads of its incoming stack words
   const read =
-    liftOptions.calleeBodyBound === undefined || liftOptions.calleeStackWords === undefined
+    liftOptions.calleeBodyBound === undefined ||
+    liftOptions.calleeStackWords === undefined ||
+    liftOptions.calleeReturnsNoHiddenPointer === undefined
       ? bodyReadsIn(
           name,
           asm,
@@ -528,6 +531,7 @@ export function liftStamped(
     ...liftOptions,
     calleeBodyBound,
     calleeStackWords: liftOptions.calleeStackWords ?? read!.stackWords,
+    calleeReturnsNoHiddenPointer: liftOptions.calleeReturnsNoHiddenPointer ?? read!.returnsNoHiddenPointer,
     ...(stacksSized === undefined
       ? {}
       : { stackSized: (callee: string, words: number) => stacksSized.set(callee, words) }),
@@ -566,7 +570,11 @@ export function liftStamped(
 }
 
 /** Both readers of a callee's body (frontend/callee-body.ts `calleeBodyReads`). */
-type BodyReaders = { bound: CalleeBodyBound; stackWords: CalleeStackWords };
+type BodyReaders = {
+  bound: CalleeBodyBound;
+  stackWords: CalleeStackWords;
+  returnsNoHiddenPointer: CalleeReturnsNoHiddenPointer;
+};
 
 /** The readers already built, per caller table as handed to `liftStamped`, each with what else it was
  *  read under. A ranked run lifts one function a dozen times under one table, and each callee body
@@ -623,6 +631,7 @@ function bodyReadsIn(
         {
           calleeBodyBound: () => undefined,
           calleeStackWords: () => undefined,
+          calleeReturnsNoHiddenPointer: () => false,
           entryReadCalls,
           ...(text === asm ? { asmIncludes } : {}),
         },

@@ -4786,6 +4786,40 @@ export const SYNTHETIC: SynthSpec[] = [
       'void callvia_frame(int a, int b, u16 c);',
     proto: { callvia_frame: { returnsVoid: true }, take: { params: ['u16 *'], returnsVoid: true } },
   },
+  // A CALLEE'S BODY PROVES IT TAKES NO HIDDEN STRUCT-RETURN POINTER (frontend/callee-body.ts
+  // `CalleeReturnsNoHiddenPointer`). An out-parameter at argument 0 and a struct returned through
+  // memory are the same caller bytes, so with `g` undeclared the frame audit declines on `b`
+  // (`hiddenReturnPointerStands`). agbcc hands the pointer back in r0 at every return of a struct
+  // return (`structReturnHandsBackPointer`; compiled `struct R mk(int *)` is `pop {r1}; bx r1` with r0
+  // still the pointer at -O0..-Os), and `g` returns through `pop {r0}; bx r0`, which holds the return
+  // address: `g` is no struct return, and `b` is the 16 bytes it fills (kl2dct sub_0801D104's callee
+  // sub_0801C234 is such a body). Nothing declares `g` in the context: a declared return answers
+  // without the body. agbcc only: the return through the return register is ARM's.
+  {
+    sym: 'sretbody_void',
+    src:
+      'extern void h(void);\nvoid g(unsigned char *d, unsigned char *s, int n)\n{\n' +
+      '    while (n-- > 0) *d++ = *s++;\n    h();\n}\n' +
+      'void sretbody_void(unsigned char *src)\n{\n    unsigned char b[16];\n    g(b, src, 16);\n}',
+    features: ['call', 'stack-addr', 'struct-return'],
+    toolchains: ['agbcc'],
+    ctx: 'extern void h(void);\nvoid sretbody_void(unsigned char *src);',
+    proto: { sretbody_void: { returnsVoid: true }, h: { params: [], returnsVoid: true } },
+  },
+  // …and a body that returns a constant is no struct return either, on every compiler that hands the
+  // pointer back at each return: agbcc and the three O32 ones (`move v0, a0`, measured at the field).
+  // mwcc reloads r3 from a frame word before the `blr` (`structReturnHandsBackPointer: false`), so a
+  // constant there proves nothing and the row stays declined.
+  {
+    sym: 'sretbody_const',
+    src:
+      'int g(unsigned char *d, unsigned char *s, int n)\n{\n    while (n-- > 0) *d++ = *s++;\n    return 0;\n}\n' +
+      'void sretbody_const(unsigned char *src)\n{\n    unsigned char b[16];\n    g(b, src, 16);\n}',
+    features: ['call', 'stack-addr', 'struct-return'],
+    toolchains: [...FIVE],
+    ctx: 'void sretbody_const(unsigned char *src);',
+    proto: { sretbody_const: { returnsVoid: true } },
+  },
   // `spillarg` is `spill10` with a genuine outgoing argument under the spills: `five(i, 1, 2, 3,
   // v0)` stages argument 5 at [sp,#0] before every call and agbcc moves the spills above it, to
   // [sp,#4]..[sp,#0x20]. Several reach `bl five` unread, so the declaration (`five` takes one stack

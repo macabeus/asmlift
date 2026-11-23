@@ -3498,6 +3498,7 @@ function liftOnce(
     | 'ownMemoryReturn'
     | 'calleeBodyBound'
     | 'calleeStackWords'
+    | 'calleeReturnsNoHiddenPointer'
     | 'stackSized'
     | 'entryReadCalls'
     | 'asmIncludes'
@@ -6776,6 +6777,7 @@ function thumbFillOf(
     ownMemoryReturn,
     calleeBodyBound,
     calleeStackWords,
+    calleeReturnsNoHiddenPointer,
     stackSized,
     entryReadCalls,
     asmIncludes,
@@ -6786,6 +6788,7 @@ function thumbFillOf(
     | 'ownMemoryReturn'
     | 'calleeBodyBound'
     | 'calleeStackWords'
+    | 'calleeReturnsNoHiddenPointer'
     | 'stackSized'
     | 'entryReadCalls'
     | 'asmIncludes'
@@ -6807,6 +6810,7 @@ function thumbFillOf(
     calleeBodyBound,
     entryReadCalls,
     stackSized,
+    calleeReturnsNoHiddenPointer,
   );
   const frame = measureThumbFrame({
     name,
@@ -8215,12 +8219,31 @@ function fallLabel(asmBlocks: readonly AsmBlock[], name: string, bi: number): st
   return nb.label;
 }
 
+/** Whether some return of `callee` in `text` that its entry reaches is a `bx` through the return
+ *  register (agbcc's `pop {r0}; bx r0`), every return read as the lift reads it: a `bx` the CFG
+ *  cannot show to jump to the caller's lr is no return, and answers false
+ *  (`refuseReturnsNotThroughCallersLr`), as does a text the lift's decode refuses. */
+function returnsThroughReturnReg(callee: string, text: string, target: TargetDescription): boolean {
+  try {
+    const read = readThumbText(callee, text, target.compilerBehaviors.farJumpRelay?.comment);
+    const cfg = thumbCfg(callee, read.blocks, read.tables);
+    refuseReturnsNotThroughCallersLr(callee, cfg);
+    return [...cfg.entryReachable].some((b) => {
+      const last = cfg.asmBlocks[b].instrs.at(-1);
+      return last?.mnemonic === 'bx' && last.ops[0] === target.returnReg;
+    });
+  } catch {
+    return false;
+  }
+}
+
 /** The ARMv4T / Thumb (agbcc) frontend, registered for the `armv4t` target. */
 export const thumbFrontend: Frontend = {
   id: 'thumb',
   inputFormat: 'gnu-as',
   lift,
   entryStackWords: thumbEntryWordsFromText,
+  returnsThroughReturnReg,
 };
 
 /** Internal surface for this module's own tests, and for nothing else. `@asmlift/core` exports

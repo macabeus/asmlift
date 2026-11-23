@@ -130,7 +130,8 @@ export function asksCalleeBody(entry: FnProto | undefined): boolean {
 }
 
 /** What each callee's body says, read as a call to it first asks and kept for the rest: the
- *  register bound, and the incoming stack words it loads (`CalleeStackWords` below), off ONE lift.
+ *  register bound, the incoming stack words it loads (`CalleeStackWords` below), and whether it is
+ *  no struct return through a hidden pointer (`CalleeReturnsNoHiddenPointer` below), off ONE lift.
  *  `lift` lifts one function of a text (the input, or a body in `external`) under a table, with no
  *  bound of its own: one level of bodies is read, never the callee's callees'. `frontend` is what
  *  the target frontend says of its own lifts: its entry scan (`Frontend.entryStackWords`), asked
@@ -142,8 +143,8 @@ export function calleeBodyReads(
   prototypes: Prototypes,
   lift: CalleeLift,
   external?: CalleeBodies,
-  frontend?: Pick<Frontend, 'entryStackWords'>,
-): { bound: CalleeBodyBound; stackWords: CalleeStackWords } {
+  frontend?: Pick<Frontend, 'entryStackWords' | 'returnsThroughReturnReg'>,
+): { bound: CalleeBodyBound; stackWords: CalleeStackWords; returnsNoHiddenPointer: CalleeReturnsNoHiddenPointer } {
   const memo = new Map<string, BodyReads>();
   const read = (callee: string): BodyReads => {
     if (!memo.has(callee)) {
@@ -151,7 +152,11 @@ export function calleeBodyReads(
     }
     return memo.get(callee)!;
   };
-  return { bound: (callee) => read(callee).bound, stackWords: (callee) => read(callee).stack };
+  return {
+    bound: (callee) => read(callee).bound,
+    stackWords: (callee) => read(callee).stack,
+    returnsNoHiddenPointer: (callee) => read(callee).noHiddenPointer === true,
+  };
 }
 
 /** {@link calleeBodyReads}'s register bound alone. */
@@ -162,7 +167,7 @@ export function calleeBodyBounds(
   prototypes: Prototypes,
   lift: CalleeLift,
   external?: CalleeBodies,
-  frontend?: Pick<Frontend, 'entryStackWords'>,
+  frontend?: Pick<Frontend, 'entryStackWords' | 'returnsThroughReturnReg'>,
 ): CalleeBodyBound {
   return calleeBodyReads(self, asm, target, prototypes, lift, external, frontend).bound;
 }
@@ -206,11 +211,14 @@ const returnOnly = (p: FnProto | undefined): FnProto => {
   return out;
 };
 
-/** What one callee's body answers: `bound`, the argument words it reads at most, and `stack`, the
- *  incoming stack words it loads (`CalleeStackWords`); each undefined where the body proves none. */
+/** What one callee's body answers: `bound`, the argument words it reads at most, `stack`, the
+ *  incoming stack words it loads (`CalleeStackWords`), each undefined where the body proves none, and
+ *  `noHiddenPointer`, true where it proves it returns no struct through a hidden pointer
+ *  (`CalleeReturnsNoHiddenPointer`). */
 interface BodyReads {
   readonly bound?: number;
   readonly stack?: number;
+  readonly noHiddenPointer?: true;
 }
 
 function bodyReads(
@@ -221,19 +229,25 @@ function bodyReads(
   prototypes: Prototypes,
   lift: CalleeLift,
   external: CalleeBodies | undefined,
-  frontend: Pick<Frontend, 'entryStackWords'> | undefined,
+  frontend: Pick<Frontend, 'entryStackWords' | 'returnsThroughReturnReg'> | undefined,
 ): BodyReads {
   if (callee === self || declaresAggregateReturn(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined)) {
     return {};
   }
-  // a body that lifts answers both; one that does not answers its entry's loads, and no bound
+  // a body that lifts answers all three; one that does not answers its entry's loads, no bound, and
+  // whether the frontend's scan finds a return through the return register
   const lifted = (text: string, relocs?: readonly Reloc[]): BodyReads => {
     const got = liftedReads(callee, text, target, prototypes, lift, relocs);
+    if (got !== undefined) {
+      return got;
+    }
     // a scan of the entry's stack loads sees no register read, so where the ABI can skip an
     // argument register (`evenWordAlignedArgs`) it cannot say the registers are all arguments
-    return (
-      got ?? { stack: target.evenWordAlignedArgs === true ? undefined : frontend?.entryStackWords?.(callee, text) }
-    );
+    const stack = target.evenWordAlignedArgs === true ? undefined : frontend?.entryStackWords?.(callee, text);
+    const scanned =
+      target.compilerBehaviors.structReturnHandsBackPointer === true &&
+      frontend?.returnsThroughReturnReg?.(callee, text, target) === true;
+    return { stack, ...(scanned ? { noHiddenPointer: true } : {}) };
   };
   if (definesLabel(asm, callee)) {
     return weakNames(asm).has(callee) ? {} : lifted(asm);
@@ -304,9 +318,10 @@ function liftedReads(
       }
     }
     if (guessed.size === 0) {
+      const noHiddenPointer = handsBackNoPointer(fn, target) ? ({ noHiddenPointer: true } as const) : {};
       const { params } = fn.blocks[0];
       if (params.some((p) => p.type.kind === 'float')) {
-        return undefined;
+        return noHiddenPointer;
       }
       const passesFirst =
         target.returnReg === target.argRegs[0] && !declaresVoidReturn(table[callee]) && returnsUntouched(fn);
@@ -316,6 +331,7 @@ function liftedReads(
         bound: Math.max(params.length, passesFirst ? 1 : 0),
         stack:
           stack > 0 && target.evenWordAlignedArgs === true && !readsEveryArgReg(fn, target, forced) ? undefined : stack,
+        ...noHiddenPointer,
       };
     }
     // an entry whose parameter list nothing can lay out (an unsizable or variadic one) is dropped
@@ -369,6 +385,40 @@ function returnsUntouched(fn: Fn): boolean {
   }
   return [...callFree].some((b) =>
     b.ops.some((o) => o.opcode === 'ret' && o.operands.length === 0 && o.attrs.viaReturnReg !== true),
+  );
+}
+
+/** WHETHER A CALLEE'S BODY PROVES IT RETURNS NO STRUCT THROUGH A HIDDEN POINTER, which no caller can
+ *  tell: a caller's out-parameter at argument 0 and a struct return through memory are the same
+ *  instructions (frontend/frame-objects.ts `hiddenReturnPointerStands`). The callee can, where its
+ *  compiler hands the pointer back in the return register at every return
+ *  (`compilerBehaviors.structReturnHandsBackPointer`, measured true on agbcc and the three O32
+ *  compilers): a return that hands back nothing, or a constant, is then no return of such a function.
+ *  On agbcc the first is the `pop {r0}; bx r0` of a function that pushed lr, where r0 holds the return
+ *  address (`ret` `viaReturnReg`): compiled at -O0, -O1, -O2 and -Os, `struct R mk(int *)` returns
+ *  through `pop {r1}; bx r1` with r0 still the pointer, and agbcc pops into r0 only where no value is
+ *  returned. On O32 it is a return no path wrote v0 for, or one of a constant left in v0, where the
+ *  struct return is `move v0, a0`.
+ *  Read off the same lift as the register bound, under its rules, and answering false wherever they
+ *  answer nothing, save one: a body that does not lift is still asked whether some return it reaches
+ *  branches through the return register (`Frontend.returnsThroughReturnReg`), which needs no lift of
+ *  what it computes. PowerPC's mwcc clobbers r3 before the `blr` (the field is false), so it never
+ *  answers there. */
+export type CalleeReturnsNoHiddenPointer = (callee: string) => boolean;
+
+/** Whether some return of `fn` hands back no value, or a constant, on a target whose compiler hands a
+ *  hidden struct pointer back at every return of a function that takes one
+ *  (`CalleeReturnsNoHiddenPointer`): neither is the pointer that function was handed. A value loaded
+ *  or computed is not asked (a reload of the pointer's spill is the pointer). */
+function handsBackNoPointer(fn: Fn, target: TargetDescription): boolean {
+  if (target.compilerBehaviors.structReturnHandsBackPointer !== true) {
+    return false;
+  }
+  const constants = new Set(
+    fn.blocks.flatMap((b) => b.ops.filter((o) => o.opcode === 'const').flatMap((o) => o.results)),
+  );
+  return fn.blocks.some((b) =>
+    b.ops.some((o) => o.opcode === 'ret' && (o.operands.length === 0 || constants.has(o.operands[0]))),
   );
 }
 

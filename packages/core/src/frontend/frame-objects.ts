@@ -2685,7 +2685,9 @@ function recheckEscapesReliedOn(offsets: ReadonlySet<number>, uses: FrameUses | 
  *
  *  The residual cost is stated rather than hidden: an OUTPUT-only parameter taken at argument
  *  0 of a callee the project has NOT declared is still byte-for-byte a struct return, and
- *  still declines with it.
+ *  still declines with it — unless the callee's own body is at hand and proves it hands back no
+ *  pointer (frontend/callee-body.ts `CalleeReturnsNoHiddenPointer`, read by the call
+ *  declarations' `returnsWithoutHiddenPointer`).
  *
  *  ONE SOURCE FOR THE DECISION AND ITS REASON, because every arm of this audit asks it and a
  *  predicate beside a message is two things that can disagree. Returns why the pointer is not
