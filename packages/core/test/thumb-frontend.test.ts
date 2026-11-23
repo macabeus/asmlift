@@ -1784,6 +1784,23 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(src).toMatch(/return \(s8\)\*\(v0 \+ a1\);/);
     });
 
+    // …and so is a phi of two runtime indices, one into each: the higher object's sum is a start
+    // of the pointer as much as the lower one's. agbcc's own output for `u8 a[8], b[8], *p = c ?
+    // a + n : b + n; for (k = 0; k < 8; k++) { a[k] = k; b[k] = k * 2; } return *p;`.
+    test('a phi of an index into each of two objects is a pointer into the one object', () => {
+      const sums =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x10\n\tcmp\tr0, #0\n\tbeq\t.L3\n\tmov\tr0, sp\n' +
+        '\tadd\tr4, r0, r1\n\tadd\tr0, sp, #0x8\n\tb\t.L4\n.L3:\n\tadd\tr0, sp, #0x8\n\tadd\tr4, r0, r1\n' +
+        '.L4:\n\tmov\tr2, #0x0\n\tadd\tr3, r0, #0\n.L8:\n\tmov\tr1, sp\n\tadd\tr0, r1, r2\n\tstrb\tr2, [r0]\n' +
+        '\tadd\tr1, r3, r2\n\tlsl\tr0, r2, #0x1\n\tstrb\tr0, [r1]\n\tadd\tr2, r2, #0x1\n\tcmp\tr2, #0x7\n' +
+        '\tble\t.L8\n\tldrb\tr0, [r4]\n\tadd\tsp, sp, #0x10\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+      const src = decompile('f', sums, ARMV4T_AGBCC, { prototypes: selProto }).source;
+      expect(src).toContain('u8 sp0[16];');
+      expect(src).toMatch(/= \(u8 \*\)\(\(u32\)sp0 \+ a1\);/);
+      expect(src).toMatch(/= \(u8 \*\)\(\(u32\)sp0 \+ 8 \+ a1\);/);
+      expect(src).toMatch(/return \*v\d;/);
+    });
+
     // hand-written: the merged pointer meets a pointer from outside the frame (`i`), so it may be
     // neither object, and a member of the one object at its offset would be the wrong storage
     test('a phi of two objects and a pointer from outside the frame refuses', () => {

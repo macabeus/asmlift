@@ -1887,11 +1887,14 @@ function indexedAccess(
     for (const blk of irBlocks) {
       for (const op of blk.ops) {
         // …save the start of a pointer stepped from the indexed element (`steppedPointers`), whose
-        // own accesses are judged where it is used
+        // own accesses are judged where it is used. A phi that also carries a lower object is
+        // stepped from that one, and is the merge only the one object declares (`merges`)
         const roles = [
           ...op.operands.flatMap((v, i) => (v === at ? [i] : [])),
           ...(op.successors ?? []).flatMap((s) =>
-            s.args.some((a, i) => a === at && !(by === 0 && stepped.get(s.block.params[i]) === off)) ? [-1] : [],
+            s.args.some((a, i) => a === at && !(by === 0 && (stepped.get(s.block.params[i]) ?? Infinity) <= off))
+              ? [-1]
+              : [],
           ),
         ];
         for (const i of roles) {

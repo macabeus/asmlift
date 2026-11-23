@@ -21273,6 +21273,28 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 's32 stkphi2(s32 c, s32 i);',
     proto: { stkphi2: { params: ['s32', 's32'], returns: 's32' } },
   },
+  //      stkphi2_idx: the phi carries a runtime index into each array, `c ? a + n : b + n`; the
+  //      higher array's index sum starts the pointer as the lower one's does (`indexedAccess`).
+  {
+    sym: 'stkphi2_idx',
+    src:
+      's32 stkphi2_idx(s32 c, s32 n)\n' +
+      '{\n' +
+      '    u8 a[8];\n' +
+      '    u8 b[8];\n' +
+      '    u8 *p = c ? a + n : b + n;\n' +
+      '    s32 k;\n' +
+      '    for (k = 0; k < 8; k++) {\n' +
+      '        a[k] = k;\n' +
+      '        b[k] = k * 2;\n' +
+      '    }\n' +
+      '    return *p;\n' +
+      '}',
+    features: ['variable-index', 'pointer'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 's32 stkphi2_idx(s32 c, s32 n);',
+    proto: { stkphi2_idx: { params: ['s32', 's32'], returns: 's32' } },
+  },
   //  40. dmafill_call (kl2dct sub_0802E340: "stack pointer used as data — the store to [sp,#0] is
   //      never reloaded"). A DMA fill whose temp's address is stored to the device's source register,
   //      then a call taking `&w`. agbcc loads the register's address into r0, the same register that
