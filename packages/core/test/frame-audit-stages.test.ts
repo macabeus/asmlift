@@ -50,7 +50,7 @@ const classify = (
   const facts = frameAddressFacts(irBlocks, undefined, ARMV4T_AGBCC);
   const { laddrs, splitRefusal } = splitAddressingCopies(irBlocks, captures, foldedHere);
   const objects = frameObjects(laddrs, owned, fail);
-  const flow = addressFlow(irBlocks, objects, facts, fail);
+  const flow = addressFlow(irBlocks, objects, facts);
   const uses = classifyFrameUses({
     irBlocks,
     objects,
@@ -185,7 +185,7 @@ describe('addressFlow', () => {
     const fail = frameRefusal('f');
     const facts = frameAddressFacts(blocks, undefined, ARMV4T_AGBCC);
     const { laddrs } = foldMovedCaptures(blocks, new Set());
-    return addressFlow(blocks, frameObjects(laddrs, { from: 0, to: 8 }, fail), facts, fail);
+    return addressFlow(blocks, frameObjects(laddrs, { from: 0, to: 8 }, fail), facts);
   };
 
   test('taints a block parameter a frame address reaches, and holds it on every path when only that reaches it', () => {
@@ -200,6 +200,23 @@ describe('addressFlow', () => {
     const flow = flowOf(blocks);
     expect(flow.taint.get(p)).toBe(0);
     expect(flow.frameOnEveryPath.has(p)).toBe(false);
+  });
+
+  // `p = c ? a : b`: the parameter holds either object, so it is a pointer into the lower one at
+  // no one displacement, and the merge is the reason the per-object model refuses it
+  test('reads a parameter two objects reach as a pointer into the lower one, and names the merge', () => {
+    const p = value();
+    const c = value();
+    const a = laddr(4);
+    const b = laddr(0);
+    const exit: Block = { params: [p], ops: [load(p, 0, 1), ret()] };
+    const toExit = (v: Value) => ({ block: exit, args: [v] });
+    const branch = mkOp('cond_br', { operands: [c], successors: [toExit(a.results[0]), toExit(b.results[0])] });
+    const flow = flowOf([{ params: [c], ops: [a, b, branch] }, exit]);
+    expect(flow.taint.get(p)).toBe(0);
+    expect(flow.stepped.get(p)).toBe(0);
+    expect(flow.merged.has(p)).toBe(true);
+    expect(flow.merges).toBe('a phi merges the frame objects at [sp,#0] and [sp,#4] — one value, two objects');
   });
 });
 

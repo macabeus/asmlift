@@ -21244,6 +21244,35 @@ export const SYNTHETIC: SynthSpec[] = [
       sink: { params: ['u16 *'], returnsVoid: true },
     },
   },
+  //  39f. stkphi2 (kl2dct sub_0802C510: "a phi merges the frame objects"). `p = c ? a : b; p[i]`
+  //      over two local arrays: one value holds either object's address, so it names no one of
+  //      them and the per-object model refuses it. With no address escaping, the local area is one
+  //      object, and the phi a pointer into it at no one member, like a stepped pointer
+  //      (frame-objects.ts `steppedPointers`).
+  {
+    sym: 'stkphi2',
+    src:
+      's32 stkphi2(s32 c, s32 i)\n' +
+      '{\n' +
+      '    s8 a[4];\n' +
+      '    s8 b[4];\n' +
+      '    s8 *p;\n' +
+      '    a[0] = 1;\n' +
+      '    a[1] = 2;\n' +
+      '    a[2] = 3;\n' +
+      '    a[3] = 4;\n' +
+      '    b[0] = 5;\n' +
+      '    b[1] = 6;\n' +
+      '    b[2] = 7;\n' +
+      '    b[3] = 8;\n' +
+      '    p = c ? a : b;\n' +
+      '    return p[i];\n' +
+      '}',
+    features: ['variable-index', 'pointer'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 's32 stkphi2(s32 c, s32 i);',
+    proto: { stkphi2: { params: ['s32', 's32'], returns: 's32' } },
+  },
   //  40. dmafill_call (kl2dct sub_0802E340: "stack pointer used as data — the store to [sp,#0] is
   //      never reloaded"). A DMA fill whose temp's address is stored to the device's source register,
   //      then a call taking `&w`. agbcc loads the register's address into r0, the same register that

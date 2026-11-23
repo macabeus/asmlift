@@ -1764,6 +1764,35 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       );
     });
 
+    // …but read through, nothing escaping, the phi is a pointer into the local area as one object.
+    // agbcc's own output for `s8 a[4], b[4], *p; a[0..3] = 1..4; b[0..3] = 5..8; p = c ? a : b;
+    // return p[i];` (kl2dct sub_0802C510's shape).
+    const selobj = (join: string) =>
+      'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr3, r1, #0\n\tmov\tr2, sp\n' +
+      [1, 2, 3, 4].map((v, i) => `\tmov\tr1, #0x${v}\n\tstrb\tr1, [r2${i ? `, #0x${i}` : ''}]\n`).join('') +
+      '\tadd\tr2, sp, #0x4\n' +
+      [5, 6, 7, 8].map((v, i) => `\tmov\tr1, #0x${v}\n\tstrb\tr1, [r2${i ? `, #0x${i}` : ''}]\n`).join('') +
+      '\tmov\tr1, sp\n\tcmp\tr0, #0\n\tbne\t.L26\n\tadd\tr1, r2, #0\n.L26:\n' +
+      join +
+      '\tldrb\tr0, [r0, #0]\n\tlsl\tr0, r0, #24\n\tasr\tr0, r0, #24\n' +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n';
+    const selProto = { f: { params: ['s32', 's32'], returns: 's32' } };
+    test('a phi of two objects read through is a pointer into the one object', () => {
+      const src = decompile('f', selobj('\tadd\tr0, r1, r3\n'), ARMV4T_AGBCC, { prototypes: selProto }).source;
+      expect(src).toContain('u8 sp0[8];');
+      expect(src).toMatch(/= \(u8 \*\)\(\(u32\)sp0 \+ 4\);/);
+      expect(src).toMatch(/return \(s8\)\*\(v0 \+ a1\);/);
+    });
+
+    // hand-written: the merged pointer meets a pointer from outside the frame (`i`), so it may be
+    // neither object, and a member of the one object at its offset would be the wrong storage
+    test('a phi of two objects and a pointer from outside the frame refuses', () => {
+      const join = '\tcmp\tr3, #0\n\tbeq\t.L27\n\tadd\tr1, r3, #0\n.L27:\n\tadd\tr0, r1, #0\n';
+      expect(() => decompile('f', selobj(join), ARMV4T_AGBCC, { prototypes: selProto })).toThrow(
+        /a phi merges the frame objects at \[sp,#0\] and \[sp,#4\] — one value, two objects/,
+      );
+    });
+
     // A MOVE THE WALK DOES NOT FOLLOW IS STILL THE CAPTURE AT THE SUM, because the IR holds the
     // constant exactly: the register-offset spelling sa3's `sub_807A2AC` uses, `mov r0, sp / movs
     // r2, #4 / ldrsh r0, [r0, r2]`, is the object `add r0, sp, #4 / ldrsh r0, [r0]` names.
