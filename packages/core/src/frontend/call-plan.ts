@@ -1690,7 +1690,10 @@ export function foldByValueArgs(
         // as its own name. A computed pointer (`p[i]`'s `add`, a `gaddr` plus an offset) or a
         // loaded one (`**pp`) prints as its defining expression, typed from that expression's own
         // operands, so `*` would dereference an integer or a `u8 *` — C that does not compile. A
-        // base read anywhere else keeps its own type and declines.
+        // base read anywhere else keeps its own type and declines. EACH WORD READ ONLY BY THE CALL,
+        // at its own place: a load whose word another reader shares (kmc CSEs `p->b` into the
+        // argument and the struct's word) would survive the fold and print off the retyped
+        // parameter as a recovered `field_<off>`, not as the declared member at that offset.
         if (
           object === undefined &&
           loaded &&
@@ -1699,7 +1702,12 @@ export function foldByValueArgs(
           irBlocks[0]!.params.includes(base0) &&
           loads.every((d, i) => wordAt(d, i, base0)) &&
           settled(loads as Op[]) &&
-          onlyReadBy(irBlocks, base0, loads as Op[])
+          onlyReadBy(irBlocks, base0, loads as Op[]) &&
+          loads.every(
+            (d) =>
+              onlyReadBy(irBlocks, d!.results[0], [call]) &&
+              call.operands.filter((o) => o === d!.results[0]).length === 1,
+          )
         ) {
           base0.type = T.ptr(type);
           pointees.add(first);
