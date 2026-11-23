@@ -21189,7 +21189,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '    for (i = 0; i < gN; i++)\n' +
       '        use(a[i], i);\n' +
       '}',
-    features: ['variable-index', 'loop'],
+    features: ['variable-index'],
     toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
     ctx: 'extern u32 gA, gB;\nextern s32 gN;\nvoid use(u32 x, s32 i);\nvoid stkwalk_up(void);',
     proto: { stkwalk_up: { returnsVoid: true }, use: { params: ['u32', 's32'], returnsVoid: true } },
@@ -21211,7 +21211,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '        use(a[i], i);\n' +
       '    rng();\n' +
       '}',
-    features: ['variable-index', 'loop'],
+    features: ['variable-index'],
     toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
     ctx: 'extern u32 gA, gB;\nextern s32 gN;\nvoid use(u32 x, s32 i);\nvoid rng(void);\nvoid stkwalk_call(void);',
     proto: {
@@ -21236,7 +21236,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '    *p = 1;\n' +
       '    sink(buf);\n' +
       '}',
-    features: ['variable-index', 'loop', 'pointer'],
+    features: ['pointer'],
     toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
     ctx: 'void sink(u16 *p);\nvoid stkwalk_down(s32 n, u16 v);',
     proto: {
