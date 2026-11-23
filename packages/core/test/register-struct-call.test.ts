@@ -320,20 +320,19 @@ describe("mwcc: the struct's frame home is the local the call assigns", () => {
 });
 
 describe("a struct local's word read through arithmetic is the member whose bits reach its readers", () => {
-  const HG = mk([
-    { name: 'h', type: 'u16' },
-    { name: 'g', type: 'u16' },
-  ]);
-  test('agbcc: only the low member reaches a halfword store, so the read is that member', () => {
+  // agbcc returns a one-member struct in r0 (thumb.c `thumb_return_in_memory`); the call's local
+  // is read as the word, and the use decides which of its bits matter
+  const HG = mk([{ name: 'h', type: 'u16' }]);
+  test('agbcc: only the member reaches a halfword store, so the read is that member', () => {
     // `struct T s = mk(x); gV = s.h + 1;` with `u16 gV`
     expect(
       decompile('c_d', agbcc('c_d', 'strh', '\tadd\tr0, r0, #0x1\n'), ARMV4T_AGBCC, { prototypes: { mk: HG } }).source,
-    ).toMatch(/gV = mk_ret\.h \+ 1;|gV = sp0\.h \+ 1;/);
+    ).toMatch(/mk_ret = mk\(a0\);\s+gV = mk_ret\.h \+ 1;/);
   });
   test('hand-edited: a whole-word store of the sum reads every bit, and keeps the word', () => {
     expect(
       decompile('c_d', agbcc('c_d', 'str', '\tadd\tr0, r0, #0x1\n'), ARMV4T_AGBCC, { prototypes: { mk: HG } }).source,
-    ).toMatch(/gV = \*\(s32 \*\)&(?:mk_ret|sp0) \+ 1;/);
+    ).toMatch(/mk_ret = mk\(a0\);\s+gV = \*\(s32 \*\)&mk_ret \+ 1;/);
   });
 });
 
