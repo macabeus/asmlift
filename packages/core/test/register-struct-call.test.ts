@@ -334,6 +334,28 @@ describe("a struct local's word read through arithmetic is the member whose bits
       decompile('c_d', agbcc('c_d', 'str', '\tadd\tr0, r0, #0x1\n'), ARMV4T_AGBCC, { prototypes: { mk: HG } }).source,
     ).toMatch(/mk_ret = mk\(a0\);\s+gV = \*\(s32 \*\)&mk_ret \+ 1;/);
   });
+  // `void f(s32 x, s32 c) { struct H2 s = mkh(x); u8 v; if (c) v = s.h + 1; else v = s.h + 3;
+  // gBm = v; }` (agbcc -O2, `struct H2 { u16 h; u16 g; }` returned in memory): each arm's sum
+  // reaches the byte store through the join, which demands its low byte alone
+  test('agbcc: a sum carried through a join to a byte store reads the low member', () => {
+    const asm =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tadd\tr2, r0, #0\n\tadd\tr4, r1, #0\n\tmov\tr0, sp\n' +
+      '\tadd\tr1, r2, #0\n\tbl\tmkh\n\tldr\tr0, [sp]\n\tcmp\tr4, #0\n\tbeq\t.L3\n\tadd\tr0, r0, #0x1\n\tb\t.L5\n' +
+      '.L3:\n\tadd\tr0, r0, #0x3\n.L5:\n\tlsl\tr0, r0, #0x18\n\tlsr\tr1, r0, #0x18\n\tldr\tr0, .L6\n' +
+      '\tstrb\tr1, [r0]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n' +
+      '.L7:\n\t.align\t2, 0\n.L6:\n\t.word\tgBm\n';
+    const mkh: FnProto = {
+      ...mk([
+        { name: 'h', type: 'u16' },
+        { name: 'g', type: 'u16' },
+      ]),
+      returns: 'struct H2',
+    };
+    const { source } = decompile('f', asm, ARMV4T_AGBCC, {
+      prototypes: { mkh, f: { params: ['s32', 's32'], returnsVoid: true } },
+    });
+    expect(source).toMatch(/= sp0\.h \+ 1;[^]*= sp0\.h \+ 3;/);
+  });
 });
 
 describe('a struct with a floating member is read as its bits, only where they are stored as bits', () => {
