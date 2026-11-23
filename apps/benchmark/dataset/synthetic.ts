@@ -2905,6 +2905,14 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'float u2f(unsigned);',
   },
+  // Two conversions chain their diamonds, the second one's test in the first one's join.
+  {
+    sym: 'u2two',
+    src: 'float u2two(unsigned a,unsigned b){ return (float)a + (float)b; }',
+    features: ['float', 'cast', 'int-to-float', 'unsigned', 'arithmetic'],
+    toolchains: ['agbcc'],
+    ctx: 'float u2two(unsigned,unsigned);',
+  },
   // A byte compared with a float is promoted to `int` and converted with `__floatsisf`, which the lift
   // spells `(float)(s32)a0`: a bare `(float)a0` of the `u8` converts unsigned, which agbcc open-codes.
   // agbcc only: on O32 the float after an int arrives in `a1` (an `mtc1` bit cast the lift refuses),

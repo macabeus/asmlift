@@ -36,6 +36,16 @@ describe('an unsigned word converted to a single', () => {
     expect(lift('u2fmul')).toBe('float u2fmul(s32 a0, float a1) {\n    return (float)(u32)a0 * a1;\n}\n');
   });
 
+  // Two conversions in one function chain their diamonds: the second one's test sits in the first
+  // one's join, which the first rewrite merges into its head.
+  test.each([
+    ['u2two', 'float u2two(s32 a0, s32 a1) {\n    return (float)(u32)a0 + (float)(u32)a1;\n}\n'],
+    ['u2seq', 'float u2seq(s32 a0, s32 a1) {\n    return (float)(u32)a0 * (float)(u32)a1;\n}\n'],
+    ['u2nest', 'float u2nest(s32 a0) {\n    return (float)(u32)a0 * (float)(u32)gU;\n}\n'],
+  ])('%s: two chained diamonds are two conversions', (name, source) => {
+    expect(lift(name)).toBe(source);
+  });
+
   // The same diamond spelled in C by hand is the same conversion.
   test('the source spelling of the open-coding', () => {
     expect(lift('u2fhand')).toBe('float u2fhand(s32 a0) {\n    return (float)(u32)a0;\n}\n');

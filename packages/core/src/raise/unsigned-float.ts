@@ -74,16 +74,21 @@ export function rewriteUnsignedFloatDiamonds(fn: Fn, target: TargetDescription):
   if (unsigned === undefined || toFloat === undefined || add === undefined) {
     return false;
   }
-  const found = findDiamonds(fn, toFloat, add);
-  for (const { head, x, join, arms, guard, conv } of found) {
+  // One at a time, searching again after each: a second conversion's head can be the first one's
+  // join (`(float)a + (float)b`), which the merge moves into the first head, so a diamond found
+  // before the merge would name a block that is gone.
+  let changed = false;
+  for (let d = findDiamonds(fn, toFloat, add)[0]; d !== undefined; d = findDiamonds(fn, toFloat, add)[0]) {
+    const { head, x, join, arms, guard, conv } = d;
     const was = join.params[0];
     const u = mkValue(was.type);
     const call = mkOp('call', { operands: [x], results: [u], attrs: { ...conv.attrs, target: unsigned } });
     head.ops = [...head.ops.slice(0, -1).filter((op) => op !== guard), call, ...join.ops];
     fn.blocks = fn.blocks.filter((b) => !arms.includes(b) && b !== join);
     replaceAllUsesWith(fn, was, u);
+    changed = true;
   }
-  return found.length > 0;
+  return changed;
 }
 
 function findDiamonds(fn: Fn, toFloat: string, add: string): UnsignedFloatDiamond[] {
