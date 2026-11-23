@@ -67,7 +67,7 @@ import {
   successorsOf,
 } from '../ir/core';
 import { deadOps, qualified } from '../ir/discipline';
-import { type IrType, T, typeEquals } from '../ir/types';
+import { type IrType, T, intFieldAt, typeEquals } from '../ir/types';
 import type { TargetDescription } from '../target';
 
 type StructType = Extract<IrType, { kind: 'struct' }>;
@@ -127,7 +127,7 @@ export function liftOwnRegisterStruct(fn: Fn, type: StructType, target: TargetDe
   if (type.size !== 4 || type.fields.length !== 1 || member === undefined) {
     return liftModifiedCallImage(fn, type, target)
       ? undefined
-      : "it is not one word that is all one integer member, or a call's struct of its type with that member written";
+      : "it is not one word that is all one integer member, or a call's struct of its type with a member at byte 0 written";
   }
   const rets = fn.blocks.map((b) => b.ops[b.ops.length - 1]).filter((op) => op?.opcode === 'ret');
   if (rets.some((op) => op.operands.length !== 1)) {
@@ -155,22 +155,28 @@ export function liftOwnRegisterStruct(fn: Fn, type: StructType, target: TargetDe
 }
 
 /** A CALL'S STRUCT, ITS MEMBER WRITTEN, RETURNED: `struct S s = mk(x); s.h += 1; return s;` over
- *  agbcc's `struct S { u16 h; }`, which it rounds to a word whose pad bits are the object's. Each
+ *  agbcc's `struct S { u16 h; }`, which it rounds to a word whose pad bits are the object's, or over
+ *  a union of integers (aggregate.ts `integerUnionType`, every member at byte 0), whose bits past
+ *  the written member are its wider members' and stay the image's. Each
  *  `ret` hands back `(A & 0xffff) | (I & 0xffff0000)`-shaped bits — `or` of a value `A` of no more
  *  bits than the member (`provableBits`) and the call's image `I` masked to exactly the bits past
  *  the member — so the word is the image with the member replaced by `A`: the call's local
  *  (frontend/register-struct-call.ts) has its member stored and is returned whole, `mk_ret.h = A;
  *  return mk_ret;`. Only where the target is little-endian (the member is the word's low bits), the
- *  struct is one word of one 1- or 2-byte integer member at byte 0 and pad, the image is a whole
+ *  struct is one word whose every member is at byte 0 — one member and pad, or a union — the member
+ *  written a 1- or 2-byte integer the mask's width picks (`intFieldAt`), the image is a whole
  *  unqualified word load of a local of this very type, and that local is read only by such loads
  *  and its call, so it still holds the image at the `ret`. Every `ret` must have this shape, or
  *  nothing changes (false). */
 function liftModifiedCallImage(fn: Fn, type: StructType, target: TargetDescription): boolean {
-  const field = type.fields.length === 1 ? type.fields[0] : undefined;
-  const width = field?.type.kind === 'int' && field.off === 0 ? field.type.width : 0;
-  if (target.capabilities.endianness === 'big' || type.size !== 4 || (width !== 8 && width !== 16)) {
+  if (target.capabilities.endianness === 'big' || type.size !== 4 || type.fields.some((f) => f.off !== 0)) {
     return false;
   }
+  return [8, 16].some((width) => intFieldAt(type, 0, width / 8) !== undefined && liftWrittenMember(fn, type, width));
+}
+
+/** `liftModifiedCallImage` for the `width`-bit integer member at byte 0. */
+function liftWrittenMember(fn: Fn, type: StructType, width: number): boolean {
   const rets = fn.blocks.map((b) => b.ops[b.ops.length - 1]).filter((op) => op?.opcode === 'ret');
   if (rets.length === 0 || rets.some((op) => op.operands.length !== 1)) {
     return false;

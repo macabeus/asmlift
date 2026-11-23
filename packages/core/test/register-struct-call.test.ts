@@ -445,12 +445,31 @@ describe("a function returning what a call returned returns the call's struct", 
     // hand-edited: a mask that keeps a bit of the member, or a value wider than the member, is no
     // image with only the member replaced
     const T =
-      /it is declared to return struct T by value, which comes back in r0 — it is not one word that is all one integer member, or a call's struct of its type with that member written, and it reads a struct a call returned there/;
+      /it is declared to return struct T by value, which comes back in r0 — it is not one word that is all one integer member, or a call's struct of its type with a member at byte 0 written, and it reads a struct a call returned there/;
     const wrongMask = mod.replace('.word\t-0x10000', '.word\t-0x8000');
     const wide = mod.replace('\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n', '');
     for (const asm of [wrongMask, wide]) {
       expect(() => decompile('f', asm, ARMV4T_AGBCC, { prototypes: { ...ownT('f'), mk: T16 } })).toThrow(T);
     }
+  });
+
+  test("agbcc: a union of integers with its narrow member written is the call's local, returned whole", () => {
+    // `union Uw { u16 h; u32 w; }; union Uw f(s32 x) { union Uw u = mkuw(x); u.h += 1; return u; }`
+    // compiles to the same bytes as the `{u16}` above: the bits past `h` are `w`'s, the image's
+    const mod =
+      'f:\n\tpush\t{lr}\n\tbl\tmk\n\tadd\tr2, r0, #0\n\tadd\tr0, r2, #0x1\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n' +
+      '\tldr\tr1, .L3\n\tand\tr1, r1, r2\n\torr\tr0, r0, r1\n\tpop\t{r1}\n\tbx\tr1\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t-0x10000\n';
+    const uw = mk(
+      [
+        { name: 'h', type: 'u16' },
+        { name: 'w', type: 'u32' },
+      ],
+      'union',
+    );
+    const own = { f: { ...uw, returns: 'union Uw' }, mk: { ...uw, returns: 'union Uw' } };
+    expect(decompile('f', mod, ARMV4T_AGBCC, { prototypes: own }).source).toMatch(
+      /mk_ret = mk\(a0\);\s+mk_ret\.h = \(u16\)\(mk_ret\.h \+ 1\);\s+return mk_ret;/,
+    );
   });
 
   test('so does one whose struct reaches the return through a frame slot', () => {

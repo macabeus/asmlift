@@ -902,7 +902,7 @@ describe('a function that itself returns a struct', () => {
     ] as const) {
       expect(decompile('rmk2', rmk2, ARMV4T_AGBCC, opts).ownArityNotes).toEqual([
         `[own-return] rmk2: its ${which} \`struct S2 rmk2(s32)\` returns struct S2 by value in r0, and it is not one ` +
-          "word that is all one integer member, or a call's struct of its type with that member written — lifted as " +
+          "word that is all one integer member, or a call's struct of its type with a member at byte 0 written — lifted as " +
           'the word the machine code returns, which the header contradicts',
       ]);
     }

@@ -1213,7 +1213,9 @@ off the call, which then cancels to the load). So the declarations block, `aggme
 own declared register-struct type returns the call (`return mk(x);`), or the call's local where
 mwcc wrote a home (`return mk_ret;`, which `struct T s = mk(1); return s;` compiles to and `return
 mk(1);` does not). On agbcc, which rounds a `{u8}` or `{u16}` to a word whose pad bits are the
-object's, a call's struct of the same type handed back with its member written — every `ret` an
+object's — and returns a union of integers in r0 too, whose bits past a narrow member are its wider
+members' — a call's struct or union of the same type handed back with a byte-0 member written (the
+one the mask's width picks, `intFieldAt`) — every `ret` an
 `or` of a member-wide value and the call's image masked past the member, straight from the insert
 idiom — is that call's local with the member stored, `mk_ret.h = (u16)(mk_ret.h + 1); return
 mk_ret;` (own-struct-return.ts `liftModifiedCallImage`), the value's read of the image the member
