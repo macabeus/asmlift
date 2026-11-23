@@ -2930,8 +2930,17 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'void divcall(int,int);',
   },
+  // Two guessed calls the result reaches on exclusive paths: the bytes are those of `hv(s)` too, so
+  // nothing picks one, and both are passed it (core frontend/ssa.ts `readByGuessedCallsAlone`).
+  {
+    sym: 'divsel',
+    src: 'void gv(); void hv();\nvoid divsel(int a,int b,int c){ int s=a/b; if (c) gv(s); else hv(); }',
+    features: ['arithmetic', 'signed', 'branch'],
+    toolchains: ['agbcc'],
+    ctx: 'void divsel(int,int,int);',
+  },
   // `fcall` with its callee declared: agbcc hands a declared `float` parameter its next one general
-  // word (core proto.ts `declaredCallArgs` `singles`), here r0, which holds the difference.
+  // word (core proto.ts `declaredCallArgs` `floats`), here r0, which holds the difference.
   {
     sym: 'fcallarg',
     src: 'float g1(float);\nfloat fcallarg(float a,float b){ return g1(a-b); }',

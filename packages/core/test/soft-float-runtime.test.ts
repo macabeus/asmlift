@@ -98,6 +98,23 @@ describe("a helper's result handed to the guessed call after it", () => {
     expect(lift(name)).toBe(source);
   });
 
+  // `if (c) gv(s); else hv();` and `if (c) gv(s); else hv(s);` are the same bytes, so nothing picks
+  // one call: every guessed call that reads the result is passed it, whichever the trim takes first
+  // (frontend/ssa.ts `readByGuessedCallsAlone`). `gv(s); hv(s);` copies `s` back into r0 for `hv`.
+  test.each([
+    [
+      'divsel',
+      'void divsel(s32 a0, s32 a1, s32 a2) {\n    s32 v0;\n    v0 = a0 / a1;\n    if (a2 != 0) {\n        gv(v0);\n    } else {\n        hv(v0);\n    }\n}\n',
+    ],
+    [
+      'divsel2',
+      'void divsel2(s32 a0, s32 a1, s32 a2) {\n    s32 v0;\n    v0 = a0 / a1;\n    if (a2 != 0) {\n        gv(v0);\n    } else {\n        hv(v0);\n    }\n}\n',
+    ],
+    ['divtwo', 'void divtwo(s32 a0, s32 a1) {\n    s32 v0;\n    v0 = a0 / a1;\n    gv(v0);\n    hv(v0);\n}\n'],
+  ])('%s: every guessed call reading the result is passed it', (name, source) => {
+    expect(lift(name)).toBe(source);
+  });
+
   // `s = a / b; gv(); return s;` and `gv(s); return s;` are the same bytes: a result read elsewhere
   // too stays the trim's leftover.
   test('a result something else reads is not passed', () => {

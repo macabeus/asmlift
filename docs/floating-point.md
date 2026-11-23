@@ -343,14 +343,18 @@ A `float` is the same story in one register: `__addsf3`, `__subsf3`, `__mulsf3`,
 were wrong C that matched: a call nothing declares is lifted at a GUESSED arity, and the guess drops
 an argument passed on unchanged, so `a * b + c` published as `__addsf3(__mulsf3(), a2)`. Optimising
 (-O1, -O2), agbcc deletes a helper call whose result is dead (`compilerBehaviors.deletesDeadLibcalls`),
-so a helper's result still in r0 at a guessed call after it, read by nothing else, is that call's
-argument: `g(a / b)` lifts as `g(a0 / a1)` (`synthetic:divcall:agbcc`), where it once lifted as `g();`
-with the division deleted. A float result handed so to an UNDECLARED callee still declines
+so a helper's result still in r0 at a guessed call after it, read by nothing but guessed calls, is
+that call's argument: `g(a / b)` lifts as `g(a0 / a1)` (`synthetic:divcall:agbcc`), where it once
+lifted as `g();` with the division deleted. Every such call is passed it: `if (c) g(s); else h();`
+and `if (c) g(s); else h(s);` are the same bytes, and lift as the second whichever call the trim
+takes first. A float result handed so to an UNDECLARED callee still declines
 (`synthetic:fcall:agbcc`): C hands such a callee a `float` promoted to a `double`, and the candidate
 declares a callee only from the prototypes it is given. Declared, a `float` parameter is the next one
-general word wherever it falls, as a `double` is the next two (`proto.ts` `declaredCallArgs`
-`singles`; `synthetic:fcallarg:agbcc`), and a single argument the function hands back is the float
-it was handed where every return is a float (`fcmpkeep`). The conversions of both precisions (`__fixsfsi`, `__floatsidf`, `__extendsfdf2` …)
+general word wherever it falls on a target with no FPU, as a `double` is the next two (`proto.ts`
+`declaredCallArgs` `floats`; `synthetic:fcallarg:agbcc`), spelled `float` or a typedef of it (`f32`),
+and a single argument the function hands back is the float it was handed where every return is a
+float (`fcmpkeep`) — unless the function's own declaration types that argument or its return an
+integer, which the candidate is compiled against. The conversions of both precisions (`__fixsfsi`, `__floatsidf`, `__extendsfdf2` …)
 fold to the IR's conversions, their integer side any integer (`synthetic:f2i:agbcc`, `i2f`, `fconv`,
 `ll2f`, `f2u`), and the compares (`__gtsf2` …) fold through the test their result is put to, read
 off libgcc's contract — its sign orders the operands and its value on a NaN is stated per helper — so

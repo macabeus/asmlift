@@ -44,7 +44,7 @@ import { foldUnsignedFloat, unsignedFloatDiamonds } from './unsigned-float';
  *   - a result NOTHING reads. Folded, it would be a dead float op, and `dce` would delete the
  *     arithmetic. Optimising (-O1, -O2), agbcc deletes a helper call whose result is dead
  *     (`s = a * b; g(); return 0;` calls no `__mulsf3`), so the frontend hands a helper's result
- *     still in r0, and read by nothing else, to the guessed call after it as its first argument
+ *     still in r0, and read by nothing but guessed calls, to the guessed call after it as its first argument
  *     (core target.ts `deletesDeadLibcalls`, frontend/call-plan.ts): `g1(a * b)` with `g1`
  *     undeclared reads `g1(__mulsf3(a, b))`, which refuses here as a result passed to another call
  *     — an undeclared callee is handed a `float` promoted to a `double`. Where the frontend does not

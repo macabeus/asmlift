@@ -1381,12 +1381,16 @@ export function callDeclarations(
     // as `g(); p();`, which compiles to the same bytes. Kept, it lifts as `p(g())`, which passes what
     // the machine passes — unless `g` is declared void, and its result names nothing.
     //
-    // A NAMED CALL IS PASSED A RUNTIME HELPER'S RESULT NOTHING ELSE READS, where the compiler deletes
-    // a helper call whose result is dead (`compilerBehaviors.deletesDeadLibcalls`, agbcc from `-O1`):
-    // the call is there, so something read its result, and the only reader left is the call after
-    // it, which finds it in argument 0. `g(a / b)` is `bl __divsi3; bl g`, and the trim would
-    // otherwise read it as `g();` with the division deleted. A result something else also reads
-    // (`s = a / b; g(); return s;`, the same bytes as `g(s)`) stays the trim's to read.
+    // A NAMED CALL IS PASSED A RUNTIME HELPER'S RESULT NOTHING BUT GUESSED CALLS READS, where the
+    // compiler deletes a helper call whose result is dead (`compilerBehaviors.deletesDeadLibcalls`,
+    // agbcc from `-O1`): the call is there, so something read its result, and the only readers left
+    // are calls, which find it in argument 0. `g(a / b)` is `bl __divsi3; bl g`, and the trim would
+    // otherwise read it as `g();` with the division deleted. EVERY such call is passed it, not one of
+    // them: `if (c) g(s); else h();` and `if (c) g(s); else h(s);` are the same bytes, so nothing in
+    // the asm picks a call, and the reading must not depend on the order the trim takes the sites in
+    // (`SsaBuilder.readByGuessedCallsAlone`); `g(s); h(s)`, with `s` copied back into r0 for `h`, is
+    // read as written. A result something else also reads (`s = a / b; g(); return s;`, the same
+    // bytes as `g(s)`) stays the trim's to read.
     //
     // …AND WHAT THE TRIM CUTS IS LEFT OUT TOO, so the frontend is asked the `leftOut` question of it
     // as well: a guess of four the check above passed can still lose a frame address in r2 when
@@ -1401,7 +1405,7 @@ export function callDeclarations(
         indirect !== undefined
           ? (r) => !voidResults.has(r)
           : target.compilerBehaviors.deletesDeadLibcalls === true
-            ? (r) => helperResults.has(r) && ssa.onlyReadBy(r, call)
+            ? (r) => helperResults.has(r) && ssa.readByGuessedCallsAlone(r)
             : undefined,
         leftOut === undefined
           ? undefined
