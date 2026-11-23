@@ -2864,8 +2864,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // GUESSED call declines. That call does not count r0, which the helper wrote, so `g1(a * b)`
   // reads `__mulsf3(); return g1();` and, folded, `return g1();`, the product deleted
   // (raise/floathelpers.ts). The conversions to and from a long long are the 64-bit side of a
-  // helper; `u2f` has none, agbcc open-coding `(float)u` around `__floatsisf`, and declines. agbcc
-  // only: the other toolchains have a hardware FPU.
+  // helper; `u2f` has none, agbcc open-coding `(float)u` around `__floatsisf` (gcc/optabs.c:3591-3622:
+  // the negative half halved with its low bit kept, converted and doubled through `__addsf3`), which
+  // the lift reads whole as `(float)(u32)x` (raise/unsigned-float.ts). agbcc only: the other
+  // toolchains have a hardware FPU.
   {
     sym: 'fneg',
     src: 'float fneg(float a){ return -a; }',

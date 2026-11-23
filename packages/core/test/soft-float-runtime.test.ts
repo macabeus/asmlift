@@ -23,3 +23,31 @@ describe('an argument the function returns', () => {
     expect(() => lift('fkeepi')).toThrow("no model for the runtime helper '__ltsf2'");
   });
 });
+
+// `(float)u` as agbcc open-codes it (gcc/optabs.c:3591-3622): `__floatsisf` where the word fits a
+// signed one, else `(u & 1) | (u >> 1)` converted and doubled through `__addsf3` (raise/unsigned-float.ts).
+describe('an unsigned word converted to a single', () => {
+  test('the diamond is the unsigned conversion', () => {
+    expect(lift('u2f')).toBe('float u2f(s32 a0) {\n    return (float)(u32)a0;\n}\n');
+    expect(lift('u2fmul')).toBe('float u2fmul(s32 a0, float a1) {\n    return (float)(u32)a0 * a1;\n}\n');
+  });
+
+  // The same diamond spelled in C by hand is the same conversion.
+  test('the source spelling of the open-coding', () => {
+    expect(lift('u2fhand')).toBe('float u2fhand(s32 a0) {\n    return (float)(u32)a0;\n}\n');
+  });
+
+  test.each([
+    ['u2fmask', 'another mask constant'],
+    ['u2fshift', 'another shift'],
+    ['u2fpeek', 'the halved conversion read inside the arm'],
+  ])('%s: %s is no unsigned conversion', (name) => {
+    expect(() => lift(name)).toThrow("no model for the runtime helper '__floatsisf'");
+  });
+
+  // A float stored is a word read; and beside a return of an argument nothing reads as a float, the
+  // function's other return is a word.
+  test.each(['u2fst', 'u2fmix'])('%s: the converted value read as a word refuses', (name) => {
+    expect(() => lift(name)).toThrow("no model for the runtime helper '__floatsisf'");
+  });
+});

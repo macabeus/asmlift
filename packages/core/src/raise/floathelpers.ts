@@ -18,6 +18,7 @@ import { arrivesAsDeclared, floatSidesOf, helperOp, isFloatHelper, lookupHelper 
 import type { TargetDescription } from '../target';
 import { RaiseUnsupportedError } from './errors';
 import { isArgumentPair } from './pairparams';
+import { foldUnsignedFloat, unsignedFloatDiamonds } from './unsigned-float';
 
 /** Rewrite the float-arithmetic helper calls to the float ops, in place, each value at the width its
  *  helper's signature states, and hand a parameter the callee declares `double` (the frontend's
@@ -109,6 +110,16 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
   const floatsOnly = (v: Value, calls: ReadonlySet<Op>) => (users.get(v) ?? []).every((u) => floatUse(u, v, calls));
   const entry = fn.blocks[0].params;
   const rets = fn.blocks.flatMap((b) => b.ops.filter((op) => op.opcode === 'ret' && op.operands.length > 0));
+  // AN UNSIGNED WORD CONVERTED, as agbcc open-codes `(float)u` (raise/unsigned-float.ts): the join of
+  // its diamond holds a float source as a helper's result is, kept where its readers all take a
+  // float — a helper the fold keeps, or a return of a function returning only floats — and folded
+  // to one `uitofp`. The diamond's own helper calls read across its edges, so this pass refuses
+  // them; a diamond kept goes, a diamond not kept stays for the helpers' refusal.
+  const diamonds = unsignedFloatDiamonds(fn, target);
+  const converted = (v: Value, calls: ReadonlySet<Op>) =>
+    diamonds.has(v) &&
+    (users.get(v) ?? []).length > 0 &&
+    (users.get(v) ?? []).every((u) => floatUse(u, v, calls) || u?.opcode === 'ret');
   // A SINGLE ARGUMENT THE FUNCTION RETURNS is moved whole into r0, so the `ret` takes it as the float
   // it was handed — but only where every `ret` then hands back a float: an argument some fold reads
   // as a float, or a float this pass makes. A `return a;` beside `return 5;` is a function whose
@@ -122,7 +133,9 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
     rets.every((r) =>
       r.operands.every((o) => {
         const d = def.get(o);
-        return d === undefined ? returnedArgument(o, calls) : (calls.has(d) && sidesOf(d).result) || declaredSingle(d);
+        return d === undefined
+          ? returnedArgument(o, calls) || converted(o, calls)
+          : (calls.has(d) && sidesOf(d).result) || declaredSingle(d);
       }),
     );
   // A `concat` of the same two slots in the same order as `d`: the frontend builds one afresh at each
@@ -148,7 +161,9 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
   const declaredSingle = (d: Op) => returners.get(d) === 'float' && intWidth(d.results[0].type) === 32;
   const fromCall = (v: Value, calls: ReadonlySet<Op>) => {
     const d = def.get(v);
-    return d !== undefined && ((calls.has(d) && sidesOf(d).result) || declaredSingle(d));
+    return d === undefined
+      ? converted(v, calls) && (!(users.get(v) ?? []).some((u) => u?.opcode === 'ret') || returnsFloats(calls))
+      : (calls.has(d) && sidesOf(d).result) || declaredSingle(d);
   };
   // A CONSTANT WORD, as a compiler may build one in two instructions: agbcc moves a word that is a
   // shifted byte as `mov`+`lsl` (thumb.md:66, `thumb_shiftable_const` at thumb.c:61) and one in
@@ -242,7 +257,7 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
   const madeFloat = (v: Value) => {
     const d = def.get(v);
     return d === undefined
-      ? returnedArgument(v, calls) && argument(v, calls)
+      ? (returnedArgument(v, calls) && argument(v, calls)) || fromCall(v, calls)
       : returned.has(d) || (calls.has(d) && sidesOf(d).result);
   };
   if (rets.some((r) => r.operands.some(madeFloat)) && !rets.every((r) => r.operands.every(madeFloat))) {
@@ -268,11 +283,17 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
       }
     }
   }
-  if (!sites.length && !consumers.size && !returned.size) {
+  const keptDiamonds = [...diamonds].filter(([v]) => fromCall(v, calls));
+  if (!sites.length && !consumers.size && !returned.size && !keptDiamonds.length) {
     return false;
   }
   const floatOf = new Map<Value, Value>();
   const float = (bits: number) => mkValue(bits > 32 ? T.f64() : T.f32());
+  for (const [v, d] of keptDiamonds) {
+    const u = float(32);
+    foldUnsignedFloat(fn, d, u);
+    floatOf.set(v, u);
+  }
   // the `fconst` each literal's `concat` becomes, and the ops computing the constant words only it read
   const literals = new Map<Op, Op>();
   const spent = new Set<Op>();
