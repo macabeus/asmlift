@@ -4763,7 +4763,7 @@ export const SYNTHETIC: SynthSpec[] = [
     src:
       'extern void (*gfp)(int);\nextern int gy, gz;\nvoid h(int a)\n{\n    gfp(a + 1);\n    gz = 0;\n}\n' +
       'void callvia_body(int *p, int b)\n{\n    p[3] = b;\n    gy = 7;\n    h(b);\n}',
-    features: ['call', 'fnptr'],
+    features: ['fnptr'],
     toolchains: ['agbcc'],
     ctx: 'extern void (*gfp)(int);\nextern int gy, gz;\nvoid h();\nvoid callvia_body(int *p, int b);',
     proto: { callvia_body: { returnsVoid: true }, h: { returnsVoid: true } },
@@ -4779,7 +4779,7 @@ export const SYNTHETIC: SynthSpec[] = [
     src:
       'typedef unsigned short u16;\nextern void (*gfp2)(int, int);\nextern void take(u16 *);\n' +
       'void callvia_frame(int a, int b, u16 c)\n{\n    u16 s;\n    s = c;\n    gfp2(a, b);\n    take(&s);\n}',
-    features: ['call', 'fnptr', 'stack-addr'],
+    features: ['fnptr', 'stack-addr'],
     toolchains: ['agbcc'],
     ctx:
       'typedef unsigned short u16;\nextern void (*gfp2)(int, int);\nextern void take(u16 *);\n' +
@@ -4801,7 +4801,7 @@ export const SYNTHETIC: SynthSpec[] = [
       'extern void h(void);\nvoid g(unsigned char *d, unsigned char *s, int n)\n{\n' +
       '    while (n-- > 0) *d++ = *s++;\n    h();\n}\n' +
       'void sretbody_void(unsigned char *src)\n{\n    unsigned char b[16];\n    g(b, src, 16);\n}',
-    features: ['call', 'stack-addr', 'struct-return'],
+    features: ['struct-return'],
     toolchains: ['agbcc'],
     ctx: 'extern void h(void);\nvoid sretbody_void(unsigned char *src);',
     proto: { sretbody_void: { returnsVoid: true }, h: { params: [], returnsVoid: true } },
@@ -4815,7 +4815,7 @@ export const SYNTHETIC: SynthSpec[] = [
     src:
       'int g(unsigned char *d, unsigned char *s, int n)\n{\n    while (n-- > 0) *d++ = *s++;\n    return 0;\n}\n' +
       'void sretbody_const(unsigned char *src)\n{\n    unsigned char b[16];\n    g(b, src, 16);\n}',
-    features: ['call', 'stack-addr', 'struct-return'],
+    features: ['struct-return'],
     toolchains: [...FIVE],
     ctx: 'void sretbody_const(unsigned char *src);',
     proto: { sretbody_const: { returnsVoid: true } },
