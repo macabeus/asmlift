@@ -132,6 +132,17 @@ function viewBytes(t: IrType): number {
   return e.width / 8;
 }
 
+/** The INTEGER FIELD of a struct at exactly `[off, off + width)` bytes, or undefined. A struct has
+ *  one field at an offset, and a union of integers typed as the struct kind sets every member at
+ *  0 (aggregate.ts `integerUnionType`) with no two of one width, so the width picks at most one. */
+export function intFieldAt(
+  st: Extract<IrType, { kind: 'struct' }>,
+  off: number,
+  width: number,
+): StructField | undefined {
+  return st.fields.find((m) => m.off === off && m.type.kind === 'int' && m.type.width === width * 8);
+}
+
 /** A struct as its declaration spells it (`declared`), else by its tag; any other type as printed. */
 export function structSpelling(t: IrType): string {
   return t.kind === 'struct' ? (t.declared ?? `struct ${t.name}`) : typeToString(t);

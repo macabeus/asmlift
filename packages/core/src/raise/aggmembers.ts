@@ -10,19 +10,22 @@
 // `aggregate` stamp), so the word is bytes of a declared object, and each use of it names a byte
 // range: a narrowing store or extension (the low end), or one of those applied to a right shift
 // by whole bytes, or such a shift alone (the top end, whose zero fill is the member's own zero
-// extension). Where every use names exactly one declared integer member, the word is those
-// member reads — the same bytes, read at the same program point: each member load is placed where
-// the word load was, and the word load is left to dce.
+// extension), or an op of `+ - * & | ^ ~ neg` whose result's demanded bits (ir/bits.ts
+// `demandedBitsAt`) fit the low member. Where every use names exactly one declared integer
+// member, the word is those member reads — the same bytes, read at the same program point: each
+// member load is placed where the word load was, and the word load is left to dce.
 //
 // REFUSALS, each leaving the word read whole (spelled through a cast, which is the same bytes):
 //   * the base is not a frame object the audit typed as a struct, or the read is qualified;
-//   * a use is anything but the shapes above (an add, a compare of the whole word, a phi
-//     argument, a call argument), or a shift whose uses are not all of one width;
+//   * a use is anything but the shapes above (an add whose sum reaches a reader past the low
+//     member, a compare of the whole word, a phi argument, a call argument), or a shift whose
+//     uses are not all of one width;
 //   * a range names no declared member exactly (a straddle, padding, a bitfield, a nested
 //     aggregate) — the member must start at that byte and be an integer of that width.
+import { type DemandedBitsIndex, demandedBitsAt, demandedBitsIndex } from '../ir/bits';
 import { type Block, type Fn, type Op, type Value, mkOp, mkValue } from '../ir/core';
 import { qualified } from '../ir/discipline';
-import { type IrType, T } from '../ir/types';
+import { type IrType, T, intFieldAt } from '../ir/types';
 
 type StructType = Extract<IrType, { kind: 'struct' }>;
 
@@ -37,8 +40,8 @@ function frameStructOf(defs: ReadonlyMap<Value, Op>, base: Value): StructType | 
 
 /** The declared integer member at exactly `[byte, byte + width)`: its signedness, or undefined. */
 function memberAt(st: StructType, byte: number, width: number): boolean | undefined {
-  const f = st.fields.find((m) => m.off === byte);
-  return f !== undefined && f.type.kind === 'int' && f.type.width === width * 8 ? f.type.signed : undefined;
+  const f = intFieldAt(st, byte, width)?.type;
+  return f?.kind === 'int' ? f.signed : undefined;
 }
 
 interface Use {
@@ -167,6 +170,19 @@ export function readDeclaredMembers(fn: Fn, littleEndian: boolean): number {
     },
   });
   const isShr = (op: Op): boolean => (op.opcode === 'shr_u' || op.opcode === 'shr_s') && op.operands.length === 1;
+  // DEMANDED BITS (ir/bits.ts `demandedBitsAt`): the bits of the word a use passes on to any
+  // reader, through that use and everything past it. Through `+ - * & | ^ ~ neg` a result's low n
+  // bits are its operands' low n bits alone, so an arithmetic chain whose every end narrows to a
+  // member — `s.h += 1` is `(u16)(word + 1)` stored to two bytes — demands only that member's bits
+  // of the word, and reads the member. The index is built afresh for each word asked about, since
+  // each rewrite below moves readers.
+  const demandSite = (u: Use) => ({
+    op: u.op,
+    rewire: (m: Value): undefined => {
+      u.op.operands[u.idx] = m;
+      return undefined;
+    },
+  });
   const frameOff = (v: Value): number | undefined => {
     const d = defs.get(v);
     return d?.opcode === 'laddr' ? (d.attrs.off as number) : undefined;
@@ -188,11 +204,25 @@ export function readDeclaredMembers(fn: Fn, littleEndian: boolean): number {
       // the byte a `width`-byte range `shift` bits up the word starts at
       const byteOf = (shift: number, width: number): number => (littleEndian ? shift / 8 : word - shift / 8 - width);
       const plan: MemberUse[] = [];
+      let index: DemandedBitsIndex | undefined;
       let ok = (uses.get(v) ?? []).length > 0;
       for (const u of uses.get(v) ?? []) {
         const width = narrowedTo(u);
         if (width !== undefined && width < word) {
           plan.push({ byte: byteOf(0, width), width, sites: [narrowSite(u)] });
+          continue;
+        }
+        if (['add', 'sub', 'mul', 'and', 'or', 'xor', 'not', 'neg'].includes(u.op.opcode)) {
+          // the narrowest member at the word's low end that holds every bit the use demands
+          const d = demandedBitsAt(fn, u.op, v, false, (index ??= demandedBitsIndex(fn)));
+          const kept = [1, 2].find(
+            (w) => w < word && (d & ~(2 ** (w * 8) - 1)) === 0 && memberAt(st, at0 + byteOf(0, w), w) !== undefined,
+          );
+          if (kept === undefined) {
+            ok = false;
+            break;
+          }
+          plan.push({ byte: byteOf(0, kept), width: kept, sites: [demandSite(u)] });
           continue;
         }
         // `(x << a) >> b`: bits [b - a, 32 - a) of the word, the middle members

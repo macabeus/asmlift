@@ -19,6 +19,8 @@ import {
   aggregateType,
   byValueCallArgs,
   byValueRefusal,
+  integerUnionType,
+  nestsFloat,
   ownArgumentWordsOn,
   ownLeadingWordParamsOn,
   returnedAggregate,
@@ -1483,12 +1485,20 @@ export function structLocalType(
   if (named === undefined) {
     return { refused: 'it names no type a local of it could be declared with' };
   }
-  const type = aggregateType(named.tag, named.spelling, returnedAggregate(own), target);
+  // a union of integers is typed as its members at offset 0 (aggregate.ts `integerUnionType`)
+  const layout = returnedAggregate(own);
+  const type =
+    layout.kind === 'union'
+      ? integerUnionType(named.tag, named.spelling, layout, target)
+      : aggregateType(named.tag, named.spelling, layout, target);
   if (type?.kind !== 'struct') {
     return {
       refused:
-        'it is a union, or its members are not all known or this target does not say how it lays one of them out ' +
-        '(an enum, a bitfield) — the local it lands in has no type here',
+        layout.kind === 'union'
+          ? 'it is a union whose members are not all integers of distinct widths, or that is spelled as a struct, or ' +
+            'whose members are not all known or this target does not lay out — the local it lands in has no type here'
+          : 'its members are not all known or this target does not say how it lays one of them out ' +
+            '(an enum, a bitfield) — the local it lands in has no type here',
     };
   }
   return type;
@@ -1507,9 +1517,11 @@ export function structLocalType(
 //   - one, two or four bytes, the widths one load reads whole — three bytes, or the second
 //     register of an eight-byte struct, is an image no load here builds;
 //   - printed beside its callee's prototype, which the declarations block defines it by;
-//   - all integers: a floating member has no spelling here that reads its bits as the float they
-//     are (structure.ts `frameStructMember` spells an integer field), and `*(s32 *)&s` stored to a
-//     `float` converts the value (agbcc: `bl __floatsisf`).
+//   - a floating member is read as its bits, `*(s32 *)&s`, which structure.ts spells only where
+//     every reader stores them into an integer lvalue the lift types (`floatBitsStoreTarget`): a
+//     float reader would convert them (agbcc: `bl __floatsisf`), so that declines there. A float
+//     inside a nested struct or union has no field to say so (aggregate.ts `nestsFloat`), so it
+//     has no local here.
 // Otherwise the register still holds nothing the caller may read. The ONE derivation of that type:
 // the call plan marks the call by it, and `liftRegisterStructCalls` declares the local by it.
 export function registerStructLocal(
@@ -1520,31 +1532,16 @@ export function registerStructLocal(
     return undefined;
   }
   const type = structLocalType(own, target);
-  if ('refused' in type || ![1, 2, 4].includes(type.size ?? 0) || hasFloatingMember(type)) {
+  if ('refused' in type || ![1, 2, 4].includes(type.size ?? 0) || nestsFloat(returnedAggregate(own))) {
     return undefined;
   }
   return spellableProto(own, target, type) === undefined ? undefined : type;
 }
 
-function hasFloatingMember(t: IrType): boolean {
-  switch (t.kind) {
-    case 'float':
-      return true;
-    case 'struct':
-      return t.fields.some((f) => hasFloatingMember(f.type));
-    case 'union':
-      return t.members.some((f) => hasFloatingMember(f.type));
-    case 'array':
-      return hasFloatingMember(t.elem);
-    default:
-      return false;
-  }
-}
-
 /** A STRUCT PASSED BY VALUE IS THE ONE OBJECT ITS ARGUMENT WORDS HOLD AT THE CALL. The lowering
  *  hands its words over one operand each (`byValueWords`, pairs of first operand and word count);
  *  C passes the struct, so the words must be one object's, whole, and that object is what the call
- *  is handed. Two objects are:
+ *  is handed. Three objects are:
  *
  *  - A FRAME OBJECT the words are loaded off — word loads at consecutive words from one `laddr`
  *    offset. The operand becomes that offset's address, and the frame-object audit judges the
@@ -1559,10 +1556,18 @@ function hasFloatingMember(t: IrType): boolean {
  *    symbol's own address too, and `take(gQs)` is a type error against the header that declares
  *    it (`bareStructRefusal`).
  *
- *  Either way every access is unqualified and in the call's own block, and no store or call lies
+ *  - THE POINTEE OF ONE POINTER — word loads at consecutive words from byte 0 of one incoming
+ *    parameter that nothing else in the function reads (never a computed or loaded pointer, which
+ *    prints as its own expression rather than as the name the retyping types).
+ *    The value is retyped a pointer to the struct, the operand becomes it, and the call names it in
+ *    `byValuePointee` (by declared parameter), which structure.ts spells `*p`. A pointer read
+ *    anywhere else keeps the type its other reads give it, so that one declines.
+ *
+ *  Every way, every access is unqualified and in the call's own block, and no store or call lies
  *  between the earliest of them and the call but those accesses themselves, so the object holds at
  *  the call what the words carry. Every other source — registers computed in place, words off two
- *  objects, off a pointer or into a global's interior, a store the call may not see last — refuses.
+ *  objects, off a pointer past its byte 0 or one read elsewhere, into a global's interior, a store
+ *  the call may not see last — refuses.
  *
  *  The operand's value is typed a pointer to the struct, and a global's `gaddr` is a fresh one that
  *  names the struct too (`passedAs`), so value numbering never merges it with a plain address of
@@ -1596,6 +1601,8 @@ export function foldByValueArgs(
         }
         return { first: words[2 * i], n: words[2 * i + 1], type, param: arg!.param };
       });
+      // the first words of the structs passed as a pointer's pointee rather than an object's address
+      const pointees = new Set<number>();
       // highest first, so folding one leaves the operand places of those below it as they were
       for (const { first, n, type } of [...pairs].sort((x, y) => y.first - x.first)) {
         const at = blk.ops.indexOf(call);
@@ -1676,11 +1683,46 @@ export function foldByValueArgs(
             });
           }
         }
+        // THE POINTEE OF ONE POINTER, read whole: word loads at consecutive words from byte 0 of one
+        // incoming parameter, which nothing else in the function reads, so the parameter is that
+        // struct's pointer and nothing else — typed so, it is passed as `*p` (structure.ts). ONLY A
+        // PARAMETER: retyping the value retypes only the name it prints as, and a parameter prints
+        // as its own name. A computed pointer (`p[i]`'s `add`, a `gaddr` plus an offset) or a
+        // loaded one (`**pp`) prints as its defining expression, typed from that expression's own
+        // operands, so `*` would dereference an integer or a `u8 *` — C that does not compile. A
+        // base read anywhere else keeps its own type and declines. EACH WORD READ ONLY BY THE CALL,
+        // at its own place: a load whose word another reader shares (kmc CSEs `p->b` into the
+        // argument and the struct's word) would survive the fold and print off the retyped
+        // parameter as a recovered `field_<off>`, not as the declared member at that offset.
+        if (
+          object === undefined &&
+          loaded &&
+          base0 !== undefined &&
+          baseDef === undefined &&
+          irBlocks[0]!.params.includes(base0) &&
+          loads.every((d, i) => wordAt(d, i, base0)) &&
+          settled(loads as Op[]) &&
+          onlyReadBy(irBlocks, base0, loads as Op[]) &&
+          loads.every(
+            (d) =>
+              onlyReadBy(irBlocks, d!.results[0], [call]) &&
+              call.operands.filter((o) => o === d!.results[0]).length === 1,
+          )
+        ) {
+          base0.type = T.ptr(type);
+          pointees.add(first);
+          const n0 = passed.length;
+          call.operands.splice(first, n0, base0);
+          for (const d of loads) {
+            dropIfUnread(irBlocks, d!);
+          }
+          continue;
+        }
         if (object === undefined) {
           throw new FrontendUnsupportedError(
             `cannot lift '${name}': the call to \`${callee ?? 'a function pointer'}\` passes ${structSpelling(type)} ` +
-              'by value, and its words are not one frame object or one global, read whole just before the call — ' +
-              'a struct passed from anywhere else is not modelled',
+              'by value, and its words are not one frame object, one global or the pointee of one pointer parameter ' +
+              'nothing else reads, read whole just before the call — a struct passed from anywhere else is not modelled',
           );
         }
         blk.ops.splice(at, 0, object);
@@ -1707,6 +1749,9 @@ export function foldByValueArgs(
           first - pairs.filter((q) => q.first < first).reduce((m, q) => m + q.n - 1, 0),
           param,
         ]),
+        ...(pointees.size > 0
+          ? { byValuePointee: sorted.filter(({ first }) => pointees.has(first)).map(({ param }) => param) }
+          : {}),
       };
     }
   }
@@ -1750,6 +1795,15 @@ function bareStructRefusal(
     return `the symbol map types it as ${info.shape === 'struct' ? `struct ${info.structName ?? '(untagged)'}` : `${info.shape === 'array' ? 'an' : 'a'} ${info.shape}`}`;
   }
   return undefined;
+}
+
+/** Whether every read of `v` — operands and branch arguments alike — is one of `readers`. */
+function onlyReadBy(irBlocks: Block[], v: Value, readers: readonly Op[]): boolean {
+  return irBlocks.every((b) =>
+    b.ops.every(
+      (x) => (readers.includes(x) || !x.operands.includes(v)) && x.successors.every((sc) => !sc.args.includes(v)),
+    ),
+  );
 }
 
 /** Removes `op` where nothing reads its result. */

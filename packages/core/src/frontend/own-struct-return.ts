@@ -45,11 +45,14 @@
 // see its own note — and otherwise leaves the stores of the copied words, which is the same
 // function spelled with one copy too many.
 //
-// A STRUCT RETURNED IN THE RETURN REGISTER is the other half of the target's rule, and only its
-// simplest case is spelled as the struct (`liftOwnRegisterStruct`): one word that is all one
-// integer member.
+// A STRUCT RETURNED IN THE RETURN REGISTER is the other half of the target's rule, and only two
+// cases are spelled as the struct (`liftOwnRegisterStruct`): one word that is all one integer
+// member, and a call's struct of the same type handed back with its one sub-word member written
+// (`liftModifiedCallImage`).
+import { constMask, provableBits } from '../ir/bits';
 import {
   type Block,
+  CALL_RETURN_OBJECT,
   type Fn,
   OWN_RETURN_OBJECT,
   type Op,
@@ -64,7 +67,7 @@ import {
   successorsOf,
 } from '../ir/core';
 import { deadOps, qualified } from '../ir/discipline';
-import { type IrType, T } from '../ir/types';
+import { type IrType, T, intFieldAt, typeEquals } from '../ir/types';
 import type { TargetDescription } from '../target';
 
 type StructType = Extract<IrType, { kind: 'struct' }>;
@@ -119,10 +122,12 @@ export function liftOwnStructReturn(fn: Fn, type: StructType, target: TargetDesc
  *  ret;`. Only a struct of exactly one word whose member at byte 0 is an integer of that word fills
  *  the register with nothing else; any other struct, or a `ret` that hands back no word, leaves `fn`
  *  as it is (its word the lift's return), and answers why. */
-export function liftOwnRegisterStruct(fn: Fn, type: StructType): string | undefined {
+export function liftOwnRegisterStruct(fn: Fn, type: StructType, target: TargetDescription): string | undefined {
   const member = type.fields.find((f) => f.off === 0 && f.type.kind === 'int' && f.type.width === 32);
   if (type.size !== 4 || type.fields.length !== 1 || member === undefined) {
-    return 'it is not one word that is all one integer member';
+    return liftModifiedCallImage(fn, type, target)
+      ? undefined
+      : "it is not one word that is all one integer member, or a call's struct of its type with a member at byte 0 written";
   }
   const rets = fn.blocks.map((b) => b.ops[b.ops.length - 1]).filter((op) => op?.opcode === 'ret');
   if (rets.some((op) => op.operands.length !== 1)) {
@@ -147,6 +152,96 @@ export function liftOwnRegisterStruct(fn: Fn, type: StructType): string | undefi
   }
   fn.blocks[0].ops.unshift(object);
   return undefined;
+}
+
+/** A CALL'S STRUCT, ITS MEMBER WRITTEN, RETURNED: `struct S s = mk(x); s.h += 1; return s;` over
+ *  agbcc's `struct S { u16 h; }`, which it rounds to a word whose pad bits are the object's, or over
+ *  a union of integers (aggregate.ts `integerUnionType`, every member at byte 0), whose bits past
+ *  the written member are its wider members' and stay the image's. Each
+ *  `ret` hands back `(A & 0xffff) | (I & 0xffff0000)`-shaped bits — `or` of a value `A` of no more
+ *  bits than the member (`provableBits`) and the call's image `I` masked to exactly the bits past
+ *  the member — so the word is the image with the member replaced by `A`: the call's local
+ *  (frontend/register-struct-call.ts) has its member stored and is returned whole, `mk_ret.h = A;
+ *  return mk_ret;`. Only where the target is little-endian (the member is the word's low bits), the
+ *  struct is one word whose every member is at byte 0 — one member and pad, or a union — the member
+ *  written a 1- or 2-byte integer the mask's width picks (`intFieldAt`), the image is a whole
+ *  unqualified word load of a local of this very type, and that local is read only by such loads
+ *  and its call, so it still holds the image at the `ret`. Every `ret` must have this shape, or
+ *  nothing changes (false). */
+function liftModifiedCallImage(fn: Fn, type: StructType, target: TargetDescription): boolean {
+  if (target.capabilities.endianness === 'big' || type.size !== 4 || type.fields.some((f) => f.off !== 0)) {
+    return false;
+  }
+  return [8, 16].some((width) => intFieldAt(type, 0, width / 8) !== undefined && liftWrittenMember(fn, type, width));
+}
+
+/** `liftModifiedCallImage` for the `width`-bit integer member at byte 0. */
+function liftWrittenMember(fn: Fn, type: StructType, width: number): boolean {
+  const rets = fn.blocks.map((b) => b.ops[b.ops.length - 1]).filter((op) => op?.opcode === 'ret');
+  if (rets.length === 0 || rets.some((op) => op.operands.length !== 1)) {
+    return false;
+  }
+  const defs = defOpMap(fn);
+  const ctx = { defs };
+  const memberMask = (1 << width) - 1;
+  const ops = fn.blocks.flatMap((b) => b.ops);
+  // the call's local, read only by its call and whole-word image loads
+  const imageLocal = (i: Value): Value | undefined => {
+    const load = defs.get(i);
+    const local = load?.opcode === 'load' ? load.operands[0] : undefined;
+    const l = local === undefined ? undefined : defs.get(local);
+    const t = l?.results[0].type;
+    if (
+      load === undefined ||
+      l?.opcode !== 'laddr' ||
+      l.attrs[CALL_RETURN_OBJECT] === undefined ||
+      t?.kind !== 'ptr' ||
+      !typeEquals(t.to, type) ||
+      load.attrs.off !== 0 ||
+      load.attrs.width !== 4 ||
+      qualified(load)
+    ) {
+      return undefined;
+    }
+    const readers = ops.filter((op) => op.operands.includes(local!));
+    const onlyImage = readers.every(
+      (op) =>
+        (op.opcode === 'call' && op.operands[0] === local && op.operands.indexOf(local!, 1) < 0) ||
+        (op.opcode === 'load' && op.attrs.off === 0 && op.attrs.width === 4 && !qualified(op)),
+    );
+    const branched = fn.blocks.some((b) => b.ops.some((op) => op.successors.some((e) => e.args.includes(local!))));
+    return onlyImage && !branched ? local : undefined;
+  };
+  const plans: { ret: Op; local: Value; value: Value }[] = [];
+  for (const ret of rets) {
+    const or = defs.get(ret.operands[0]);
+    if (or?.opcode !== 'or' || or.operands.length !== 2) {
+      return false;
+    }
+    const plan = [0, 1]
+      .map((k) => {
+        const [a, b] = [or.operands[k], or.operands[1 - k]];
+        const masked = defs.get(b);
+        if (masked?.opcode !== 'and' || masked.operands.length !== 2) {
+          return undefined;
+        }
+        const j = masked.operands.findIndex((o) => constMask(ctx, o) === ~memberMask);
+        const local = j < 0 ? undefined : imageLocal(masked.operands[1 - j]);
+        return local !== undefined && provableBits(ctx, a) <= width ? { ret, local, value: a } : undefined;
+      })
+      .find((p) => p !== undefined);
+    if (plan === undefined) {
+      return false;
+    }
+    plans.push(plan);
+  }
+  for (const { ret, local, value } of plans) {
+    const b = fn.blocks.find((x) => x.ops.includes(ret))!;
+    b.ops.splice(b.ops.length - 1, 0, mkOp('store', { operands: [local, value], attrs: { off: 0, width: width / 8 } }));
+    ret.operands = [local];
+    ret.attrs = { ...ret.attrs, [RETURNS_OBJECT]: true };
+  }
+  return true;
 }
 
 /** The incoming pointer `hidden` and every address derived from it by adding a constant (O32's

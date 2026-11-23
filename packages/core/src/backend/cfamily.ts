@@ -202,6 +202,9 @@ function legalizedIndexBase(ix: Extract<Expr, { k: 'index' }>, vt: PrintEnv): Ex
   // `field` subtree, reindex's `base.k === 'var'`), but `mapExprChildren` spreads the field across
   // an arbitrary base substitution, so that is five accidents rather than a check. This ordering
   // is the check. Measured: zero test moves either way.
+  if (ix.whole === true) {
+    return ix.base;
+  }
   const declared = ix.baseElem !== undefined ? T.ptr(ix.baseElem) : undefined;
   return derefStrideOk(exprCType(ix.base, vt.type) ?? declared, ix.width, ix.signed)
     ? ix.base

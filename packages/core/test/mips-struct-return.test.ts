@@ -14,6 +14,7 @@ import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
 import type { AggregateLayout, Prototypes } from '../src/proto';
+import { globalsFromContext } from '../src/proto-context';
 import { MIPS_GCC, MIPS_IDO, type TargetDescription } from '../src/target';
 import { relocs } from './helpers';
 
@@ -567,18 +568,23 @@ describe('what the lowering does not build still declines', () => {
   test('a float argument', () => {
     expect(() => lift('sretf', IDO_SRETF, MIPS_IDO)).toThrow(/cannot lift 'sretf': `mkf` returns struct SF/);
   });
+});
 
-  // `void sretfl(s32 x){ struct Fl s = mkfl(x); gF = s.f; }`, `extern float gF;`: gcc reads the
-  // member as a word (`lw v0,16(sp)`), and `gF = *(s32 *)&sp16;` would convert those bits
-  test('a floating member read as the word it is', () => {
-    const KMC_SRETFL: Fixture = {
-      lines: KMC_SRET1W.lines,
-      rs: [[0xc, 'R_MIPS_26', 'mkfl'], ...KMC_SRET1W.rs.slice(1)],
-    };
-    expect(() => lift('sretfl', KMC_SRETFL, MIPS_GCC)).toThrow(
-      /a 4-byte read of the floating member 'f' of a struct local is an integer here/,
-    );
-  });
+// `void sretfl(s32 x){ struct Fl s = mkfl(x); gW = s.f; }`: gcc reads the member as a word (`lw
+// v0,16(sp)`) and stores it, so the bits are copied as bits through the global's integer cell,
+// whether a context declares it `float` or nothing declares it at all: `gW = *(s32 *)&sp16;` against
+// a `float` declaration, the context's or the project's, would convert them
+test('a floating member read as the word it is is stored as its bits', () => {
+  const asm = obj('sretfl', KMC_SRET1W.lines);
+  const asmData = relocs([[0xc, 'R_MIPS_26', 'mkfl'], ...KMC_SRET1W.rs.slice(1)]);
+  const prototypes: Prototypes = { ...PROTOS, sretfl: { returnsVoid: true } };
+  expect(decompile('sretfl', asm, MIPS_GCC, { asmData, prototypes }).source).toMatch(
+    /sp16 = mkfl\(a0\);\s+\*\(s32 \*\)&gW = \*\(s32 \*\)&sp16;/,
+  );
+  const contextGlobals = globalsFromContext('extern float gW;', 'c');
+  expect(decompile('sretfl', asm, MIPS_GCC, { asmData, prototypes, contextGlobals }).source).toMatch(
+    /\*\(s32 \*\)&gW = \*\(s32 \*\)&sp16;/,
+  );
 });
 
 // THE EVEN-WORD RULE COUNTS THE HIDDEN POINTER. An 8-aligned struct starts at an even argument word,
@@ -737,5 +743,57 @@ describe('a function that itself returns a struct', () => {
 
   test('is the pointer function it compiles to where nothing states it', () => {
     expect(lift('rmk1', KMC_RMK1, MIPS_GCC)).toMatch(/s32 \* rmk1\(s32 \*a0, s32 a1\)/);
+  });
+});
+
+// gcc2.7.2kmc -O2 of `struct Q { s32 a; s32 b; }; void takeQ(s32 k, struct Q q);`
+describe("a struct passed by value as a pointer parameter's pointee", () => {
+  const takeQ = {
+    params: ['s32', 'struct Q'],
+    returnsVoid: true,
+    byValueLayouts: { 1: layout(['a', 's32'], ['b', 's32']) },
+  };
+  const pass = (name: string, lines: string[], params: string[]) =>
+    decompile(name, obj(name, lines), MIPS_GCC, {
+      asmData: relocs([[lines.findIndex((l) => l.includes('jal')) * 4, 'R_MIPS_26', 'takeQ']]),
+      prototypes: { takeQ, [name]: { params, returnsVoid: true } },
+    }).source;
+
+  // `void f(s32 k, struct Q *p) { takeQ(k, *p); }`
+  test('is `*p` where the call alone reads its words', () => {
+    const lines = [
+      '0:\taddiu\tsp,sp,-24',
+      '4:\tmove\tv0,a1',
+      '8:\tsw\tra,16(sp)',
+      'c:\tlw\ta1,0(v0)',
+      '10:\tjal\t0 <f>',
+      '14:\tlw\ta2,4(v0)',
+      '18:\tlw\tra,16(sp)',
+      '1c:\tjr\tra',
+      '20:\taddiu\tsp,sp,24',
+    ];
+    expect(pass('f', lines, ['s32', 'struct Q *'])).toContain('takeQ(a0, *a1);');
+  });
+
+  // `void f(struct Q *p) { takeQ(p->b, *p); }`: kmc loads `p->b` once for the argument and the
+  // struct's second word (`move a2,a0`), so the load outlives the fold and would print off the
+  // retyped parameter as a recovered `field_4` — under a header whose names collide, the wrong
+  // offset at exit 0
+  test('declines where another reader shares a word', () => {
+    const lines = [
+      '0:\taddiu\tsp,sp,-24',
+      '4:\tmove\tv0,a0',
+      '8:\tsw\tra,16(sp)',
+      'c:\tlw\ta0,4(v0)',
+      '10:\tlw\ta1,0(v0)',
+      '14:\tjal\t0 <f>',
+      '18:\tmove\ta2,a0',
+      '1c:\tlw\tra,16(sp)',
+      '20:\tjr\tra',
+      '24:\taddiu\tsp,sp,24',
+    ];
+    expect(() => pass('f', lines, ['struct Q *'])).toThrow(
+      /the call to `takeQ` passes struct Q by value, and its words are not one frame object, one global/,
+    );
   });
 });

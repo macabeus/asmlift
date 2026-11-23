@@ -7,15 +7,13 @@ import { describe, expect, test } from 'vitest';
 
 import { renderDeclarations } from '../src/declare';
 import { decompile } from '../src/pipeline';
-import type { FnProto } from '../src/proto';
+import type { AggregateMember, FnProto } from '../src/proto';
+import { globalsFromContext } from '../src/proto-context';
 import { enumerateCandidates } from '../src/rank';
 import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '../src/target';
 
-const mk = (
-  members: { name: string; type: string; bits?: number }[],
-  kind: 'struct' | 'union' = 'struct',
-): FnProto => ({
+const mk = (members: AggregateMember[], kind: 'struct' | 'union' = 'struct'): FnProto => ({
   params: ['s32'],
   returns: 'struct T',
   returnLayout: { kind, members },
@@ -42,7 +40,7 @@ describe('agbcc: a struct of one member comes back in r0', () => {
     expect(w1).toMatch(/mk_ret = mk\(a0\);\s+gV = \*\(s32 \*\)&mk_ret;/);
   });
 
-  test('a bitfield is extracted from the local, and a union has no local and still declines', () => {
+  test('a bitfield is extracted from the local', () => {
     const bf = agbcc('c_bf', 'str', '\tlsl\tr0, r0, #0x18\n\tlsr\tr0, r0, #0x1c\n');
     const members = [
       { name: 'a', type: 'u32', bits: 4 },
@@ -51,16 +49,46 @@ describe('agbcc: a struct of one member comes back in r0', () => {
     expect(decompile('c_bf', bf, ARMV4T_AGBCC, { prototypes: { mk: mk(members) } }).source).toMatch(
       /mk_ret = mk\(a0\);\s+gV = \(u32\)\(\*\(s32 \*\)&mk_ret << 24\) >> 28;/,
     );
-    const un = mk(
+  });
+
+  // `union T { u32 w; u16 h; }; union T s = mk(x); gV = s.h;`: thumb.c returns a union of integers
+  // in r0, and the local is declared as the union the declarations block defines
+  test('a union of integers is read off a local of it, each read naming the member of its width', () => {
+    const un = (members: { name: string; type: string }[]): FnProto => ({
+      ...mk(members, 'union'),
+      returns: 'union T',
+    });
+    const wh = un([
+      { name: 'w', type: 'u32' },
+      { name: 'h', type: 'u16' },
+    ]);
+    // the strh keeps the low halfword of r0, which is `h` (raise/aggmembers.ts names it by width)
+    expect(decompile('c_un', agbcc('c_un', 'strh'), ARMV4T_AGBCC, { prototypes: { mk: wh } }).source).toMatch(
+      /union T mk_ret;\s+mk_ret = mk\(a0\);\s+gV = mk_ret\.h;/,
+    );
+    const [c] = enumerateCandidates('c_un', agbcc('c_un', 'strh'), ARMV4T_AGBCC, { prototypes: { mk: wh } });
+    expect(renderDeclarations(c.symbolRefs ?? [])).toContain('union T { u32 w; u16 h; };');
+    // mwcc 2.3.3: a 2-byte read of the home names `h`, not the first member
+    const mw = mwcc233('c_un', 'lhz     r0,12(r1)', 'sth');
+    expect(
+      decompile('c_un', mw, TOOLCHAIN_TARGETS.mwcc_233_163n.description, { prototypes: { ...own('c_un'), mk: wh } })
+        .source,
+    ).toMatch(/union T mk_ret;\s+mk_ret = mk\(a0\);\s+gV = mk_ret\.h;/);
+    // a member that is no integer, or two of one width, names no single member: no local
+    for (const members of [
       [
         { name: 'w', type: 'u32' },
-        { name: 'h', type: 'u16' },
+        { name: 'f', type: 'float' },
       ],
-      'union',
-    );
-    expect(() => decompile('c_un', agbcc('c_un', 'strh'), ARMV4T_AGBCC, { prototypes: { mk: un } })).toThrow(
-      /r0 is read on a path where a call has destroyed it/,
-    );
+      [
+        { name: 'w', type: 'u32' },
+        { name: 'v', type: 's32' },
+      ],
+    ]) {
+      expect(() => decompile('c_un', agbcc('c_un', 'strh'), ARMV4T_AGBCC, { prototypes: { mk: un(members) } })).toThrow(
+        /r0 is read on a path where a call has destroyed it/,
+      );
+    }
   });
 
   test("each call's struct is its own local, so a read of the first after the second reads the first", () => {
@@ -291,14 +319,98 @@ describe("mwcc: the struct's frame home is the local the call assigns", () => {
   });
 });
 
-describe('a struct with a floating member has no local here', () => {
-  test('agbcc: `struct T { float a; }` comes back in r0, and r0 still holds nothing the caller may read', () => {
-    // `struct T s = mk(x); gF = s.a;` against `extern float gF;`: read as `*(s32 *)&s`, the store
-    // would convert the bits to a float (`bl __floatsisf`)
-    const fl = agbcc('c_f', 'str');
-    expect(() =>
-      decompile('c_f', fl, ARMV4T_AGBCC, { prototypes: { mk: mk([{ name: 'a', type: 'float' }]) } }),
-    ).toThrow(/r0 is read on a path where a call has destroyed it/);
+describe("a struct local's word read through arithmetic is the member whose bits reach its readers", () => {
+  // agbcc returns a one-member struct in r0 (thumb.c `thumb_return_in_memory`); the call's local
+  // is read as the word, and the use decides which of its bits matter
+  const HG = mk([{ name: 'h', type: 'u16' }]);
+  test('agbcc: only the member reaches a halfword store, so the read is that member', () => {
+    // `struct T s = mk(x); gV = s.h + 1;` with `u16 gV`
+    expect(
+      decompile('c_d', agbcc('c_d', 'strh', '\tadd\tr0, r0, #0x1\n'), ARMV4T_AGBCC, { prototypes: { mk: HG } }).source,
+    ).toMatch(/mk_ret = mk\(a0\);\s+gV = mk_ret\.h \+ 1;/);
+  });
+  test('hand-edited: a whole-word store of the sum reads every bit, and keeps the word', () => {
+    expect(
+      decompile('c_d', agbcc('c_d', 'str', '\tadd\tr0, r0, #0x1\n'), ARMV4T_AGBCC, { prototypes: { mk: HG } }).source,
+    ).toMatch(/mk_ret = mk\(a0\);\s+gV = \*\(s32 \*\)&mk_ret \+ 1;/);
+  });
+  // `void f(s32 x, s32 c) { struct H2 s = mkh(x); u8 v; if (c) v = s.h + 1; else v = s.h + 3;
+  // gBm = v; }` (agbcc -O2, `struct H2 { u16 h; u16 g; }` returned in memory): each arm's sum
+  // reaches the byte store through the join, which demands its low byte alone
+  test('agbcc: a sum carried through a join to a byte store reads the low member', () => {
+    const asm =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tadd\tr2, r0, #0\n\tadd\tr4, r1, #0\n\tmov\tr0, sp\n' +
+      '\tadd\tr1, r2, #0\n\tbl\tmkh\n\tldr\tr0, [sp]\n\tcmp\tr4, #0\n\tbeq\t.L3\n\tadd\tr0, r0, #0x1\n\tb\t.L5\n' +
+      '.L3:\n\tadd\tr0, r0, #0x3\n.L5:\n\tlsl\tr0, r0, #0x18\n\tlsr\tr1, r0, #0x18\n\tldr\tr0, .L6\n' +
+      '\tstrb\tr1, [r0]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n' +
+      '.L7:\n\t.align\t2, 0\n.L6:\n\t.word\tgBm\n';
+    const mkh: FnProto = {
+      ...mk([
+        { name: 'h', type: 'u16' },
+        { name: 'g', type: 'u16' },
+      ]),
+      returns: 'struct H2',
+    };
+    const { source } = decompile('f', asm, ARMV4T_AGBCC, {
+      prototypes: { mkh, f: { params: ['s32', 's32'], returnsVoid: true } },
+    });
+    expect(source).toMatch(/= sp0\.h \+ 1;[^]*= sp0\.h \+ 3;/);
+  });
+});
+
+describe('a struct with a floating member is read as its bits, only where they are stored as bits', () => {
+  const fl = mk([{ name: 'a', type: 'float' }]);
+  test('agbcc: `struct T { float a; }` in r0 stored to a global nothing declares copies the word', () => {
+    // `struct T s = mk(x); gV = s.a;`: nothing says what `gV` is, and the project's header may say
+    // `float gV`, where the bare `gV = *(s32 *)&mk_ret;` would convert the bits; its own cast cell
+    // copies them under any declaration of the word
+    expect(decompile('c_f', agbcc('c_f', 'str'), ARMV4T_AGBCC, { prototypes: { mk: fl } }).source).toMatch(
+      /struct T mk_ret;\s+mk_ret = mk\(a0\);\s+\*\(s32 \*\)&gV = \*\(s32 \*\)&mk_ret;/,
+    );
+  });
+
+  test('a global a context declares is stored through an integer cell, never bare', () => {
+    // against `extern float gV;`, `gV = *(s32 *)&s;` would convert the bits (`bl __floatsisf`)
+    const contextGlobals = globalsFromContext('extern float gV;', 'c');
+    expect(
+      decompile('c_f', agbcc('c_f', 'str'), ARMV4T_AGBCC, { prototypes: { mk: fl }, contextGlobals }).source,
+    ).toMatch(/mk_ret = mk\(a0\);\s+\*\(s32 \*\)&gV = \*\(s32 \*\)&mk_ret;/);
+  });
+
+  test('a float in an array member is its bits too, and one in a nested aggregate has no local', () => {
+    // `{ float a[1]; }` hands back the word `{ float a; }` does: stored bare to an undeclared `gV`,
+    // a project's `float gV` would convert it
+    const arr = mk([{ name: 'a', type: 'float', dims: [1] }]);
+    expect(decompile('c_f', agbcc('c_f', 'str'), ARMV4T_AGBCC, { prototypes: { mk: arr } }).source).toMatch(
+      /mk_ret = mk\(a0\);\s+\*\(s32 \*\)&gV = \*\(s32 \*\)&mk_ret;/,
+    );
+    // `{ struct { float f; } in; }` and `{ union { float f; u32 w; } u; }`: the nested member has
+    // no field to say its bytes are a float's, so r0 stays the callee's
+    for (const type of [
+      { kind: 'struct' as const, members: [{ name: 'f', type: 'float' }] },
+      {
+        kind: 'union' as const,
+        members: [
+          { name: 'f', type: 'float' },
+          { name: 'w', type: 'u32' },
+        ],
+      },
+    ]) {
+      const nested = mk([{ name: 'in', type }]);
+      expect(() => decompile('c_f', agbcc('c_f', 'str'), ARMV4T_AGBCC, { prototypes: { mk: nested } })).toThrow(
+        /r0 is read on a path where a call has destroyed it/,
+      );
+    }
+  });
+
+  test('a reader that takes a float declines: the bits would be converted', () => {
+    // `float c_f(s32 x) { return mk(x).a; }`: r0 is returned as the float it is, which the word read
+    // of the local would convert
+    const ret = 'c_f:\n\tpush\t{lr}\n\tbl\tmk\n\tpop\t{r1}\n\tbx\tr1\n';
+    const own = { params: ['s32'], returns: 'float' };
+    expect(() => decompile('c_f', ret, ARMV4T_AGBCC, { prototypes: { mk: fl, c_f: own } })).toThrow(
+      /a 4-byte read of the floating member 'a' of a struct local is an integer here/,
+    );
   });
 });
 
@@ -322,13 +434,41 @@ describe("a function returning what a call returned returns the call's struct", 
     expect(renderDeclarations(c.symbolRefs ?? [])).toContain('struct T mk(s32);');
   });
 
-  test('a word computed from the struct and returned as the own `{u16}` declines, as it did', () => {
-    // `struct T s = mk(x); s.a += 1; return s;`: agbcc keeps the pad's bits, which no member copy says
+  test("agbcc: the call's own `{u16}` with its member written is the call's local, returned whole", () => {
+    // `struct T s = mk(x); s.a += 1; return s;`: agbcc keeps the pad's bits, the image's
     const mod =
       'f:\n\tpush\t{lr}\n\tbl\tmk\n\tadd\tr2, r0, #0\n\tadd\tr0, r2, #0x1\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n' +
       '\tldr\tr1, .L3\n\tand\tr1, r1, r2\n\torr\tr0, r0, r1\n\tpop\t{r1}\n\tbx\tr1\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t-0x10000\n';
-    expect(() => decompile('f', mod, ARMV4T_AGBCC, { prototypes: { ...ownT('f'), mk: T16 } })).toThrow(
-      /it is declared to return struct T by value, which comes back in r0 — it is not one word that is all one integer member, and it reads a struct a call returned there/,
+    expect(decompile('f', mod, ARMV4T_AGBCC, { prototypes: { ...ownT('f'), mk: T16 } }).source).toMatch(
+      /mk_ret = mk\(a0\);\s+mk_ret\.a = \(u16\)\(mk_ret\.a \+ 1\);\s+return mk_ret;/,
+    );
+    // hand-edited: a mask that keeps a bit of the member, or a value wider than the member, is no
+    // image with only the member replaced
+    const T =
+      /it is declared to return struct T by value, which comes back in r0 — it is not one word that is all one integer member, or a call's struct of its type with a member at byte 0 written, and it reads a struct a call returned there/;
+    const wrongMask = mod.replace('.word\t-0x10000', '.word\t-0x8000');
+    const wide = mod.replace('\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n', '');
+    for (const asm of [wrongMask, wide]) {
+      expect(() => decompile('f', asm, ARMV4T_AGBCC, { prototypes: { ...ownT('f'), mk: T16 } })).toThrow(T);
+    }
+  });
+
+  test("agbcc: a union of integers with its narrow member written is the call's local, returned whole", () => {
+    // `union Uw { u16 h; u32 w; }; union Uw f(s32 x) { union Uw u = mkuw(x); u.h += 1; return u; }`
+    // compiles to the same bytes as the `{u16}` above: the bits past `h` are `w`'s, the image's
+    const mod =
+      'f:\n\tpush\t{lr}\n\tbl\tmk\n\tadd\tr2, r0, #0\n\tadd\tr0, r2, #0x1\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n' +
+      '\tldr\tr1, .L3\n\tand\tr1, r1, r2\n\torr\tr0, r0, r1\n\tpop\t{r1}\n\tbx\tr1\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t-0x10000\n';
+    const uw = mk(
+      [
+        { name: 'h', type: 'u16' },
+        { name: 'w', type: 'u32' },
+      ],
+      'union',
+    );
+    const own = { f: { ...uw, returns: 'union Uw' }, mk: { ...uw, returns: 'union Uw' } };
+    expect(decompile('f', mod, ARMV4T_AGBCC, { prototypes: own }).source).toMatch(
+      /mk_ret = mk\(a0\);\s+mk_ret\.h = \(u16\)\(mk_ret\.h \+ 1\);\s+return mk_ret;/,
     );
   });
 

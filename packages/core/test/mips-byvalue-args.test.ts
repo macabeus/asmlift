@@ -339,17 +339,21 @@ describe('a struct passed by value on O32', () => {
     expect(lift('bvtg', IDO_BVTG, MIPS_IDO)).toBe('void bvtg(void) {\n    takeT(gT);\n}\n');
   });
 
-  // Words off a pointer, an incoming register passed on untouched, and two halfwords packed in
-  // registers are not one object here; the guess would lift `takeW(*a0)`, `takeW()` and
-  // `takeP(*p0 << 16 | p0[1])`.
+  // Words off byte 0 of a pointer nothing else reads are its pointee, passed as `*p`
+  // (call-plan.ts `foldByValueArgs`), the pointer typed as the struct's
+  test('a pointer read whole is passed as its pointee', () => {
+    expect(lift('bvwp', KMC_BVWP, MIPS_GCC)).toBe('void bvwp(struct W *a0) {\n    takeW(*a0);\n}\n');
+  });
+
+  // An incoming register passed on untouched, and two halfwords packed in registers, are not one
+  // object here; the guess would lift `takeW()` and `takeP(*p0 << 16 | p0[1])`.
   test.each([
-    ['bvwp', KMC_BVWP, 'takeW', 'struct W'],
     ['byvalW', KMC_BYVALW, 'takeW', 'struct W'],
     ['byvalG', KMC_BYVALG, 'takeP', 'struct P'],
   ] as const)('%s declines, and is not guessed', (name, f, callee, spelling) => {
     expect(() => lift(name, f, MIPS_GCC)).toThrow(
       new RegExp(
-        `the call to \`${callee}\` passes ${spelling} by value, and its words are not one frame object or one global`,
+        `the call to \`${callee}\` passes ${spelling} by value, and its words are not one frame object, one global`,
       ),
     );
   });
@@ -413,11 +417,11 @@ describe('a struct passed by value on O32', () => {
       rs: KMC_BVQG.rs.map(([o, t, sym]) => [o, t, o >= 8 && o <= 0xc ? 'gR' : sym] as [number, string, string]),
     };
     expect(() => lift('bvqg', two, MIPS_GCC)).toThrow(
-      /the call to `takeQ` passes struct Q by value, and its words are not one frame object or one global/,
+      /the call to `takeQ` passes struct Q by value, and its words are not one frame object, one global/,
     );
     // hand-edited: the second word is read off the symbol's start again
     const again: Fixture = { ...KMC_BVQG, lines: KMC_BVQG.lines.map((l) => l.replace('lw\ta2,4(a2)', 'lw\ta2,0(a2)')) };
-    expect(() => lift('bvqg', again, MIPS_GCC)).toThrow(/its words are not one frame object or one global/);
+    expect(() => lift('bvqg', again, MIPS_GCC)).toThrow(/its words are not one frame object, one global/);
   });
 
   // The struct at offset 0 of an array or of an enclosing struct sits at the symbol's own address,

@@ -171,7 +171,7 @@ function declaredStructDecl(tag: string, layout: AggregateLayout): string {
         return `${type}${type.endsWith('*') || declarator === '' ? '' : ' '}${declarator}${bits};`;
       })
       .join(' ');
-  return `struct ${tag} { ${body(layout.members!)} };`;
+  return `${layout.kind} ${tag} { ${body(layout.members!)} };`;
 }
 
 /**
@@ -192,7 +192,7 @@ export function renderDeclarations(refs: SymbolRef[]): string {
     }
     if (!/^(?:struct|union)\s/.test(s.declared) && !declaredTypedefs.has(s.declared)) {
       declaredTypedefs.add(s.declared);
-      lines.push(`typedef struct ${s.name} ${s.declared};`);
+      lines.push(`typedef ${s.layout.kind} ${s.name} ${s.declared};`);
     }
   };
   for (const {

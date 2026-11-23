@@ -11618,15 +11618,25 @@ export const SYNTHETIC: SynthSpec[] = [
   //      r3/r3:r4, reads up to four the same way, folds the frame home it stores r3 to into that
   //      local, declines on the pair r3:r4 (sret8), and lowers no hidden pointer for 12.
   //      sret1b and sret2b add {u8} (r0/r3 on both) and {u8, u8} (memory on agbcc, r3 on mwcc,
-  //      read back off its home); sretun a union and sretbf a bitfield, which have no local type
-  //      and decline wherever they come back in a register; sretfwd a function returning such a
-  //      struct straight from such a callee, which returns the call (`return sg(1);`), and
+  //      read back off its home); sretun a union of integers, read off a local of it on every
+  //      toolchain, each read naming the member of its own width (aggregate.ts `integerUnionType`),
+  //      and sretunw the same union read by its wider member; sretbf a bitfield, read off the local
+  //      on agbcc (a shift of its word) and declining on every other toolchain; sretfwd a function
+  //      returning such a struct straight from such a callee, which returns the call
+  //      (`return sg(1);`), and
   //      sretname the same through a named local, which mwcc gives a home the bare call has not;
   //      sret2fwd the {u16} forwarded the same way, and sret2mod a {u16} modified before it is
-  //      returned, which declines where it comes back in a register (agbcc keeps the pad's bits,
-  //      no member copy says so); sretfl a {float}, which has no local here and declines on agbcc
-  //      (r0 read as `*(s32 *)&s` would convert the bits), on mwcc's lfs and ido's lwc1, and where
-  //      gcc reads the member back through memory as a word (the same cast). A callee declared
+  //      returned: on agbcc, which keeps the pad's bits, the call's local with its member written,
+  //      `sm_ret.h = (u16)(sm_ret.h + 1); return sm_ret;` (frontend/own-struct-return.ts
+  //      `liftModifiedCallImage`), the member read off the image word because only its bits reach
+  //      the store (raise/aggmembers.ts demanded bits), and sretmsk that read through a mask into
+  //      a narrower store; on mwcc, whose r3 below the {u16} is no object, and on IDO, which
+  //      writes the returned object, sret2mod declines; sretfl a {float}, whose member is read as its bits and stored
+  //      through the global's own integer cell, `*(s32 *)&gF = *(s32 *)&s;`, which copies them
+  //      whatever the project declares gF as (structure.ts `floatBitsStoreTarget`), on agbcc's r0
+  //      and gcc's memory return alike, and declining on mwcc's lfs and ido's lwc1; sretfld the same
+  //      against a context that declares the global `float`, where the bare name would convert the
+  //      bits. A callee declared
   //      without its struct return stays a scalar call, as the same bytes from a scalar callee do;
   //      that control is a core test
   //      (packages/core/test/register-struct-call.test.ts), since as a row it would be sret1w
@@ -11686,10 +11696,12 @@ export const SYNTHETIC: SynthSpec[] = [
   //      the frame, and mwcc_242_81 refuses the by-value parameter itself (it passes a copy's
   //      address, `tbval`).
   //  11. bvwg, bvqg, bvtg, bvqp, bvcg: a struct passed by value straight from a global (one, two and
-  //      three words), through a pointer, and a `u8[4]` struct. O32 passes the words in argument
+  //      three words), through a pointer, and a `u8[4]` struct; bvqpo through a pointer past its
+  //      byte 0, a member of an enclosing struct, which declines. O32 passes the words in argument
   //      registers (kmc through one `lui`/`lw` pair per word, IDO storing each into its home slot),
-  //      which the call plan folds into the global passed whole. Through a pointer declines on every
-  //      toolchain, and the `u8[4]` struct on both MIPS ones (IDO copies it with `lwl`/`swl`, gcc
+  //      which the call plan folds into the global passed whole. Through a pointer it is the
+  //      pointer's pointee, `takeQ(k, *p)`, on agbcc and both MIPS ones, and the `u8[4]` struct
+  //      declines on both MIPS ones (IDO copies it with `lwl`/`swl`, gcc
   //      packs its bytes into a register). mwcc_242_81 passes a copy's address and declines; agbcc
   //      is the control. One statement per line: IDO schedules by source line. gcc2.7.2 is pinned
   //      in packages/cli/test/matching/mips-calls.test.ts.
@@ -12114,6 +12126,72 @@ export const SYNTHETIC: SynthSpec[] = [
         proto: {
           mkfl: { params: ['s32'], returns: 'struct Fl', returnLayout: one('f', 'float') },
           sretfl: { returnsVoid: true },
+        },
+      },
+      // the union read by its wider member, which a read must name by its width, not by its place
+      {
+        sym: 'sretunw',
+        src:
+          'union Uw { u16 h; u32 w; };\nextern union Uw mkuw(s32 x);\nextern u32 gW;\n' +
+          'void sretunw(s32 x)\n{\n    union Uw u = mkuw(x);\n    gW = u.w;\n}',
+        features: ['struct-return', 'union'],
+        ...at,
+        ctx: 'union Uw { u16 h; u32 w; };\nunion Uw mkuw(s32 x);\nvoid sretunw(s32 x);',
+        proto: {
+          mkuw: {
+            params: ['s32'],
+            returns: 'union Uw',
+            returnLayout: {
+              kind: 'union',
+              members: [
+                { name: 'h', type: 'u16' },
+                { name: 'w', type: 'u32' },
+              ],
+            },
+          },
+          sretunw: { returnsVoid: true },
+        },
+      },
+      // sretfl with the float global DECLARED (and a callee of no argument, which is all that sets
+      // the two sources apart): its bits stored bare would convert, so the lift must spell the
+      // store through an integer cell or decline
+      {
+        sym: 'sretfld',
+        src:
+          'struct Fd { float f; };\nextern struct Fd mkfd(void);\nextern float gFd;\n' +
+          'void sretfld(void)\n{\n    struct Fd s = mkfd();\n    gFd = s.f;\n}',
+        features: ['struct-return', 'float'],
+        ...at,
+        ctx: 'struct Fd { float f; };\nextern float gFd;\nstruct Fd mkfd(void);\nvoid sretfld(void);',
+        proto: {
+          mkfd: { params: [], returns: 'struct Fd', returnLayout: one('f', 'float') },
+          sretfld: { returnsVoid: true },
+        },
+      },
+      // a member read through a mask into a narrower store: the word the call returned is read
+      // once, and only its low member's bits reach the store, so the read is that member's
+      // (raise/aggmembers.ts demanded bits), not `*(s32 *)&s`, which recompiles to other code
+      {
+        sym: 'sretmsk',
+        src:
+          'struct Hm { u16 h; u16 g; };\nextern struct Hm mkhm(s32 x);\nextern u8 gBm;\n' +
+          'void sretmsk(s32 x)\n{\n    struct Hm s = mkhm(x);\n    gBm = (s.h & 0xf0) | 1;\n}',
+        features: ['struct-return', 'field'],
+        ...at,
+        ctx: 'struct Hm { u16 h; u16 g; };\nstruct Hm mkhm(s32 x);\nvoid sretmsk(s32 x);',
+        proto: {
+          mkhm: {
+            params: ['s32'],
+            returns: 'struct Hm',
+            returnLayout: {
+              kind: 'struct',
+              members: [
+                { name: 'h', type: 'u16' },
+                { name: 'g', type: 'u16' },
+              ],
+            },
+          },
+          sretmsk: { returnsVoid: true },
         },
       },
       // a member stored through a POINTER global's value: the element is the pointee's, never the
@@ -12889,6 +12967,33 @@ export const SYNTHETIC: SynthSpec[] = [
         returnsVoid: true,
       },
       bvqp: { returnsVoid: true },
+    },
+  },
+  // bvqp's struct one word into an enclosing one, `takeQ(k, o->q)`: the words start past the
+  // pointer's byte 0, which no spelling here states, so it declines
+  {
+    sym: 'bvqpo',
+    src:
+      'struct Q { u32 a, b; };\nstruct O { u32 t; struct Q q; };\nvoid takeQ(s32 k, struct Q q);\n' +
+      'void bvqpo(s32 k, struct O *o)\n{\n    takeQ(k, o->q);\n}',
+    features: ['pointer', 'multi-arg'],
+    toolchains: ALL,
+    ctx: 'struct Q { u32 a, b; };\nstruct O { u32 t; struct Q q; };\nvoid takeQ(s32 k, struct Q q);\nvoid bvqpo(s32 k, struct O *o);',
+    proto: {
+      takeQ: {
+        params: ['s32', 'struct Q'],
+        byValueLayouts: {
+          1: {
+            kind: 'struct',
+            members: [
+              { name: 'a', type: 'u32' },
+              { name: 'b', type: 'u32' },
+            ],
+          },
+        },
+        returnsVoid: true,
+      },
+      bvqpo: { returnsVoid: true },
     },
   },
   {

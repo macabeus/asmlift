@@ -824,6 +824,16 @@ the `/ptr-field` flip) reaches it. **Structure** reads an access through the vie
 width and extension (`p->field_0.half[1]`, `p->field_0.shalf`; `ir/types.ts` `unionViewAt`); the type walk and the
 deref contract share `memberOf`, so they agree on which member access is well-typed.
 
+A union the HEADERS name is not this kind. A call that returns a declared union of integers in its
+register lands in a local that must be declared by the headers' own spelling (`union Un mk_ret;`),
+and that name is what the struct kind's `declared` spelling already carries through the
+declarations block and every name-keyed pass; the nameless inline kind carries none. So such a
+local is typed as the struct kind, every member a field at offset 0 (aggregate.ts
+`integerUnionType`), only where the members are integer scalars of distinct widths, so an access
+names at most one field by its offset and width, and the two readers that pick a field at an
+offset pick it by width through one helper (ir/types.ts `intFieldAt`, which structure.ts
+`frameStructMember` and raise/aggmembers.ts `memberAt` share).
+
 **A frame object is the second inhabitant.** The frame audit keeps a local area as one object in
 memory where a device or a callee holds its address, or where nothing escapes and the per-object
 model refuses the frame (a by-value struct parameter, spilled word by word over the spill slots and
@@ -864,14 +874,21 @@ is a lower bound, a variadic callee's a prefix. A struct a declaration passes by
 REGISTERS (agbcc and O32, `compilerBehaviors.byValueAggregateArgWords`) is not a store reaching the call: the
 call lowering hands its words over one operand each (`byValueWords`), and `foldByValueArgs`
 (frontend/call-plan.ts) folds them, before the audit, into the one object they hold at the call — a
-frame object they are loaded off, or a global they are loaded off or were just stored to — or
-refuses. It refuses a struct agbcc never puts in memory: an SImode struct of four bytes or less,
+frame object they are loaded off, or a global they are loaded off or were just stored to — or into
+the pointee of a pointer PARAMETER they are loaded off whole from byte 0, where nothing else reads
+that parameter, which is then typed a pointer to the struct and passed as `*p` — or refuses. Only a
+parameter: the retyping types the name a value prints as, and a computed pointer (`p[i]`'s `add`)
+or a loaded one (`**pp`) prints as its own expression, typed from its operands, so `*` over it
+would not compile. And only words the call alone reads: kmc loads `p->b` once for an argument and
+the struct's word both, and that load, outliving the fold, would print off the retyped parameter as
+a recovered `field_4` rather than as the declared member at that offset. It refuses a struct agbcc never puts in memory: an SImode struct of four bytes or less,
 built in a register by an `and`/`orr` insert chain over the register's stale bits, and an all-word
 eight-byte struct passed straight from the registers holding its members. Its words are values, not
 one object's, and spelling them would mean a local struct the lift invents, with member stores
 that cover every byte the chain leaves stale. O32 refuses the same kinds: kmc and gcc2.7.2 packing
 sub-word members in registers (`sll`/`or`), an insert over a register nothing set, IDO's
-`lwl`/`swl` copy, and a struct read through a pointer, which leaves no object to name. A global is
+`lwl`/`swl` copy, and a struct read through a pointer anywhere but whole off a parameter's byte 0
+(`o->q`, `p[i]`, a pointer read elsewhere), which leaves no object to name. A global is
 spelled bare only where C can name it and its declarations type it as that struct: the struct at
 offset 0 of an array or of an enclosing struct shares the symbol's address, and a static at its
 section's start is relocated against the section, and a function-scope static by a name and
@@ -1154,7 +1171,14 @@ none for the rest (a nested aggregate, a bitfield, an enum, a plain `char`); `at
 argument 0 is where it lands; the frame temp's `laddr` is a pointer to it. A register return keeps
 the declared arguments where they are. Where the struct can be a local here
 (frontend/call-plan.ts `registerStructLocal`, the one derivation: a type `structLocalType`
-declares, of one, two or four bytes, all integers, its callee's prototype printable), the call
+declares, of one, two or four bytes, its callee's prototype printable — a union whose members are
+integers of distinct widths too, typed as its members at offset 0 under the headers' `union`
+spelling, since the IR's own `union` kind is nameless and inline; a floating member is read as its
+bits, `*(s32 *)&s`, spelled only where every reader stores them through an integer cell the lift
+types, a bare global's own `*(s32 *)&gF` included, since any float reader would convert them, and a
+float at any depth of the member a read covers counts, `{ float f[1]; }` too; a float inside a
+nested struct or union, which has no field to say so, gives no local, aggregate.ts `nestsFloat`),
+the call
 writes the return register as its value, marked `REGISTER_STRUCT`, and the frontend reads that
 word as it reads any call's; a guessed arity after the call still does not take it (ssa.ts
 `noteStructImage`), since the bytes do not say whether a callee nothing declares is handed the
@@ -1188,9 +1212,18 @@ off the call, which then cancels to the load). So the declarations block, `aggme
 **The own side composes with it.** A function whose every `ret` hands back a call's image of its
 own declared register-struct type returns the call (`return mk(x);`), or the call's local where
 mwcc wrote a home (`return mk_ret;`, which `struct T s = mk(1); return s;` compiles to and `return
-mk(1);` does not). Where the own return is a word the own side cannot spell as the struct
-(`liftOwnRegisterStruct`, a `{u8}` or `{u16}`) and the function reads any call's register struct,
-it refuses: the word may be computed from that struct through a frame slot as well as an op (an
+mk(1);` does not). On agbcc, which rounds a `{u8}` or `{u16}` to a word whose pad bits are the
+object's — and returns a union of integers in r0 too, whose bits past a narrow member are its wider
+members' — a call's struct or union of the same type handed back with a byte-0 member written (the
+one the mask's width picks, `intFieldAt`) — every `ret` an
+`or` of a member-wide value and the call's image masked past the member, straight from the insert
+idiom — is that call's local with the member stored, `mk_ret.h = (u16)(mk_ret.h + 1); return
+mk_ret;` (own-struct-return.ts `liftModifiedCallImage`), the value's read of the image the member
+because only the member's bits reach the store (`aggmembers` demanded bits, below). Any other own
+return that is a word the own side
+cannot spell as the struct (`liftOwnRegisterStruct`: a member written on one branch and joined,
+mwcc's r3, any other `{u8}` or `{u16}`) in a function that reads any call's register struct
+refuses: the word may be computed from that struct through a frame slot as well as an op (an
 array, an escaped local, mwcc's home), and printed as the word it is it would be the scalar the
 declaration contradicts.
 
@@ -1204,17 +1237,17 @@ inside the project's headers drops that block.
 
 **What refuses, and why each refusal is where it is.**
 
-| level       | refusal                                                                                                               | because                                                              |
-| ----------- | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| frontend    | a declared struct return whose members are not all known or not sized on this target, or a target that states no rule | where the pointer goes decides where every argument is read from     |
-| frontend    | a memory return whose parameters nothing sizes                                                                        | a guessed arity reads from argument 0, which holds the pointer       |
-| frontend    | a memory-returned union                                                                                               | its IR type carries no name to declare the local by                  |
-| frontend    | a pointer at argument 0 that is not a local of this frame                                                             | a struct returned into a global or through a pointer is not modelled |
-| frontend    | PowerPC: a memory return                                                                                              | only the register return is lowered there                            |
-| frame audit | a write, an index or any other use of the return temp but a read inside it                                            | only a read of a returned struct is modelled                         |
-| frontend    | the return register read after a struct came back in it that `registerStructLocal` gives no local                     | its bytes are a struct, not a word this function named               |
-| L1          | a read of the register past a one- or two-byte struct's bits; a home read where the fold does not reach               | what the callee left there is no value                               |
-| L1          | an own `{u8}`/`{u16}` register return, kept as its word, in a function that reads a call's register struct            | the word printed as a scalar contradicts the declaration             |
+| level       | refusal                                                                                                                                                 | because                                                              |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| frontend    | a declared struct return whose members are not all known or not sized on this target, or a target that states no rule                                   | where the pointer goes decides where every argument is read from     |
+| frontend    | a memory return whose parameters nothing sizes                                                                                                          | a guessed arity reads from argument 0, which holds the pointer       |
+| frontend    | a memory-returned union                                                                                                                                 | its IR type carries no name to declare the local by                  |
+| frontend    | a pointer at argument 0 that is not a local of this frame                                                                                               | a struct returned into a global or through a pointer is not modelled |
+| frontend    | PowerPC: a memory return                                                                                                                                | only the register return is lowered there                            |
+| frame audit | a write, an index or any other use of the return temp but a read inside it                                                                              | only a read of a returned struct is modelled                         |
+| frontend    | the return register read after a struct came back in it that `registerStructLocal` gives no local                                                       | its bytes are a struct, not a word this function named               |
+| L1          | a read of the register past a one- or two-byte struct's bits; a home read where the fold does not reach                                                 | what the callee left there is no value                               |
+| L1          | an own `{u8}`/`{u16}` register return, kept as its word and no call's image with its member inserted, in a function that reads a call's register struct | the word printed as a scalar contradicts the declaration             |
 
 **Member reads of a returned struct.** A declared struct's range (`declaredStructs`: a return temp,
 or a struct passed by value) is an object boundary. The audit rebases onto its base both a
@@ -1223,7 +1256,12 @@ capture's access inside it and an `laddr` strictly inside it that is only access
 of a return temp; structure spells an access that names one
 declared member exactly as that member (`sp0.a`), and an L1 pass, `raise/aggmembers.ts` in
 `PRE_RECOVERY_PASSES` after `structs`, splits a whole-word read of the temp — agbcc's only
-sp-relative load — into the member reads its uses take.
+sp-relative load — into the member reads its uses take. A use through `+ - * & | ^ ~` takes the
+low member whose bits cover every bit its result can reach a reader with (its demanded bits,
+`ir/bits.ts` `demandedBitsAt`, the same transfer `demandedBits` walks for a register-returned
+struct's word: a narrowing store or extension bounds them, a constant mask narrows them, a shift
+moves them, and a join passes on what its parameter's readers need): the low n bits of such a result are its
+operands' low n bits alone, so `(s.h & 0xf0) | 1` stored to a byte reads `s.h`, not the word.
 
 **A hidden pointer that reaches the call through a merge.** gcc rotates a loop that calls a
 struct-returning function, so `addiu a0,sp,16` runs once ahead of the loop and once in the delay

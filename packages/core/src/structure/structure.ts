@@ -107,7 +107,9 @@ import { type NaturalLoop, analyzeLoops } from '../ir/loops';
 import { CAST_WIDTHS, FLOAT_RESIZE, FLOAT_TO_INT, INT_TO_FLOAT, NEGATED_FCMP, WIDE_BITS, opSig } from '../ir/opcodes';
 import {
   type IrType,
+  type StructField,
   T,
+  intFieldAt,
   intWidth,
   scalarTypeForAccess,
   spellsAccessType,
@@ -782,6 +784,30 @@ function structureLadder(
   }
   refusedHeld.push(...refused!.held);
   throw refused!.error;
+}
+
+/** Whether a floating value lies in bytes [lo, hi) of an object of type `t`, at any depth. A
+ *  struct's field reaches to the next field's offset (the fields are sorted by it), the last one
+ *  past any read; an array's element is asked whole, so a float anywhere in it counts. Both widen
+ *  the bytes a member covers, never narrow them: a byte this cannot place counts as a float's. */
+function floatBytesIn(t: IrType, lo: number, hi: number): boolean {
+  switch (t.kind) {
+    case 'float':
+      return true;
+    case 'array':
+      return floatBytesIn(t.elem, 0, Infinity);
+    case 'union':
+      return t.members.some((m) => floatBytesIn(m.type, lo - m.off, hi - m.off));
+    case 'struct':
+      return t.fields.some((m, i) => fieldFloatBytes(m, t.fields[i + 1], lo, hi));
+    default:
+      return false;
+  }
+}
+
+/** `floatBytesIn` for one struct field, given the field after it (or none). */
+function fieldFloatBytes(m: StructField, next: StructField | undefined, lo: number, hi: number): boolean {
+  return m.off < hi && lo < (next?.off ?? Infinity) && floatBytesIn(m.type, lo - m.off, hi - m.off);
 }
 
 function structureRanked(
@@ -3371,8 +3397,8 @@ function structureRanked(
     if (d?.opcode !== 'laddr' || d.attrs.aggregate !== true || t?.kind !== 'ptr' || t.to.kind !== 'struct') {
       return null;
     }
-    const f = t.to.fields.find((m) => m.off === off);
-    if (f === undefined || f.type.kind !== 'int' || f.type.width !== width * 8 || qualifiedBy(op) !== null) {
+    const f = intFieldAt(t.to, off, width);
+    if (f?.type.kind !== 'int' || qualifiedBy(op) !== null) {
       return null;
     }
     return signed === null || spellsAccessType(f.type.signed, width, signed)
@@ -3415,15 +3441,20 @@ function structureRanked(
   // reader is a store into an lvalue whose integer type this lift states (`floatBitsStoreTarget`):
   // a whole-struct copy lowered to words, `((s32 *)&gV3)[1] = ((s32 *)&s)[1];`, passes the bits
   // through. Any other reader (a named global, a declared member, a call, a return, a join)
-  // declines. A store of bits into such a member is the bits, and keeps the cast.
+  // declines. A store of bits into such a member is the bits, and keeps the cast. The float may sit
+  // anywhere in the field the read covers (`floatBytesIn`): `{ float f[1]; }` hands back the same
+  // word as `{ float f; }`. A float inside a nested struct or union has no field here, so such a
+  // struct gets no local (aggregate.ts `nestsFloat`).
   const floatMemberBits = (op: Op): { name: string; width: number } | null => {
     if (op.opcode !== 'load') {
       return null;
     }
     const width = op.attrs.width as number;
+    const off = op.attrs.off as number;
     const t = defs.get(op.operands[0])?.results[0].type;
-    const f = t?.kind === 'ptr' && t.to.kind === 'struct' ? t.to.fields.find((m) => m.off === op.attrs.off) : undefined;
-    return f?.type.kind === 'float' && f.type.width === width * 8 ? { name: f.name, width } : null;
+    const s = t?.kind === 'ptr' && t.to.kind === 'struct' ? t.to : undefined;
+    const f = s?.fields.find((m, i) => fieldFloatBytes(m, s.fields[i + 1], off, off + width));
+    return f === undefined ? null : { name: f.name, width };
   };
   const refuseFloatBits = (m: { name: string; width: number }): never => {
     throw new StructureError(
@@ -3445,12 +3476,13 @@ function structureRanked(
   };
   // …and the store side: the lvalue must be one whose type the lift spells, an integer of the
   // read's width: a cast cell (`((s32 *)&g)[1]`), or a local's or a parameter's cell. A bare global
-  // (`gF = …`, `gA[i] = …`) has the project's type, whatever that is.
-  const floatBitsStoreTarget = (value: Value, lval: Expr): void => {
+  // (`gF = …`, `gA[i] = …`) has the project's type, whatever that is. Answers the lvalue to store
+  // through: `lval` itself, or for a bare global nothing declares, its cast cell.
+  const floatBitsStoreTarget = (value: Value, lval: Expr): Expr => {
     const d = defs.get(value);
     const m = d === undefined ? null : floatMemberBits(d);
     if (m === null) {
-      return;
+      return lval;
     }
     let root: Expr = lval;
     while (root.k === 'index' || root.k === 'field') {
@@ -3458,9 +3490,29 @@ function structureRanked(
     }
     const t = ctype(lval);
     const own = root.k !== 'var' || varType.has(root.name);
+    // …or a bare global NOTHING declares — no context, map or static names it. The lift's own
+    // declaration types it as an integer, but the project's header is what a candidate compiles
+    // against, and there it is `float gF` as often as not: `gF = *(s32 *)&s;` would convert the
+    // bits there. So it is stored through its own cast cell, `*(s32 *)&gF = *(s32 *)&s;`, which
+    // copies the bits under any declaration of the word, as `str r0` does.
+    const undeclared =
+      lval.k === 'var' &&
+      !varType.has(lval.name) &&
+      symbols?.has(lval.name) !== true &&
+      contextGlobals?.declared.has(lval.name) !== true;
+    if (undeclared) {
+      return {
+        k: 'index',
+        base: { k: 'addr', name: lval.name },
+        idx: { k: 'const', value: 0 },
+        width: m.width,
+        signed: true,
+      };
+    }
     if (!own || (lval.k !== 'index' && lval.k !== 'field') || t?.kind !== 'int' || t.width !== m.width * 8) {
       refuseFloatBits(m);
     }
+    return lval;
   };
   // A STRUCT LOCAL'S BYTES STORED INTO A BARE ARRAY ELEMENT keep the cast cell. The bare `gA[i]`
   // (globalaccess.ts `bareArrayLead`) checks the element's width, not its kind, and the bytes of
@@ -4055,15 +4107,18 @@ function structureRanked(
       const through = calleeValue(d);
       // a struct passed by value is the object its operand addresses — a frame object stamped as
       // that struct, or a global — spelled bare (frontend/call-plan.ts `foldByValueArgs`)
+      // …or the pointee of a pointer read whole, `*p`, where the operand is that pointer
+      const pointee = (d.attrs.byValuePointee as number[] | undefined) ?? [];
       const byValue = byValueOperands(d).map(({ at, param }) => {
         const o = defs.get(d.operands[at]);
         const t = d.operands[at].type;
         const type = t.kind === 'ptr' && t.to.kind === 'struct' ? t.to : undefined;
         const object =
           type !== undefined &&
-          (o?.opcode === 'laddr'
-            ? o.attrs.aggregate === true
-            : o?.opcode === 'gaddr' && o.attrs.passedAs === structSpelling(type));
+          (pointee.includes(param) ||
+            (o?.opcode === 'laddr'
+              ? o.attrs.aggregate === true
+              : o?.opcode === 'gaddr' && o.attrs.passedAs === structSpelling(type)));
         if (!object) {
           throw new Error(
             `internal: a by-value argument of '${d.attrs.target}' is not the address of an object of the struct it passes`,
@@ -4073,7 +4128,11 @@ function structureRanked(
       });
       const args = callArgs(d).map((v, i): Expr => {
         const x = e(v);
-        return byValue.some((b) => b.at === i) && x.k === 'addr' ? { k: 'var', name: x.name } : x;
+        const passed = byValue.find((b) => b.at === i);
+        if (passed !== undefined && pointee.includes(passed.param)) {
+          return { k: 'index', base: x, idx: { k: 'const', value: 0 }, width: 4, signed: false, whole: true };
+        }
+        return passed !== undefined && x.k === 'addr' ? { k: 'var', name: x.name } : x;
       });
       return {
         k: 'call',
@@ -4715,7 +4774,7 @@ function structureRanked(
           continue;
         }
         const baseExpr = expr(op.operands[0]);
-        const lval0 = structBytesCell(
+        const lvalBare = structBytesCell(
           op.operands[1],
           memAccess(
             op.operands[0],
@@ -4732,7 +4791,7 @@ function structureRanked(
             frameArrayFor(op),
           ),
         );
-        floatBitsStoreTarget(op.operands[1], lval0);
+        const lval0 = floatBitsStoreTarget(op.operands[1], lvalBare);
         if (lval0.k === 'var') {
           globalNames.add(lval0.name);
           out.push({ k: 'assign', name: lval0.name, value: intoPtrCell(lval0, expr(op.operands[1])) });

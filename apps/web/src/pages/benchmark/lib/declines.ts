@@ -516,8 +516,9 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // A STRUCT LOCAL'S FLOATING MEMBER READ AS ITS INTEGER BITS (`structure/structure.ts`): a
     // declared struct's frame object — a call's return storage, a struct passed by value — whose
     // float member a word load reads. The only spelling here is `*(s32 *)&s`, which C converts
-    // wherever a float is read, so the read declines (gcc 2.7.2's `lw` off a struct returned
-    // through memory, `sretfl`). What it names to build is a float-typed member read.
+    // wherever a float is read, so the read declines unless every reader stores the bits into an
+    // integer lvalue the lift types (`floatBitsStoreTarget`). Uninhabited: `sretfl`'s read is
+    // such a store. What it names to build is a float-typed member read.
     key: 'struct-float-member',
     label: "A struct local's floating member read as its integer bits",
     pattern: /floating member/,
@@ -661,13 +662,13 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // Four throws in `frontend/call-plan.ts` spell it, each straight after the callee: no rule
     // places the aggregate in argument words (the target states none, the declaration does not
     // lay it out, it is a union, another parameter is unsized, or the declaration is variadic), it
-    // runs past the argument registers, its words are not one frame object or one global read
-    // whole at the call, or they are one global C cannot spell bare as the struct (a section
-    // symbol, a function-scope static, or a symbol the declarations type as an array, an enclosing
-    // struct or another type).
+    // runs past the argument registers, its words are not one frame object, one global or the
+    // pointee of one pointer parameter nothing else reads, read whole at the call, or they are one
+    // global C cannot spell bare as the struct (a section symbol, a function-scope static, or a
+    // symbol the declarations type as an array, an enclosing struct or another type).
     //
-    // ITS INHABITANTS ARE `bvqp` ON agbcc AND BOTH MIPS TOOLCHAINS, AND `bvcg` ON gcc2.7.2kmc: words
-    // read through a pointer, and a `u8[4]` struct whose bytes gcc packs into a register.
+    // ITS INHABITANT IS `bvcg` ON gcc2.7.2kmc: a `u8[4]` struct whose bytes gcc packs into a
+    // register. Words read through a pointer parameter (`bvqp`) are its pointee and lift.
     key: 'byvalue-arg',
     label: 'Struct arguments passed by value that a call plan cannot place or fold',
     pattern: / by value as its parameter [^,]+, and |by value, and its words are not one | by value off '/,
