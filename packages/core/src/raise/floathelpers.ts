@@ -2,7 +2,8 @@
 //
 // Four things cross it. A runtime helper whose op computes on floats (`isFloatHelper`) — the peer of
 // `raise/widehelpers.ts`, gated by the target's runtime table rather than a hardware capability.
-// A parameter an ordinary callee declares `double` (the frontend's `doubles` on the call). The
+// A parameter an ordinary callee declares `double` or `float` (the frontend's `doubles` and
+// `singles` on the call). The
 // result of an ordinary callee declared to return a floating type (its `floatReturn`). And a
 // double literal, two constant words, where the target states their order
 // (`TargetDescription.doubleArgWords`) and its compiler reads a literal back
@@ -85,8 +86,12 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
         )
       ) {
         sites.push(op);
-      } else if (!helper && op.opcode === 'call' && Array.isArray(op.attrs.doubles)) {
-        consumers.set(op, op.attrs.doubles as number[]);
+      } else if (
+        !helper &&
+        op.opcode === 'call' &&
+        (Array.isArray(op.attrs.doubles) || Array.isArray(op.attrs.singles))
+      ) {
+        consumers.set(op, [...((op.attrs.doubles as number[]) ?? []), ...((op.attrs.singles as number[]) ?? [])]);
       }
       if (!helper && op.opcode === 'call' && typeof op.attrs.floatReturn === 'string') {
         returners.set(op, op.attrs.floatReturn);
@@ -266,19 +271,23 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
         'back an integer word, which C would convert to that float',
     );
   }
-  // A DECLARED DOUBLE HAS NO FALLBACK. A helper the fold refuses stays a call for
-  // `refuseUnmodelledHelpers` to gap, but an ordinary callee is no helper, and its two words handed
-  // on as integers are the wrong number — so a double parameter nothing here can hand a double
-  // refuses the function. It counts arguments as the source does: an `sret` call's operand 0, the
+  // A DECLARED DOUBLE OR FLOAT HAS NO FALLBACK. A helper the fold refuses stays a call for
+  // `refuseUnmodelledHelpers` to gap, but an ordinary callee is no helper, and its words handed on
+  // as integers are the wrong number, C converting them at the call — so a floating parameter
+  // nothing here can hand a float of its width refuses the function. It counts arguments as the source does: an `sret` call's operand 0, the
   // hidden pointer, is not one.
   for (const [op, at] of consumers) {
     for (const i of at) {
       if (!source(op.operands[i], calls)) {
         const arg = i + (op.attrs.sret === true ? 0 : 1);
+        const single = Array.isArray(op.attrs.singles) && op.attrs.singles.includes(i);
         throw new RaiseUnsupportedError(
           `cannot lift '${fn.name}': argument ${arg} of the call to '${String(op.attrs.target)}' ` +
-            'is a `double` its callee declares, and its two words are not a double this function was ' +
-            'handed, a runtime helper returned or a finite literal staged, moved whole',
+            (single
+              ? 'is a `float` its callee declares, and its word is not a float this function was handed or ' +
+                'a runtime helper returned, moved whole'
+              : 'is a `double` its callee declares, and its two words are not a double this function was ' +
+                'handed, a runtime helper returned or a finite literal staged, moved whole'),
         );
       }
     }
@@ -342,7 +351,8 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
     }
   }
   for (const [op, at] of consumers) {
-    at.forEach((i) => retype(op.operands[i], 64));
+    const singles = Array.isArray(op.attrs.singles) ? op.attrs.singles : [];
+    at.forEach((i) => retype(op.operands[i], singles.includes(i) ? 32 : 64));
   }
   const folded = new Map<Op, Op>();
   for (const [op, found] of tests) {

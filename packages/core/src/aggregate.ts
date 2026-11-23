@@ -442,8 +442,9 @@ function layOutByValue(p: FnProto | undefined, target: TargetDescription, hidden
       widths.push(...Array.from({ length: words }, () => 32));
       continue;
     }
+    // a `float` beside a struct is a word nothing here hands the float rule (`singles`), so unsized
     const one = declaredCallArgs({ params: [t], wordParams: p.wordParams?.includes(i) ? [0] : [] }, target);
-    if (one === undefined) {
+    if (one === undefined || one.singles.size > 0) {
       return {
         refused: `its parameter ${i + 1} '${t}' is not sized, so where the struct starts is not known`,
         param: first,

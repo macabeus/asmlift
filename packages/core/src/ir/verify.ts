@@ -16,17 +16,23 @@ import { type IrType, T, intWidth, typeEquals, typeToString } from './types';
 
 export class VerifyError extends Error {}
 
-/** A call hands a float only to a parameter its callee is declared to take a `double` in — the
- *  operands the frontend lists in `doubles` — and returns one only where its callee is declared to
+/** A call hands a float only to a parameter its callee is declared to take a `double` or a `float`
+ *  in — the operands the frontend lists in `doubles` and `singles` — and returns one only where its callee is declared to
  *  return a `float` (`floatReturn`), as that single. */
 function floatsDeclared(op: Op): boolean {
   const at = Array.isArray(op.attrs.doubles) ? op.attrs.doubles : [];
+  const one = Array.isArray(op.attrs.singles) ? op.attrs.singles : [];
   return (
     op.opcode === 'call' &&
     op.results.every(
       (r) => r.type.kind !== 'float' || (op.attrs.floatReturn === 'float' && typeEquals(r.type, T.f32())),
     ) &&
-    op.operands.every((o, i) => o.type.kind !== 'float' || (at.includes(i) && typeEquals(o.type, T.f64())))
+    op.operands.every(
+      (o, i) =>
+        o.type.kind !== 'float' ||
+        (at.includes(i) && typeEquals(o.type, T.f64())) ||
+        (one.includes(i) && typeEquals(o.type, T.f32())),
+    )
   );
 }
 

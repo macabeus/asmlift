@@ -584,15 +584,31 @@ describe('declaredCallArgs on a double', () => {
 
   test('a target whose doubles take no general word abstains', () => {
     expect(declaredCallArgs({ params: ['s32', 'double'] }, PPC_MWCC)).toBeUndefined();
-    expect(declaredCallArgs({ params: ['s32', 's32'] }, PPC_MWCC)).toEqual({ widths: [32, 32], doubles: new Set() });
+    expect(declaredCallArgs({ params: ['s32', 's32'] }, PPC_MWCC)).toEqual({
+      widths: [32, 32],
+      doubles: new Set(),
+      singles: new Set(),
+    });
   });
 
-  // An undeclared callee is handed a `float` promoted to a `double`, and the candidate declares no
-  // floating parameter, so one word would be the wrong layout for the C that is compiled.
-  test('a float and a long double state no layout, and a count is that many words', () => {
-    expect(declaredCallArgs({ params: ['s32', 'float'] }, soft)).toBeUndefined();
+  // A declared `float` is the next one general word, wherever it falls (agbcc -O2: `(int, float)` in
+  // r0, r1; `(double, float)` in r0:r1, r2; a fifth-argument `float` in the first stack word), and
+  // the candidate prints its keyword, as it prints `double`. A `long double` states no layout.
+  test('a float is one marked word, a long double states no layout, and a count is that many words', () => {
+    const laid = declaredCallArgs({ params: ['double', 'const float', 's32'] }, soft)!;
+    expect(laid.widths).toEqual([64, 32, 32]);
+    expect([...laid.singles]).toEqual([1]);
+    expect(spellableProto({ params: ['s32', 'float'], returns: 'int' }, soft)).toEqual({
+      params: ['s32', 'float'],
+      returns: 'int',
+    });
+    expect(declaredCallArgs({ params: ['s32', 'float'] }, PPC_MWCC)).toBeUndefined();
     expect(declaredCallArgs({ params: ['long double'] }, soft)).toBeUndefined();
-    expect(declaredCallArgs({ params: 5 }, soft)).toEqual({ widths: [32, 32, 32, 32, 32], doubles: new Set() });
+    expect(declaredCallArgs({ params: 5 }, soft)).toEqual({
+      widths: [32, 32, 32, 32, 32],
+      doubles: new Set(),
+      singles: new Set(),
+    });
   });
 });
 

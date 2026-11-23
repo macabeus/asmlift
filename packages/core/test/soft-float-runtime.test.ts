@@ -1,11 +1,13 @@
 // agbcc's single-precision runtime where a float crosses something other than a helper: an argument
-// the function hands back (`raise/floathelpers.ts`). The corpus is compiled at agbcc -O2 from the
+// the function hands back, an unsigned word converted, and a callee's declared `float` parameter
+// (`raise/floathelpers.ts`). The corpus is compiled at agbcc -O2 from the
 // sources its header lists.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
+import type { Prototypes } from '../src/proto';
 import { ARMV4T_AGBCC } from '../src/target';
 
 const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-soft-float-rt.s'), 'utf8');
@@ -49,5 +51,38 @@ describe('an unsigned word converted to a single', () => {
   // function's other return is a word.
   test.each(['u2fst', 'u2fmix'])('%s: the converted value read as a word refuses', (name) => {
     expect(() => lift(name)).toThrow("no model for the runtime helper '__floatsisf'");
+  });
+});
+
+// A callee declared to take a `float` is handed it in the next one general word (proto.ts
+// `declaredCallArgs` `singles`), and the soft-float boundary reads that word as the float or refuses.
+describe('a declared float parameter of an ordinary callee', () => {
+  const prototypes: Prototypes = {
+    h1: { params: ['int', 'float'], returnsVoid: true },
+    h2: { params: ['double', 'float'], returnsVoid: true },
+    h3: { params: ['int', 'int', 'int', 'int', 'float'], returnsVoid: true },
+    h4: { params: ['float', 'double'], returnsVoid: true },
+    g1: { params: ['float'], returns: 'float' },
+  };
+  const declared = (name: string) => decompile(name, asm, ARMV4T_AGBCC, { prototypes }).source;
+
+  test.each([
+    ['fpass1', 'void fpass1(s32 a0, float a1) {\n    h1(a0 + 1, a1);\n}\n'],
+    ['fpass2', 'void fpass2(double a0, float a1) {\n    h2(a0, a1);\n}\n'],
+    ['fpass3', 'void fpass3(float a0) {\n    h3(1, 2, 3, 4, a0);\n}\n'],
+    ['fpass4', 'void fpass4(float a0, double a1) {\n    h4(a0, a1);\n}\n'],
+  ])('%s: an argument passed on in its word', (name, source) => {
+    expect(declared(name)).toBe(source);
+  });
+
+  test('a helper result handed to it', () => {
+    expect(declared('fcallarg')).toBe(
+      'float fcallarg(float a0, float a1) {\n    float v0;\n    v0 = a0 * a1;\n    return g1(v0);\n}\n',
+    );
+  });
+
+  // A word loaded from memory is no float the ABI handed over whole; C would convert it at the call.
+  test('a loaded word refuses', () => {
+    expect(() => declared('fpassw')).toThrow("argument 2 of the call to 'h1' is a `float` its callee declares");
   });
 });

@@ -209,6 +209,7 @@ export function liftRegisterStructCalls(
         ...attrs,
         sret: true,
         ...shifted('doubles', 1),
+        ...shifted('singles', 1),
         ...shifted('byValue', 2),
         ...shifted('byValueWords', 2),
       };

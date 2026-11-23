@@ -91,6 +91,8 @@ export interface DeclaredCall {
   readonly widths: readonly number[];
   /** the indices into `widths` that are a `double` */
   readonly doubles: ReadonlySet<number>;
+  /** the indices into `widths` that are a `float`, one word each */
+  readonly singles: ReadonlySet<number>;
   /** the declared parameter count, a hidden pointer aside */
   readonly params: number;
   readonly returned?: StructReturn | 'register';
@@ -115,6 +117,8 @@ export interface CallPlan {
   readonly widths: readonly number[] | null;
   /** the indices into `widths` its declaration types `double` */
   readonly doubles: ReadonlySet<number>;
+  /** the indices into `widths` its declaration types `float` */
+  readonly singles: ReadonlySet<number>;
   /** the structs its declaration passes by value, by their words in `widths` */
   readonly byValue?: readonly ByValueArg[];
   readonly returns:
@@ -483,8 +487,8 @@ export function callDeclarations(
   };
   // A FLOATING PARAMETER THE DECLARATION STATES BUT NOTHING LAYS OUT REFUSES; IT IS NOT GUESSED.
   // Where the target has an FPU, `plan` refuses every floating parameter first (it travels in the
-  // FPU's registers). Where it has none — agbcc — a `double` is laid out in general words
-  // (`TargetDescription.doubleArgWords`) and a `float` or `long double` is not (`proto.ts`
+  // FPU's registers). Where it has none — agbcc — a `double` and a `float` are laid out in general
+  // words (`TargetDescription.doubleArgWords`) and a `long double` is not (`proto.ts`
   // `declaredCallArgs`), so the call would fall to the arity guess, which is wrong both ways: a
   // trailing argument passed through unchanged is dropped (`int g(int, float)`: `g(a + 1, b)` as
   // `g(a0 + 1)`), and a register left over from the caller is counted (`float h(float)`: `h(v)` as
@@ -522,7 +526,13 @@ export function callDeclarations(
     const returned = declaresAggregateReturn(own) ? structReturnOf(name, target, callee, own!, fail) : undefined;
     const hidden = returned === undefined || returned === 'register' ? 0 : 1;
     const declared:
-      { widths: readonly number[]; doubles: ReadonlySet<number>; byValue?: readonly ByValueArg[] } | undefined =
+      | {
+          widths: readonly number[];
+          doubles: ReadonlySet<number>;
+          singles?: ReadonlySet<number>;
+          byValue?: readonly ByValueArg[];
+        }
+      | undefined =
       declaredCallArgs(declarationOf(callee), target) ?? byValueCallArgs(declarationOf(callee), target, hidden);
     const params = declared?.widths;
     if (params === undefined) {
@@ -562,6 +572,7 @@ export function callDeclarations(
     }
     const widths = hidden === 0 ? params : [32, ...params];
     const doubles = new Set([...declared!.doubles].map((i) => i + hidden));
+    const singles = new Set([...(declared!.singles ?? [])].map((i) => i + hidden));
     const byValue = (declared!.byValue ?? []).map((b) => ({
       ...b,
       word: b.word + hidden,
@@ -578,6 +589,7 @@ export function callDeclarations(
     return {
       widths,
       doubles,
+      singles,
       params: declared!.widths.length - byValue.reduce((n, b) => n + b.words - 1, 0),
       ...(returned === undefined ? {} : { returned }),
       ...(byValue.length === 0 ? {} : { byValue }),
@@ -688,6 +700,7 @@ export function callDeclarations(
       ...(floatReturn === undefined ? {} : { floatReturn }),
       widths: wide?.params ?? declared?.widths ?? null,
       doubles: declared?.doubles ?? new Set(),
+      singles: declared?.singles ?? new Set(),
       ...(declared?.byValue === undefined ? {} : { byValue: declared.byValue }),
       returns: voided
         ? { kind: 'void' }
@@ -941,6 +954,7 @@ export function callDeclarations(
         : {
             widths: bound < 0 ? null : Array.from({ length: bound }, () => 32),
             doubles: new Set(),
+            singles: new Set(),
             returns: { kind: 'word' },
             clobbers: callClobbers,
             declaredVoid: false,
@@ -1315,8 +1329,10 @@ export function callDeclarations(
     // A DECLARED `double` IS TWO WORDS THAT ARE NOT A `long long`: its first word holds the
     // sign and exponent (`TargetDescription.doubleArgWords`), so the pair read as an integer
     // spells a different number — `g(1.5)` as `g(1073217536, 0)`. The call names the operands
-    // that are doubles, and `raise/floathelpers.ts` retypes each or refuses it.
+    // that are doubles, and `raise/floathelpers.ts` retypes each or refuses it. A declared `float` is
+    // one word that is no integer either, named in `singles` the same way.
     const doubles = p.doubles.size ? [...p.doubles] : undefined;
+    const singles = p.singles.size ? [...p.singles] : undefined;
     // A STRUCT PASSED BY VALUE IS ITS WORDS HERE, one operand each, and the call names them as
     // (first operand, words) pairs: `foldByValueArgs` folds them into the one object passed whole
     // once the function is lifted, or refuses.
@@ -1329,6 +1345,7 @@ export function callDeclarations(
         ...(sret === undefined ? {} : { sret: true }),
         ...(returns.kind === 'register-struct' && returns.image ? { [REGISTER_STRUCT]: true } : {}),
         ...(doubles === undefined ? {} : { doubles }),
+        ...(singles === undefined ? {} : { singles }),
         ...(p.floatReturn === undefined ? {} : { floatReturn: p.floatReturn }),
         ...(byValue === undefined ? {} : { byValueWords: byValue }),
       },

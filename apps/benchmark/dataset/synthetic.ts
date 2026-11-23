@@ -2921,6 +2921,15 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'float fcall(float,float);',
   },
+  // `fcall` with its callee declared: agbcc hands a declared `float` parameter its next one general
+  // word (core proto.ts `declaredCallArgs` `singles`), here r0, which holds the product.
+  {
+    sym: 'fcallarg',
+    src: 'float g1(float);\nfloat fcallarg(float a,float b){ return g1(a*b); }',
+    features: ['float', 'arithmetic', 'call'],
+    toolchains: ['agbcc'],
+    ctx: 'float g1(float); float fcallarg(float,float);',
+  },
   {
     sym: 'dadd',
     src: 'double dadd(double a,double b){ return a+b; }',

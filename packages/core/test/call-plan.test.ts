@@ -31,7 +31,7 @@ describe('callDeclarations', () => {
     const { declaredCall } = thumbCalls({
       g: { params: ['s32', 's32', 's32', 'long long'] },
     });
-    expect(declaredCall('g')).toEqual({ widths: [32, 32, 32, 64], doubles: new Set(), params: 4 });
+    expect(declaredCall('g')).toEqual({ widths: [32, 32, 32, 64], doubles: new Set(), singles: new Set(), params: 4 });
   });
 
   test('puts the hidden pointer of a struct returned through memory first', () => {
@@ -70,6 +70,7 @@ describe('callDeclarations.plan', () => {
     expect(calls.plan('__muldi3')).toEqual({
       widths: [64, 64],
       doubles: new Set(),
+      singles: new Set(),
       returns: { kind: 'pair' },
       clobbers: pairClobbers(calls),
       declaredVoid: false,
@@ -118,6 +119,7 @@ describe('callDeclarations.plan', () => {
     expect(calls.plan('mv')).toEqual({
       widths: null,
       doubles: new Set(),
+      singles: new Set(),
       returns: { kind: 'register-struct', image: false },
       clobbers: [...calls.callClobbers, 'r0'],
       declaredVoid: false,
@@ -257,6 +259,7 @@ describe('callDeclarations.plan for a lowering with no pair, no memory return an
     expect(calls.plan('__div2i')).toEqual({
       widths: null,
       doubles: new Set(),
+      singles: new Set(),
       returns: { kind: 'word' },
       clobbers: calls.callClobbers,
       declaredVoid: false,
@@ -491,10 +494,23 @@ describe('callDeclarations.plan for a callee declared with a float', () => {
     expect(thumbCalls({ g: { params: 1, returns: 'float' } }).plan('g').returns).toEqual({ kind: 'word' });
   });
 
-  // …but a `float` parameter there is a spelling with no layout (`proto.ts` `declaredCallArgs`), and
-  // the arity guess that would stand in for it drops a trailing argument passed through unchanged
+  // …and a `float` parameter there is the next one general word (`proto.ts` `declaredCallArgs`),
+  // named in `singles` as a double is in `doubles`
+  test('lays a float parameter out in one general word', () => {
+    const plan = thumbCalls({ g: { params: ['double', 'float', 's32'], returns: 'float' } }).plan('g');
+    expect(plan.widths).toEqual([64, 32, 32]);
+    expect(plan.doubles).toEqual(new Set([0]));
+    expect(plan.singles).toEqual(new Set([1]));
+  });
+
+  // Where the target states no general words for a floating value, a `float` parameter is a
+  // spelling with no layout, and the arity guess that would stand in for it drops a trailing
+  // argument passed through unchanged
   test('refuses a float parameter where the target lays out no float argument word', () => {
-    expect(() => thumbCalls({ g: { params: ['s32', 'float'], returns: 'float' } }).plan('g')).toThrow(
+    const { doubleArgWords: _, ...none } = ARMV4T_AGBCC;
+    expect(() =>
+      callDeclarations('f', none, { g: { params: ['s32', 'float'], returns: 'float' } }, EVERY, fail).plan('g'),
+    ).toThrow(
       /^cannot lift 'f': `g` is declared to take 'float' as its parameter 2, which this target passes in general argument words that are not laid out here/,
     );
   });
