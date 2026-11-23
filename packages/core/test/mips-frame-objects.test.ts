@@ -402,7 +402,59 @@ describe('a frame word that is not a local refuses', () => {
     ).toThrow(/reaches across an edge of the local area/);
   });
 
-  test('a frame sum carried across a join names no one object', () => {
+  test('a frame sum carried across a join is a pointer into the object, built where it is handed over', () => {
+    const out = src([
+      '0:\taddiu\tsp,sp,-16',
+      '4:\tsw\tzero,0(sp)',
+      '8:\tsw\tzero,4(sp)',
+      'c:\tbeqz\ta1,18 <f+0x18>',
+      '10:\taddu\tv0,sp,a0',
+      '14:\taddu\tv0,sp,a2',
+      '18:\tlw\tv0,0(v0)',
+      '1c:\tjr\tra',
+      '20:\taddiu\tsp,sp,16',
+    ]);
+    expect(out).toContain('v0 = (s32 *)((u32)sp0 + a2);');
+    expect(out).toContain('v0 = (s32 *)((u32)sp0 + a0);');
+    expect(out).toContain('return *v0;');
+  });
+
+  // `u16 buf[16]; u16 *p = buf + n; for (k = 0; k < n; k++) { *p-- = v; v >>= 1; } *p = 1; sink(buf);`
+  // at gcc2.7.2kmc -O2: the sum starts a pointer the loop steps down
+  test('a pointer stepped from a runtime index into the object', () => {
+    const out = src(
+      [
+        '0:\taddiu\tsp,sp,-64',
+        '4:\tsw\tra,56(sp)',
+        '8:\tsll\tv1,a0,0x1',
+        'c:\taddiu\tv0,sp,16',
+        '10:\taddu\ta2,v0,v1',
+        '14:\tblez\ta0,38 <f+0x38>',
+        '18:\tmove\tv1,zero',
+        '1c:\tsh\ta1,0(a2)',
+        '20:\tandi\tv0,a1,0xffff',
+        '24:\tsrl\ta1,v0,0x1',
+        '28:\taddiu\tv1,v1,1',
+        '2c:\tslt\tv0,v1,a0',
+        '30:\tbnez\tv0,1c <f+0x1c>',
+        '34:\taddiu\ta2,a2,-2',
+        '38:\tli\tv0,1',
+        '3c:\tsh\tv0,0(a2)',
+        '40:\tjal\t0 <f>',
+        '44:\taddiu\ta0,sp,16',
+        '48:\tlw\tra,56(sp)',
+        '4c:\tjr\tra',
+        '50:\taddiu\tsp,sp,64',
+      ],
+      [[0x40, 'R_MIPS_26', 'k']],
+    );
+    expect(out).toContain('u8 sp16[40];');
+    expect(out).toContain('v0 = (u16 *)((u32)sp16 + (a0 << 1));');
+    expect(out).toContain('v0 = v0 + -1;');
+    expect(out).toContain('k(sp16);');
+  });
+
+  test('a frame sum carried across a join and read as a value refuses', () => {
     expect(
       lift([
         '0:\taddiu\tsp,sp,-16',
@@ -411,11 +463,11 @@ describe('a frame word that is not a local refuses', () => {
         'c:\tbeqz\ta1,18 <f+0x18>',
         '10:\taddu\tv0,sp,a0',
         '14:\taddu\tv0,sp,a2',
-        '18:\tlw\tv0,0(v0)',
+        '18:\tsltu\tv0,v0,a3',
         '1c:\tjr\tra',
         '20:\taddiu\tsp,sp,16',
       ]),
-    ).toThrow(/across a join/);
+    ).toThrow(/a pointer stepped through the frame from the object at \[sp,#0\) flows into `icmp_ult`/);
   });
 
   test('a sub-word access outside the area keeps the whole function off the slot model', () => {

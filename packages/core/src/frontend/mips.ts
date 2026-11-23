@@ -3477,8 +3477,32 @@ interface FrameSum {
 }
 
 /** A frame sum is a VALUE no op defines — every use builds its own `laddr` and `add` — so one that
- *  reached a phi, or anything else the fill did not materialize, refuses. */
+ *  reached anything the fill did not materialize refuses. One that reaches a phi is built at the
+ *  frame offset it starts from, at the end of the block that hands it over: no access there picks
+ *  an object by its displacement, so the phi carries the sum itself, the start of a pointer
+ *  stepped from it (`u16 *p = buf + n; *p-- = v`), which the shared audit judges
+ *  (frame-objects.ts `steppedPointers`). */
 function refuseEscapedFrameSums(name: string, irBlocks: readonly Block[], sums: ReadonlyMap<Value, FrameSum>): void {
+  for (const blk of irBlocks) {
+    const last = blk.ops[blk.ops.length - 1];
+    for (const succ of last?.successors ?? []) {
+      succ.args = succ.args.map((v) => {
+        const sum = sums.get(v);
+        if (sum === undefined) {
+          return v;
+        }
+        const base = mkValue(T.unk(32));
+        const at = mkValue(T.unk(32));
+        blk.ops.splice(
+          blk.ops.length - 1,
+          0,
+          mkOp('laddr', { results: [base], attrs: { off: sum.base } }),
+          mkOp('add', { operands: [base, sum.index], results: [at] }),
+        );
+        return at;
+      });
+    }
+  }
   for (const blk of irBlocks) {
     for (const op of blk.ops) {
       if ([...op.operands, ...op.successors.flatMap((x) => x.args)].some((v) => sums.has(v))) {
