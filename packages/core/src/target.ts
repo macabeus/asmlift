@@ -1138,6 +1138,18 @@ export interface CallBehaviors {
   // load decides only where this is `false`. ABSENT ⇒ unmeasured, and read as `true`, which only
   // refuses more.
   discardedReadMayFillArgRegister?: boolean;
+  // DOES THIS COMPILER, AT THESE FLAGS, DELETE A RUNTIME HELPER CALL WHOSE RESULT NOTHING READS?
+  // agbcc at `-O1` and `-O2` emits a libcall as a const call (optabs.c `emit_libcall_block`), which
+  // flow's dead-code pass deletes with its unused value: COMPILED, `int s = a / b; g(); return 0;`
+  // and `float s = a * b; g(); return 0;` are `bl g` alone, where `-O0` keeps `bl __divsi3` /
+  // `bl __mulsf3`. So at those levels a helper's word result still in the return register at a
+  // following call whose arity is guessed, and read by nothing but such calls, IS that call's first argument
+  // (`g(a / b)` is `bl __divsi3; bl g`): frontend/call-plan.ts hands it on as one. A FLAG fact on a
+  // description: `targetFor` clears it at `-O0`.
+  //
+  // ABSENT ⇒ a helper's unread result says nothing about the call after it, which the trim reads
+  // as the call's own leftover (frontend/call-arity.ts `trimClobberedCallArgs`).
+  deletesDeadLibcalls?: boolean;
 }
 
 /** What the compiler does with NARROW VALUES and MEMORY READS: how a narrow parameter or store constant shows in the
@@ -1293,18 +1305,6 @@ export interface LoadBehaviors {
   // gcc 2.7.2 (which has no alias sets), and IDO 7.1, measured at `-O2` with a `u16`, a `u8` and an
   // `s32` read beside an `s32` and a `u16` stepped store.
   strictAliasing?: boolean;
-  // DOES THIS COMPILER, AT THESE FLAGS, DELETE A RUNTIME HELPER CALL WHOSE RESULT NOTHING READS?
-  // agbcc at `-O1` and `-O2` emits a libcall as a const call (optabs.c `emit_libcall_block`), which
-  // flow's dead-code pass deletes with its unused value: COMPILED, `int s = a / b; g(); return 0;`
-  // and `float s = a * b; g(); return 0;` are `bl g` alone, where `-O0` keeps `bl __divsi3` /
-  // `bl __mulsf3`. So at those levels a helper's word result still in the return register at a
-  // following call whose arity is guessed, and read by nothing else, IS that call's first argument
-  // (`g(a / b)` is `bl __divsi3; bl g`): frontend/call-plan.ts hands it on as one. A FLAG fact on a
-  // description: `targetFor` clears it at `-O0`.
-  //
-  // ABSENT ⇒ a helper's unread result says nothing about the call after it, which the trim reads
-  // as the call's own leftover (frontend/call-arity.ts `trimClobberedCallArgs`).
-  deletesDeadLibcalls?: boolean;
   // HOW THIS COMPILER MOVES a plain store at a loop-invariant address out of a poll loop (a loop
   // whose test reads memory at a fixed address, pinned `volatile`), which the effect contract
   // refuses to print plain (contracts.ts `sunkPollStore`). COMPILED at the canonical flags:
