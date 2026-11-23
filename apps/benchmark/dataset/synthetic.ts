@@ -8239,7 +8239,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // and the write leave the loop together when plain: refused. `pollover`'s two plain stores overlap,
   // one a byte, which keeps both in agbcc's loop. `pollrot`'s read past the loop's first branch is
   // the guard's again, which agbcc deletes when plain, so it is printed volatile; `pollor`'s second
-  // read, past the first one's branch, IDO loads once ahead of the loop when plain.
+  // read, past the first one's branch, IDO loads once ahead of the loop when plain. `pollsym`'s
+  // store through a symbol beside one at a constant address is written once ahead of the loop by
+  // IDO when plain, which tells the two addresses apart: refused. `pollentry`'s read past the loop's
+  // first branch is of the cell its entry reads, which agbcc's and KMC's `cse` delete as the entry's
+  // read again when plain, so it is printed volatile.
   {
     sym: 'pollkmc',
     src:
@@ -8300,6 +8304,28 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['ido7.1'],
     ctx: 'void g(void);\nvoid pollor(s32 a0);',
     proto: { pollor: { params: ['s32'], returnsVoid: true }, g: { params: [], returnsVoid: true } },
+  },
+  {
+    sym: 'pollsym',
+    src:
+      'extern s32 gW;\nvoid g(void);\nvoid pollsym(s32 a0, s32 a1)\n{\n' +
+      '    while (*(volatile u32 *)0xA4000010 & 3) {\n        ((s32 *)0xA0001000)[1] = a0;\n' +
+      '        *(volatile s32 *)&gW = a1;\n    }\n    g();\n}',
+    features: ['device-access', 'global'],
+    toolchains: ['ido7.1'],
+    ctx: 'extern s32 gW;\nvoid g(void);\nvoid pollsym(s32 a0, s32 a1);',
+    proto: { pollsym: { params: ['s32', 's32'], returnsVoid: true }, g: { params: [], returnsVoid: true } },
+  },
+  {
+    sym: 'pollentry',
+    src:
+      's32 pollentry(s32 s)\n{\n    if (*(volatile u32 *)0x4000104 & 1)\n        return 0;\n    do {\n' +
+      '        s += 3;\n        if (s > 200)\n            return 1;\n' +
+      '    } while (!(*(volatile u32 *)0x4000104 & 1));\n    return s;\n}',
+    features: ['device-access', 'branch'],
+    toolchains: ['agbcc', 'gcc2.7.2kmc'],
+    ctx: 's32 pollentry(s32 s);',
+    proto: { pollentry: { params: ['s32'], returns: 's32' } },
   },
   // What the discard register does NOT say. `dvnarrow` is the control for a load that leaves it:
   // CodeWarrior at -O0,p reads the plain `s8 x; x = p[5];` as `lwz r0` + `extsb r31,r0`, a home,
