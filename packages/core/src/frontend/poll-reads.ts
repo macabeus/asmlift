@@ -1,14 +1,14 @@
 /** THE POLL-READ PIN: a memory read a loop makes each time round, at an address the loop never
- *  changes, in a loop that makes no call, was `volatile` in the source, so it
- *  is stamped `volatile` (the `device` placement, ir/discipline.ts) and the structurer spells it
- *  through a qualified pointer or declines.
+ *  changes, in a loop that makes no call, was `volatile` in the source, so it is stamped `volatile`
+ *  (the `device` placement, ir/discipline.ts) and the structurer spells it through a qualified
+ *  pointer or declines.
  *
- *  The claim is the COMPILER's: at a level that moves loop-invariant code
- *  (where target.ts `keepsLoopInvariantReads` is absent), a plain read at an invariant address in a loop that
- *  stores nothing and calls nothing is invariant, and the compiler loads it once, ahead of the
- *  loop. agbcc's loop pass takes a `MEM` for invariant when it is not volatile and no store in the
- *  loop may alias it (loop.c `invariant_p`, and `load_mems` past it), so `while (*(s32 *)0x4000004
- *  & 3);` becomes `.L3: cmp r0, #0; bne .L3`. COMPILED, the same source on each compiler, the read
+ *  The claim is the COMPILER's: at a level that moves loop-invariant code (where target.ts
+ *  `keepsLoopInvariantReads` is absent), a plain read at an invariant address in a loop that stores
+ *  nothing and calls nothing is invariant, and the compiler loads it once, ahead of the loop.
+ *  agbcc's loop pass takes a `MEM` for invariant when it is not volatile and no store in the loop
+ *  may alias it (loop.c `invariant_p`, and `load_mems` past it), so `while (*(s32 *)0x4000004 &
+ *  3);` becomes `.L3: cmp r0, #0; bne .L3`. COMPILED, the same source on each compiler, the read
  *  left in the loop only when it was `volatile`: agbcc and KMC gcc 2.7.2 at `-O1` and `-O2`, IDO 7.1
  *  at `-O2` and `-O3`, mwcc 2.4.2 at `-O3` and `-O4,p` each turn it into a branch to itself; IDO at
  *  `-O1` and mwcc at `-O1` and `-O2` keep the plain read in the loop, and those levels pin nothing.
@@ -26,33 +26,27 @@
  *     the exit-target gate (loop.c:2512-2525) stops only `load_mems`, and `scan_loop`'s movables
  *     (871-887) do not look at exit targets;
  *   • where the loop stores, only a read a branch that leaves the loop or goes round it again
- *     decides on (`testedReads`): a poll's. Where an access's address moves, not a read the
- *     compiler provably keeps beside it (`keptBesideMoving`): under alias sets (target.ts
- *     `strictAliasing`, agbcc at `-O2`), a store through a stepped pointer provably keeps only
- *     a read at a constant address where one of the two is a byte, so `while (*(u8 *)0x4000006 !=
- *     160) *p++ = 0;` stays plain, and `while (*(u16 *)0x4000006 != 160) *p++ = 0;` with `s32 *p`,
- *     which agbcc loads once ahead of the loop, is pinned, as is a copy loop's `u8` bound in a
- *     global (kl2dct's `AgbMain`), which register history keeps or moves; without alias
- *     sets (IDO, KMC, agbcc at `-O1`) such a store keeps every read beside it, and none is pinned.
- *     A READ whose address moves keeps a read beside it only where the loop also writes that
- *     read's cell, and then only by `keptBesideMoving`'s alias-set conflict: without alias sets
- *     the read is pinned, as `while (REG & 3) { B[1] = a0; s += *q++; }`, which KMC gcc 2.7.2 and
- *     agbcc at `-O1` turn into a branch to itself when REG is plain, needs. Where every
- *     access is at a fixed address, whether a store keeps a plain read in the loop is the
- *     compiler's alias analysis, decided on register history the lift cannot see — agbcc keeps
- *     `while (((volatile s32 *)0x40000d4)[2] & M) ((s32 *)0x40000d4)[5] = a0;`'s read but moves
- *     the plain spelling of it, and IDO 7.1 keeps `while (*(s32 *)A & 3) ((s32 *)B)[1] = a0;`'s read
+ *     decides on (`testedReads`): a poll's. Not a read the compiler provably keeps beside an access
+ *     whose address moves: under alias sets (target.ts `strictAliasing`, agbcc at `-O2`), the ones
+ *     `keptBesideMoving` proves; without them (IDO, KMC, agbcc at `-O1`), every read beside a STORE
+ *     whose address moves, while a READ whose address moves keeps none (`while (REG & 3) { B[1] =
+ *     a0; s += *q++; }` branches to itself on KMC gcc 2.7.2 and agbcc at `-O1` when REG is plain).
+ *     Where every access is at a fixed address, whether a store keeps a plain read in the loop is
+ *     the compiler's alias analysis, decided on register history the lift cannot see — agbcc keeps
+ *     `while (((volatile s32 *)0x40000d4)[2] & M) ((s32 *)0x40000d4)[5] = a0;`'s read but moves the
+ *     plain spelling of it, and IDO 7.1 keeps `while (*(s32 *)A & 3) ((s32 *)B)[1] = a0;`'s read
  *     while moving `while (gF == 0) gW = a0;`'s — so the read is pinned, which is right whichever
  *     the compiler decided, and the store is the poll-store rule's (contracts.ts `sunkPollStore`).
  *     A pinned read the loop's condition renders makes the loop a poll to that rule, which refuses
  *     a plain store no rule proves kept: a counted loop's `u8` bound beside DMA stores (sa3's
  *     `ProcessOamBuffers`) declines though agbcc kept its stores, since a byte read keeps no store
  *     its addresses prove apart from (`for (;;) { DMA[5] = a0; if (++i >= *(volatile u8 *)&gIdx)
- *     break; }` sinks it), and leaving the bound plain lets `do { …; i++; } while (i < gIdx);` load it
- *     once. A header read no exit tests is left as it was, though `scan_loop` moves it whatever
- *     tests it (`do { if (VCOUNT == 3) DMA[6] = a0; } while (DMA[2] & M);` loads VCOUNT once when
- *     plain): pinning it forecloses the base-pointer spelling three matched rows need
- *     (`synthetic:fieldbase`, `dmafield`, `dmaflat`), whose constant-address plain read agbcc moves. Not on a compiler that keeps the read beside any store (target.ts
+ *     break; }` sinks it), and leaving the bound plain lets `do { …; i++; } while (i < gIdx);` load
+ *     it once. KNOWN GAP: a header read no exit tests is left as it was, though `scan_loop` moves it
+ *     whatever tests it (`do { if (VCOUNT == 3) DMA[6] = a0; } while (DMA[2] & M);` loads VCOUNT
+ *     once when plain): pinning it forecloses the base-pointer spelling three matched rows need
+ *     (`synthetic:fieldbase`, `dmafield`, `dmaflat`), whose constant-address plain read agbcc
+ *     moves. Not on a compiler that keeps the read beside any store (target.ts
  *     `keepsInvariantReadsBesideStores`: mwcc, in every probe);
  *   • the read is in the loop's header, the block every time round starts with, ahead of every
  *     branch the loop takes, or one of two reads past a branch below. A read past a branch is
@@ -61,12 +55,11 @@
  *     KMC gcc 2.7.2 and mwcc, COMPILED (`for (i = 0; i < gCount; i++) { if (gTab[i] == x) …; }`,
  *     `synthetic:retpost_tail`, matches with its bound plain). But a rotated poll's read, which is
  *     itself passed as the block argument the loop's test reads, is the read ahead of the loop
- *     again with no store between, which agbcc's
- *     `gcse` deletes: `v1 = *(s32 *)0x4000104; while ((v1 & 3) != 0) { if (v0 + 1 > 99) break;
- *     v0++; v1 = *(s32 *)0x4000104; }` reads REG once. And on IDO 7.1, which moves a read from
- *     past a branch (target.ts `movesReadsPastBranches`: `do { … } while ((*(vu32 *)A & 3) ||
- *     (*(u32 *)B & 1));` loads B once ahead of the loop when B is plain), every read the loop's
- *     exit tests;
+ *     again with no store between, which agbcc's `gcse` deletes: `v1 = *(s32 *)0x4000104; while
+ *     ((v1 & 3) != 0) { if (v0 + 1 > 99) break; v0++; v1 = *(s32 *)0x4000104; }` reads REG once.
+ *     And on IDO 7.1, which moves a read from past a branch (target.ts `movesReadsPastBranches`:
+ *     `do { … } while ((*(vu32 *)A & 3) || (*(u32 *)B & 1));` loads B once ahead of the loop when
+ *     B is plain), every read the loop's exit tests;
  *   • its address is invariant: every value it is computed from is a constant, a symbol's address,
  *     or a value defined outside the loop, through pure arithmetic — no read, no block argument of
  *     a loop block;
@@ -76,8 +69,8 @@
  *     sign-extending narrow load on agbcc is a plain read's, and stays plain.
  *  The guard a rotated `while` duplicates its test into ahead of the loop reads the same cell, and
  *  is pinned with it (`sameRead`): it is the source's one condition, and only two reads alike let
- *  the structurer fuse the guard back into the loop. Without it, a `/volatile` pointer spelling
- *  that matched before (`synthetic:onepoll`) lost its `while`.
+ *  the structurer fuse the guard back into the loop: without it, `synthetic:onepoll`'s `/volatile`
+ *  pointer spelling loses its `while`.
  *  Over-reach never costs an access, as the device pin's does not: a `volatile` read is made where
  *  the machine made it. */
 import { type Block, type Op, type Value, dominators, predecessors, reachableBlocks, terminator } from '../ir/core';
@@ -148,10 +141,8 @@ export function pinPollReads(irBlocks: readonly Block[], target: TargetDescripti
     }
   }
   for (const loop of loops.byHeader.values()) {
-    // A loop left for more than one place — an early `return`, a `break` past a tail — is no
-    // exception: the exit-target gate (loop.c:2512-2525) stops only `load_mems`, and `scan_loop`'s
-    // movables (871-887) do not look at exit targets, so `while (VCOUNT != 160) { if (DISPSTAT &
-    // 1) return 1; }` loads DISPSTAT once, ahead of the loop, when it is plain.
+    // a loop left for several places included: `while (VCOUNT != 160) { if (DISPSTAT & 1) return
+    // 1; }` loads DISPSTAT once, ahead of the loop, when it is plain
     const ops = [...loop.body].flatMap((b) => b.ops);
     if (ops.some((op) => op.opcode === 'call' || op.opcode === 'opaque')) {
       continue;
@@ -180,10 +171,9 @@ export function pinPollReads(irBlocks: readonly Block[], target: TargetDescripti
     const moves = (op: Op): boolean =>
       MEM_BASE_OPS.has(op.opcode) &&
       !op.operands.slice(0, op.opcode === 'aload' || op.opcode === 'astore' ? 2 : 1).every((o) => invariant(o));
-    // The reads a store the compiler keeps them beside stay as they were: under alias sets, only
-    // those `keptBesideMoving` proves; without them, every read beside a STORE whose address moves.
-    // A read whose address moves keeps nothing there: `while (REG & 3) { B[1] = a0; s += *q++; }`
-    // loads REG once ahead of the loop on KMC gcc 2.7.2 and agbcc at `-O1`.
+    // The reads a moving access keeps in the loop stay as they were (the module comment's second
+    // bound): under alias sets, those `keptBesideMoving` proves; without them, every read beside a
+    // STORE whose address moves.
     const kept = !stores
       ? undefined
       : target.compilerBehaviors.strictAliasing === true
@@ -391,7 +381,8 @@ function keptBesideMoving(
 
 /** The loop's reads a branch that leaves the loop, or goes round it again, decides on: the ops
  *  its condition is computed from, through every op but a read and through the values a block
- *  argument is passed, and the reads where that walk ends, in the loop's own blocks. A read the loop only computes or stores with is none of them. */
+ *  argument is passed, and the reads where that walk ends, in the loop's own blocks. A read the
+ *  loop only computes or stores with is none of them. */
 function testedReads(
   loop: NaturalLoop,
   defOf: ReadonlyMap<Value, Op>,

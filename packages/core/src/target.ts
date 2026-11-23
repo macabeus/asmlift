@@ -1288,6 +1288,7 @@ export interface LoadBehaviors {
   // only where one of the two is a byte (`while (*(u16 *)0x4000006 != 160) *p++ = 0;` with `s32 *p`
   // loads the register once, ahead of the loop). Read by the poll-read pin (frontend/poll-reads.ts
   // `keptBesideMoving`).
+  //
   // ABSENT ⇒ a store at an address the loop moves keeps every read beside it: agbcc at `-O1`, KMC
   // gcc 2.7.2 (which has no alias sets), and IDO 7.1, measured at `-O2` with a `u16`, a `u8` and an
   // `s32` read beside an `s32` and a `u16` stepped store.
@@ -1307,6 +1308,7 @@ export interface LoadBehaviors {
   //              on both.
   //   Either only where the level moves loop-invariant code (`keepsLoopInvariantReads` absent):
   //   gcc's loop pass runs from `-O1`, and agbcc `-O0` keeps the store in the loop.
+  //
   // ABSENT ⇒ the store stays in the loop: mwcc kept it in every probe, those shapes KMC moves
   // included (mwcc 2.4.2 `-O4,p`).
   pollStoreMotion?: 'sinks' | 'hoists';
@@ -1317,7 +1319,8 @@ export interface LoadBehaviors {
   // `-O4,p`. Read by the poll-read pin (frontend/poll-reads.ts), which then pins a read the loop's
   // exit tests wherever in the loop it is. KMC is left absent on that probe and on
   // `synthetic:retpost_tail`'s plain loop bound, though it moves the read of `while (s < 100) {
-  // …; if ((*(u32 *)A & 3) == 0) break; }` (a residue: setting it costs that row its match).
+  // …; if ((*(u32 *)A & 3) == 0) break; }` (KNOWN GAP: setting it costs that row its match).
+  //
   // ABSENT ⇒ false: past the loop's header, only a rotated poll's read is the pin's.
   movesReadsPastBranches?: boolean;
   // WHERE DOES THIS COMPILER PUT A READ NOBODY USES, at a level that keeps a plain one
@@ -2450,7 +2453,7 @@ export function keepsUnusedReadsAt(family: FlagFamily, level: string | undefined
  *  A LEVEL NO FLAG NAMES (`undefined`) KEEPS, and so does a level word the table does not read
  *  (`-Os`). The cost runs the other way from `keepsUnusedReadsAt`'s: answering "moves" where the
  *  compiler keeps the read pins a `volatile` the source never wrote, while answering "keeps" leaves
- *  the read plain, as the lift printed it before the pin existed. */
+ *  the read plain. */
 export function keepsLoopInvariantReadsAt(family: FlagFamily, level: string | undefined): boolean {
   const n = level === undefined ? undefined : /^\d/.exec(level)?.[0];
   return n === undefined || Number(n) < (family === 'mwcc' ? 3 : family === 'ido' ? 2 : 1);
@@ -2459,8 +2462,7 @@ export function keepsLoopInvariantReadsAt(family: FlagFamily, level: string | un
 /** Does agbcc at optimisation level `level` (the profile's `O` slot) keep alias sets
  *  (`compilerBehaviors.strictAliasing`)? From `-O2`, and at `-Os`, which forces `optimize` to 2
  *  (toplev.c:3576-3577, :3616); not at `-O0` or `-O1`. `flag` is the `-fstrict-aliasing` slot, which
- *  `-fno-strict-aliasing` sets `off` and overrides the level.
- *  No level names `-O0`. */
+ *  `-fno-strict-aliasing` sets `off` and overrides the level. A profile with no `O` slot is `-O0`. */
 export function strictAliasingAt(level: string | undefined, flag: string | undefined): boolean {
   if (flag === 'on' || flag === 'off') {
     return flag === 'on';

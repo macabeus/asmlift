@@ -254,7 +254,7 @@ describe('a context-declared pointer to volatile', () => {
     const src = decompile('pvq', PVQ, ARMV4T_AGBCC, { prototypes: VOIDQ, contextGlobals: ctx }).source;
     expect(src).toContain('while (((volatile u16 *)gQ)[1] == 0)');
     // the context's volatility withheld: the poll-read pin still qualifies the read the loop makes
-    // each time round, which a plain one the compiler would hoist out of the loop
+    // each time round, which the compiler would hoist out of the loop were it plain
     const none: ContextGlobals = { ...ctx, pointeeVolatiles: new Set() };
     expect(decompile('pvq', PVQ, ARMV4T_AGBCC, { prototypes: VOIDQ, contextGlobals: none }).source).toContain(
       'while (((volatile u16 *)gQ)[1] == 0)',

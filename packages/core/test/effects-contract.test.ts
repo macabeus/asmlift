@@ -605,7 +605,7 @@ describe('assertEffectsPreserved — a pinned device access', () => {
       checkReads(irReading([REG, REG], [], [0x4000010]), [pollWhile([write(0x4000010)], true)]),
     ).not.toThrow();
     // a u16 store beside the u16 poll at another address: no access proves it kept, so the
-    // poll-store rule refuses it before the withheld credit would
+    // poll-store rule refuses it
     const plainHalf: Stmt = {
       k: 'store',
       lval: at({ k: 'const', value: 0x4000010 }, false),
@@ -724,7 +724,8 @@ describe('assertEffectsPreserved — a pinned device access', () => {
       value: { k: 'const', value: 1 },
     };
     expect(() => checkReads(irReading([REG]), [pollWhile([byte])])).not.toThrow();
-    // the store under an `if` of the loop: agbcc moves no cell that may trap out of a loop that branches
+    // the store under an `if` of the loop: agbcc moves no cell that may trap out of a loop that
+    // branches
     const guarded: Stmt = { k: 'if', cond: { k: 'var', name: 'k' }, then: [plainWord()], else: [] };
     expect(() => checkReads(irReading([REG]), [pollWhile([guarded])], ['k'])).not.toThrow();
     // a u16 store beside the u16 poll at another address proves nothing: refused

@@ -389,9 +389,8 @@ const plainWrite = (s: Stmt, ctx: TreeContext): s is Write =>
  *  agbcc's loop pass (loop.c `load_mems`) moves a memory cell into a register for the duration of
  *  a loop when the cell's address does not change in it, the loop makes no call, and no other
  *  access in the loop conflicts with the cell (alias.c `true_dependence`), and stores it back at
- *  the exit. `volatile` is what keeps
- *  such a write in the loop, so one the asm makes there, in a loop with neither a call nor an
- *  aliasing access, was qualified in the source: a pointer the device pin left plain
+ *  the exit. `volatile` is what keeps such a write in the loop, so one the asm makes there, in a
+ *  loop with neither a call nor an aliasing access, was qualified in the source: a pointer the device pin left plain
  *  (frontend/device-pins.ts: the per-object policy pins no store a later one does not overwrite),
  *  or a `volatile` global the lift cannot see. Spelled plain, the recompile writes it once, after
  *  the loop, or never on a run that does not go round, and its read counts are unchanged.
@@ -403,9 +402,9 @@ const plainWrite = (s: Stmt, ctx: TreeContext): s is Write =>
  *  REG; }`). Where the compiler hoists (`'hoists'`), which moves the write whatever the polled
  *  read's qualifier, a condition that reads a global is a poll too: IDO's `while (gF == 0) ((s32
  *  *)B)[5] = a0;` writes once ahead of the loop compiled against `extern volatile s32 gF;`, the
- *  declaration the lift's bare `gF` is printed for. A loop whose body only holds a device read, or a nested poll, is no poll: its writes are
- *  not judged here. A plain write at a fixed address in any other loop is the same hazard where its
- *  source was `volatile`, and is not judged here. */
+ *  declaration the lift's bare `gF` is printed for. A loop whose body only holds a device read, or
+ *  a nested poll, is no poll: its writes are not judged here. A plain write at a fixed address in
+ *  any other loop is the same hazard where its source was `volatile`, and is not judged here. */
 function sunkPollStore(s: Loop, ctx: TreeContext): Write | undefined {
   if (ctx.motion === undefined) {
     return undefined;
@@ -484,8 +483,9 @@ function movedWrite(s: Loop, motion: 'sinks' | 'hoists', ctx: TreeContext): Writ
  *  whose bytes provably overlap the write's where one of the two is a byte, and the write itself
  *  qualified ({@link plainWrite}). Every other plain write at a fixed address is the one returned.
  *  An address is fixed in the loop when it reads no memory, makes no call and names no local the
- *  loop assigns anything but the one constant the function gives it (`literalLocals`); a write whose width the tree does not say (a member, or a global assigned by its
- *  name) has no bytes to overlap, so only the other keeps can clear it. */
+ *  loop assigns anything but the one constant the function gives it (`literalLocals`); a write
+ *  whose width the tree does not say (a member, or a global assigned by its name) has no bytes to
+ *  overlap, so only the other keeps can clear it. */
 function sunkStore(
   stmts: readonly Stmt[],
   exprs: readonly Expr[],
@@ -574,8 +574,8 @@ function sunkStore(
  *  keeps it, measured on both: a value the loop computes (`x += …; B[5] = x;`) and a second store
  *  to another cell. Two stores to one cell are one, and hoisted. A memory read is no change: KMC
  *  loads `B[1] = gV;`'s global once ahead of the loop and writes it there too, so only a local the
- *  loop assigns (anything but its one constant), a post-increment, a call or a qualified access (a declared global's included)
- *  moves a value or an address. */
+ *  loop assigns (anything but its one constant), a post-increment, a call or a qualified access (a
+ *  declared global's included) moves a value or an address. */
 function hoistedStore(stmts: readonly Stmt[], assigned: ReadonlySet<string>, ctx: TreeContext): Write | undefined {
   const fixed = (e: Expr): boolean =>
     e.k !== 'call' &&
@@ -665,10 +665,10 @@ function countEffects(
       const test: EffectCounts = new Map();
       effectsInExpr(s.fusedGuard.test, test, ctx);
       const cond = deviceReads(own);
-      // A plain write in the loop is no reason to withhold it: the loop's condition renders the
-      // credited read, so the loop is a poll, and {@link sunkPollStore} has just refused every write
-      // in it the compiler's loop pass moves (none, at flags with no `motion`). What it lets through
-      // is kept in the loop, as IDO keeps `while (REG & 3) { B[5] = a0; C[2] = a1; }`'s two stores.
+      // Credited in a loop that writes plain too: its condition renders the credited read, so the
+      // loop is a poll, and {@link sunkPollStore} has refused every write in it the compiler's loop
+      // pass moves. What it lets through stays in the loop, as IDO keeps `while (REG & 3) { B[5] =
+      // a0; C[2] = a1; }`'s two stores.
       const credit = new Map([...deviceReads(test)].map(([k, n]) => [k, Math.min(n, cond.get(k) ?? 0)] as const));
       const copies = ctx.fusedCopies.get(s.fusedGuard.site) ?? [];
       ctx.fusedCopies.set(s.fusedGuard.site, [...copies, { credit, cond }]);
@@ -762,11 +762,6 @@ export function assertCaseGotosNarrow(sfn: SFn): void {
   }
 }
 
-/**
- * Post structuring: every call and pinned access the asm makes is emitted, and none of those or of
- * its declared volatile reads is emitted more times than the asm makes it on any one path. See the
- * note above for what this deliberately does not cover.
- */
 /** The compiler behaviours the effect contract reads (target.ts, the fields): how a plain store
  *  moves out of a poll loop, and whether the level moves loop-invariant code at all. A caller that
  *  passes none is judged as moving no store. */
@@ -801,6 +796,11 @@ function literalLocalsOf(sfn: SFn): Map<string, number> {
   return out;
 }
 
+/**
+ * Post structuring: every call and pinned access the asm makes is emitted, and none of those or of
+ * its declared volatile reads is emitted more times than the asm makes it on any one path. See the
+ * note above for what this deliberately does not cover.
+ */
 export function assertEffectsPreserved(fn: Fn, sfn: SFn, behaviors: EffectBehaviors = {}): void {
   assertCaseGotosNarrow(sfn);
   // Reachable blocks only: an unreachable block's call is legitimately never emitted.
