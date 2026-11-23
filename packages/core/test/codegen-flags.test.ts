@@ -102,8 +102,9 @@ describe('targetFor', () => {
     expect(keepsUnusedReads).toBe(true);
     // every level that keeps an unused read also leaves a loop-invariant read in its loop
     expect(keepsLoopInvariantReads).toBe(true);
-    // …and none keeps alias sets, which gcc's `-O2` turns on (`strictAliasingAt`)
-    const { strictAliasing: _declared, ...declared } = DESCRIPTIONS[id].compilerBehaviors;
+    // …and none keeps alias sets, which gcc's `-O2` turns on (`strictAliasingAt`), nor deletes a dead
+    // libcall, which agbcc does from `-O1` (`deletesDeadLibcallsAt`)
+    const { strictAliasing: _declared, deletesDeadLibcalls: _dead, ...declared } = DESCRIPTIONS[id].compilerBehaviors;
     expect(rest).toEqual(declared);
   });
 
@@ -132,9 +133,27 @@ describe('targetFor', () => {
   ] as const)('agbcc at %j keeps alias sets: %s', (flags, strict) => {
     const behaviors = targetFor('agbcc', flags).target.compilerBehaviors;
     expect(behaviors.strictAliasing === true).toBe(strict);
-    const { strictAliasing: _a, keepsLoopInvariantReads: _k, keepsUnusedReads: _u, ...rest } = behaviors;
-    const { strictAliasing: _d, ...declared } = DESCRIPTIONS.agbcc.compilerBehaviors;
+    const {
+      strictAliasing: _a,
+      keepsLoopInvariantReads: _k,
+      keepsUnusedReads: _u,
+      deletesDeadLibcalls: _l,
+      ...rest
+    } = behaviors;
+    const { strictAliasing: _d, deletesDeadLibcalls: _e, ...declared } = DESCRIPTIONS.agbcc.compilerBehaviors;
     expect(rest).toEqual(declared);
+  });
+
+  // …and one more: agbcc deletes a libcall whose result nothing reads from `-O1` and at `-Os`
+  // (target.ts `deletesDeadLibcallsAt`; compiled, `int s = a / b; g(); return 0;` is `bl g` alone).
+  test.each([
+    [['-O0', '-mthumb-interwork'], false],
+    [['-mthumb-interwork'], false],
+    [['-O1', '-mthumb-interwork'], true],
+    [['-O2', '-mthumb-interwork'], true],
+    [['-Os', '-mthumb-interwork'], true],
+  ] as const)('agbcc at %j deletes a dead libcall: %s', (flags, deletes) => {
+    expect(targetFor('agbcc', flags).target.compilerBehaviors.deletesDeadLibcalls === true).toBe(deletes);
   });
 
   // …save one the flags change: under `-fshort-enums` an enum is the smallest integer its values fit,
