@@ -3422,6 +3422,7 @@ function liftOnce(
     }
   }
 
+  buildHandedFrameSums(irBlocks, frameSums);
   return finishLift({
     name,
     target,
@@ -3476,13 +3477,13 @@ interface FrameSum {
   readonly index: Value;
 }
 
-/** A frame sum is a VALUE no op defines — every use builds its own `laddr` and `add` — so one that
- *  reached anything the fill did not materialize refuses. One that reaches a phi is built at the
- *  frame offset it starts from, at the end of the block that hands it over: no access there picks
- *  an object by its displacement, so the phi carries the sum itself, the start of a pointer
- *  stepped from it (`u16 *p = buf + n; *p-- = v`), which the shared audit judges
- *  (frame-objects.ts `steppedPointers`). */
-function refuseEscapedFrameSums(name: string, irBlocks: readonly Block[], sums: ReadonlyMap<Value, FrameSum>): void {
+/** A FRAME SUM HANDED TO A PHI IS BUILT where it is handed over: at the frame offset it starts
+ *  from, at the end of the block that hands it. No access there picks an object by its
+ *  displacement, so the phi carries the sum itself, the start of a pointer stepped from it (`u16
+ *  *p = buf + n; *p-- = v`), which the shared audit judges (frame-objects.ts `steppedPointers`).
+ *  Every other use of a sum was built by the fill (`materialize`). Run on the finished SSA, which is
+ *  where a phi's incoming values are known. */
+function buildHandedFrameSums(irBlocks: Block[], sums: ReadonlyMap<Value, FrameSum>): void {
   for (const blk of irBlocks) {
     const last = blk.ops[blk.ops.length - 1];
     for (const succ of last?.successors ?? []) {
@@ -3503,6 +3504,11 @@ function refuseEscapedFrameSums(name: string, irBlocks: readonly Block[], sums: 
       });
     }
   }
+}
+
+/** A frame sum is a VALUE no op defines — every use builds its own `laddr` and `add` — so one that
+ *  reached anything neither the fill nor `buildHandedFrameSums` built refuses. */
+function refuseEscapedFrameSums(name: string, irBlocks: readonly Block[], sums: ReadonlyMap<Value, FrameSum>): void {
   for (const blk of irBlocks) {
     for (const op of blk.ops) {
       if ([...op.operands, ...op.successors.flatMap((x) => x.args)].some((v) => sums.has(v))) {
