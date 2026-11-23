@@ -12149,18 +12149,19 @@ export const SYNTHETIC: SynthSpec[] = [
           sretunw: { returnsVoid: true },
         },
       },
-      // sretfl with the float global DECLARED: its bits stored bare would convert, so the lift must
-      // spell the store through an integer cell or decline
+      // sretfl with the float global DECLARED (and a callee of no argument, which is all that sets
+      // the two sources apart): its bits stored bare would convert, so the lift must spell the
+      // store through an integer cell or decline
       {
         sym: 'sretfld',
         src:
-          'struct Fd { float f; };\nextern struct Fd mkfd(s32 x);\nextern float gFd;\n' +
-          'void sretfld(s32 x)\n{\n    struct Fd s = mkfd(x);\n    gFd = s.f;\n}',
+          'struct Fd { float f; };\nextern struct Fd mkfd(void);\nextern float gFd;\n' +
+          'void sretfld(void)\n{\n    struct Fd s = mkfd();\n    gFd = s.f;\n}',
         features: ['struct-return', 'float'],
         ...at,
-        ctx: 'struct Fd { float f; };\nextern float gFd;\nstruct Fd mkfd(s32 x);\nvoid sretfld(s32 x);',
+        ctx: 'struct Fd { float f; };\nextern float gFd;\nstruct Fd mkfd(void);\nvoid sretfld(void);',
         proto: {
-          mkfd: { params: ['s32'], returns: 'struct Fd', returnLayout: one('f', 'float') },
+          mkfd: { params: [], returns: 'struct Fd', returnLayout: one('f', 'float') },
           sretfld: { returnsVoid: true },
         },
       },
