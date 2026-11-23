@@ -55,6 +55,11 @@ export interface PreRecoveryOptions {
   paramWidth?: ParamWidthOptions;
   /** raise/structs.ts `foldDisplacedAccesses` — the `/far-cast` lift. */
   displaced?: DisplacedOptions;
+  /** the context's own entry for this function (proto-context.ts `ownContextEntry`), where no stated
+   *  prototype (`self`) is in hand: read by raise/floathelpers.ts alone, as the declaration a
+   *  candidate that includes the header is compiled against, so no argument word or return it types
+   *  an integer is read as a float. Every other pass bounds by it softly or not at all. */
+  ownContext?: FnProto;
 }
 
 export interface ParamWidthOptions {
@@ -159,8 +164,8 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // which ran before there was a float compare to negate.
   {
     id: 'floathelpers',
-    run: (fn, _self, _opts, target) => {
-      if (!recognizeFloatHelpers(fn, target)) {
+    run: (fn, self, opts, target) => {
+      if (!recognizeFloatHelpers(fn, target, self ?? opts.ownContext)) {
         return false;
       }
       if (NOT_FCMP_PATTERNS.reduce((n, p) => n + applyPattern(fn, p, target), 0) > 0) {

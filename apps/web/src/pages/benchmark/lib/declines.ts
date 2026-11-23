@@ -394,6 +394,17 @@ export const DECLINE_CLASSES: DeclineClass[] = [
       /(?:half|halves) of a 64-bit (?:value|pair)|is a `double` its callee declares|return type is 5 to 8 bytes|the other word of a 64-bit return|no lowering for op 'concat'|no upper half to shift out/,
   },
   {
+    // A WORD A CALLEE DECLARES `float` that is no float this function was handed or a runtime helper
+    // returned, moved whole (`raise/floathelpers.ts`), on a target with no FPU. The soft-float ABI
+    // passes the float as its bits in one general word, so handing an integer word on would have C
+    // convert it at the call. One word, so not `wide-call-arg`'s `double`; and no FPU register, so
+    // not `float`. Its one inhabitant, `synthetic:fpun:agbcc`, is a correct decline: the function's
+    // own declaration types that word an `int`.
+    key: 'float-call-arg',
+    label: 'A word a callee declares `float` that is no float this function holds (soft-float)',
+    pattern: /is a `float` its callee declares/,
+  },
+  {
     // THE SIBLING GAP OF `opaque-ops`, and a different capability: not an instruction nobody
     // decoded, but a call into the compiler's own runtime that no recognizer folded into the
     // operation it computes. It is a REFUSAL rather than a miss — re-emitting `__div2i(a, b)` as

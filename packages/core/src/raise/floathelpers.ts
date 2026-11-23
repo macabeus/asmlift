@@ -2,26 +2,29 @@
 //
 // Four things cross it. A runtime helper whose op computes on floats (`isFloatHelper`) — the peer of
 // `raise/widehelpers.ts`, gated by the target's runtime table rather than a hardware capability.
-// A parameter an ordinary callee declares `double` (the frontend's `doubles` on the call). The
-// result of an ordinary callee declared to return a floating type (its `floatReturn`). And a
-// double literal, two constant words, where the target states their order
-// (`TargetDescription.doubleArgWords`) and its compiler reads a literal back
+// A parameter an ordinary callee declares `double` or `float` (the operands the frontend names on
+// the call, `FLOATS_ATTR`). The result of an ordinary callee declared to return a floating type
+// (its `floatReturn`). And a double literal, two constant words, where the target states their
+// order (`TargetDescription.doubleArgWords`) and its compiler reads a literal back
 // (`compilerBehaviors.roundTripsDoubleLiterals`). What sets all four apart from the integer
 // helpers is the value's KIND: the words are bits in integer registers, and the pass re-types them
 // as floats, which only data flow may justify — see the function below.
 import { constWord } from '../ir/bits';
-import { Fn, Op, Value, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
+import { Fn, Op, Value, floatOperands, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
 import { doubleBits, doubleOf } from '../ir/float-bits';
 import { type Opcode, fcmpOfTruth } from '../ir/opcodes';
 import { T, intWidth } from '../ir/types';
+import { type FnProto, declaredCallArgs, declaresAggregateReturn, floatingSpelling } from '../proto';
 import { arrivesAsDeclared, floatSidesOf, helperOp, isFloatHelper, lookupHelper } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 import { RaiseUnsupportedError } from './errors';
 import { isArgumentPair } from './pairparams';
+import { rewriteUnsignedFloatDiamonds } from './unsigned-float';
 
 /** Rewrite the float-arithmetic helper calls to the float ops, in place, each value at the width its
- *  helper's signature states, and hand a parameter the callee declares `double` (the frontend's
- *  `doubles` on the call) a double. Returns whether anything changed.
+ *  helper's signature states, and hand a parameter the callee declares `double` or `float` (the
+ *  operands the frontend names on the call, `FLOATS_ATTR`) a float of that width. Returns whether
+ *  anything changed.
  *
  *  A SOFT-FLOAT VALUE IS BITS IN INTEGER REGISTERS, AND ONLY DATA FLOW MAY READ THEM AS A FLOAT. A
  *  single travels in one register; a double in the pair a long long travels in, which the frontend
@@ -30,26 +33,28 @@ import { isArgumentPair } from './pairparams';
  *  the value whole keeps it right, so a float may come only from where the ABI hands one over
  *  whole — this function's argument slot, or two consecutive ones for a double, or another of these
  *  helpers' results — and may go only into another of them, the return, or a parameter a callee
- *  declares `double`. Anything else refuses, and the call stays for `refuseUnmodelledHelpers` to
+ *  declares `double` or `float`. Anything else refuses, and the call stays for `refuseUnmodelledHelpers` to
  *  gap:
  *   - an operand built from a load or two unrelated words, whose halves the int64 naming would put
  *     in the wrong order. Two CONSTANT words are the exception: they are a literal, read in the
  *     target's word order into an `fconst` (`a + 1.5` stages `0x3ff80000` in r2, its high word);
- *   - an argument the function also reads on its own, as a word or as one half of a pair;
+ *   - an argument the function also reads on its own, as a word or as one half of a pair — save a
+ *     single the `ret` hands back whole where every `ret` hands back a float (`returnedArgument`);
  *   - a result read as a word or a half (`*(int *)&c` is a double's HIGH word, in r0), passed to
  *     any other call, or carried across an edge;
  *   - a result NOTHING reads. Folded, it would be a dead float op, and `dce` would delete the
- *     arithmetic. Optimising (-O1, -O2), agbcc deletes a helper call whose result is dead
- *     (`s = a * b; g(); return 0;` calls no `__mulsf3`), so the result's one reader was a later call
- *     that took it in r0, and a guessed arity does not count a register a call wrote (frontend/call-arity.ts
- *     `fallbackArgc`, `trimClobberedCallArgs`): `g1(a * b)` with `g1` undeclared reads as
- *     `__mulsf3(); return g1();`, and folded would print `return g1();`. A double's pair refuses
- *     that shape at the frontend, naming the half the next call reads; a single is one word, so it
- *     reaches here. At -O0 the rule is not asked: agbcc stores the result to the frame, which reads
- *     it, and nothing folds there, its arguments being read from frame homes. A frontend that reads
- *     those homes must re-measure this. A result some other op ALSO reads is not refused:
- *     `s = a * b; g(s); return s;` and `s = a * b; g(); return s;` are the same bytes on agbcc, and
- *     a declaration of `g` closes the trim's `g()` reading (`trimClobberedCallArgs`).
+ *     arithmetic. Optimising (-O1 and above), agbcc deletes a helper call whose result is
+ *     dead (`s = a * b; g(); return 0;` calls no `__mulsf3`), so the frontend hands a helper's
+ *     result still in r0, and read by nothing but guessed calls, to each such call as its first
+ *     argument (core target.ts `deletesDeadLibcalls`, frontend/call-plan.ts): `g1(a * b)` with `g1`
+ *     undeclared reads `g1(__mulsf3(a, b))`, which refuses here as a result passed to another call
+ *     — an undeclared callee is handed a `float` promoted to a `double`. Where the frontend does not
+ *     hand it on, it reaches here unread. At -O0 the rule is not asked: agbcc stores the result to
+ *     the frame, which reads it, and nothing folds there, its arguments being read from frame
+ *     homes. A frontend that reads those homes must re-measure this. A result some other op ALSO
+ *     reads is not refused: `s = a * b; g(s); return s;` and `s = a * b; g(); return s;` are the
+ *     same bytes on agbcc, and a declaration of `g` closes the trim's `g()` reading
+ *     (`trimClobberedCallArgs`).
  *  A call refused takes every call its result feeds or is fed by with it, so what folds is a closed
  *  set of floats and verify's float rule holds by construction.
  *
@@ -57,10 +62,12 @@ import { isArgumentPair } from './pairparams';
  *  rule above: `(float)i` converts whatever integer `i` is, a parameter, a load or a sum, and
  *  `(int)x` hands an integer to anything. Its result must still be read, by the dead-result rule,
  *  and a float the function also reads as a word is no float source for it either. */
-export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolean {
+export function recognizeFloatHelpers(fn: Fn, target: TargetDescription, self?: FnProto): boolean {
   const table = target.runtimeHelpers ?? {};
+  // agbcc's open-coded `(float)u`, rewritten to the one call of its table entry it is (raise/unsigned-float.ts)
+  const rewrote = rewriteUnsignedFloatDiamonds(fn, target);
   let sites: Op[] = [];
-  const consumers = new Map<Op, readonly number[]>();
+  const consumers = new Map<Op, ReadonlyMap<number, number>>();
   const def = new Map<Value, Op>();
   const users = new Map<Value, Array<Op | null>>(); // null: an edge argument
   const returners = new Map<Op, string>(); // ordinary calls declared to return a floating type
@@ -83,8 +90,8 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
         )
       ) {
         sites.push(op);
-      } else if (!helper && op.opcode === 'call' && Array.isArray(op.attrs.doubles)) {
-        consumers.set(op, op.attrs.doubles as number[]);
+      } else if (!helper && op.opcode === 'call' && floatOperands(op).size > 0) {
+        consumers.set(op, floatOperands(op));
       }
       if (!helper && op.opcode === 'call' && typeof op.attrs.floatReturn === 'string') {
         returners.set(op, op.attrs.floatReturn);
@@ -92,21 +99,51 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
     }
   }
   if (!sites.length && !consumers.size && !returners.size) {
-    return false;
+    return rewrote;
   }
   // A projection nothing reads is not a read of a half: `dce` runs ahead of this pass only after a
   // fold that changed the IR, so the frontend's split of the result back into its registers may stand.
   const deadHalf = (u: Op | null) =>
     u !== null && (u.opcode === 'lo32' || u.opcode === 'hi32') && !users.has(u.results[0]);
   // A USE THAT TAKES THE VALUE AS A FLOAT: a helper the fold keeps, or a parameter the callee declares
-  // `double` (the frontend's `doubles`) — and only that parameter, so the same value handed to the
+  // floating (`FLOATS_ATTR`) — and only that parameter, so the same value handed to the
   // same call as a word is a word read.
   const floatUse = (u: Op | null, v: Value, calls: ReadonlySet<Op>): boolean =>
     u !== null &&
     ((calls.has(u) && sidesOf(u).operands) ||
-      (consumers.has(u) && u.operands.every((o, i) => o !== v || consumers.get(u)!.includes(i))));
+      (consumers.has(u) && u.operands.every((o, i) => o !== v || consumers.get(u)!.has(i))));
   const floatsOnly = (v: Value, calls: ReadonlySet<Op>) => (users.get(v) ?? []).every((u) => floatUse(u, v, calls));
   const entry = fn.blocks[0].params;
+  // THE FUNCTION'S OWN DECLARATION, where the caller states one, is the type the candidate prints
+  // against it: an argument word it declares an integer is no float this function was handed
+  // (`void q(int x){ pf(*(float *)&x); }` with `pf(float)` declared is `bl pf` alone, and lifted as
+  // `void q(float x)` it conflicts with `void q(int x);`), and a return it declares no float takes
+  // none (`int q(void){ float f = rf(); return *(int *)&f; }`).
+  const integerWords = ownIntegerWords(self, target);
+  const declaredWord = (v: Value) => integerWords.has(entry.indexOf(v));
+  const returnsDeclaredWord =
+    typeof self?.returns === 'string' && self.returns.trim() !== 'void' && floatingSpelling(self.returns) === undefined;
+  // a `ret` hands back a float only where the function may be declared to return one
+  const floatRet = (u: Op | null) => u?.opcode === 'ret' && !returnsDeclaredWord;
+  const rets = fn.blocks.flatMap((b) => b.ops.filter((op) => op.opcode === 'ret' && op.operands.length > 0));
+  // A SINGLE ARGUMENT THE FUNCTION RETURNS is moved whole into r0, so the `ret` takes it as the float
+  // it was handed — but only where every `ret` then hands back a float: an argument some fold reads
+  // as a float, or a float this pass makes. A `return a;` beside `return 5;` is a function whose
+  // other return C would convert to 5.0f, so there the `ret` stays a word read and the helper is
+  // refused. A double's pair is two words the `ret` reads apart, and stays refused.
+  const returnedArgument = (v: Value, calls: ReadonlySet<Op>) =>
+    entry.includes(v) &&
+    !declaredWord(v) &&
+    (users.get(v) ?? []).some((u) => floatUse(u, v, calls)) &&
+    (users.get(v) ?? []).every((u) => floatUse(u, v, calls) || floatRet(u));
+  const returnsFloats = (calls: ReadonlySet<Op>) =>
+    !returnsDeclaredWord &&
+    rets.every((r) =>
+      r.operands.every((o) => {
+        const d = def.get(o);
+        return d === undefined ? returnedArgument(o, calls) : (calls.has(d) && sidesOf(d).result) || declaredSingle(d);
+      }),
+    );
   // A `concat` of the same two slots in the same order as `d`: the frontend builds one afresh at each
   // call it hands the pair to, so `g(x); g(x)` reads one parameter through two of them.
   const samePair = (u: Op | null, d: Op): u is Op =>
@@ -117,10 +154,16 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
   const argument = (v: Value, calls: ReadonlySet<Op>): boolean => {
     const d = def.get(v);
     if (d === undefined) {
-      return entry.includes(v) && floatsOnly(v, calls);
+      return (
+        entry.includes(v) &&
+        !declaredWord(v) &&
+        (floatsOnly(v, calls) || (returnedArgument(v, calls) && returnsFloats(calls)))
+      );
     }
     return (
       isArgumentPair(entry, d, (p) => users.get(p)!.filter((u) => !samePair(u, d)).length + 1) &&
+      !declaredWord(d.operands[0]) &&
+      !declaredWord(d.operands[1]) &&
       users.get(d.operands[0])!.every((u) => samePair(u, d) && floatsOnly(u.results[0], calls))
     );
   };
@@ -185,7 +228,7 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
       return (
         (!sides.operands || op.operands.every((o) => source(o, calls))) &&
         read.length > 0 &&
-        (!sides.result || read.every((u) => floatUse(u, op.results[0], calls) || u?.opcode === 'ret'))
+        (!sides.result || read.every((u) => floatUse(u, op.results[0], calls) || floatRet(u)))
       );
     });
     if (kept.length === sites.length) {
@@ -208,7 +251,7 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
     if (read.length === 0) {
       continue;
     }
-    if (!declaredSingle(op) || !read.every((u) => floatUse(u, r, calls) || u?.opcode === 'ret')) {
+    if (!declaredSingle(op) || !read.every((u) => floatUse(u, r, calls) || floatRet(u))) {
       throw new RaiseUnsupportedError(
         `cannot lift '${fn.name}': '${String(op.attrs.target)}' is declared to return ${spelled}, which this ` +
           'target hands back as bits in a general register, and its result is read here as something ' +
@@ -223,34 +266,39 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
   // helper's result or a declared single's.
   const madeFloat = (v: Value) => {
     const d = def.get(v);
-    return d !== undefined && (returned.has(d) || (calls.has(d) && sidesOf(d).result));
+    return d === undefined
+      ? returnedArgument(v, calls) && argument(v, calls)
+      : returned.has(d) || (calls.has(d) && sidesOf(d).result);
   };
-  const rets = fn.blocks.flatMap((b) => b.ops.filter((op) => op.opcode === 'ret' && op.operands.length > 0));
   if (rets.some((r) => r.operands.some(madeFloat)) && !rets.every((r) => r.operands.every(madeFloat))) {
     throw new RaiseUnsupportedError(
       `cannot lift '${fn.name}': it returns a float on one path, and another return of this function hands ` +
         'back an integer word, which C would convert to that float',
     );
   }
-  // A DECLARED DOUBLE HAS NO FALLBACK. A helper the fold refuses stays a call for
-  // `refuseUnmodelledHelpers` to gap, but an ordinary callee is no helper, and its two words handed
-  // on as integers are the wrong number — so a double parameter nothing here can hand a double
-  // refuses the function. It counts arguments as the source does: an `sret` call's operand 0, the
-  // hidden pointer, is not one.
+  // A DECLARED DOUBLE OR FLOAT HAS NO FALLBACK. A helper the fold refuses stays a call for
+  // `refuseUnmodelledHelpers` to gap, but an ordinary callee is no helper, and its words handed on
+  // as integers are the wrong number, C converting them at the call — so a floating parameter
+  // nothing here can hand a float of its width refuses the function. It counts arguments as the
+  // source does: an `sret` call's operand 0, the hidden pointer, is not one.
   for (const [op, at] of consumers) {
-    for (const i of at) {
+    for (const [i, width] of at) {
       if (!source(op.operands[i], calls)) {
         const arg = i + (op.attrs.sret === true ? 0 : 1);
+        const single = width === 32;
         throw new RaiseUnsupportedError(
           `cannot lift '${fn.name}': argument ${arg} of the call to '${String(op.attrs.target)}' ` +
-            'is a `double` its callee declares, and its two words are not a double this function was ' +
-            'handed, a runtime helper returned or a finite literal staged, moved whole',
+            (single
+              ? 'is a `float` its callee declares, and its word is not a float this function was handed or ' +
+                'a runtime helper returned, moved whole'
+              : 'is a `double` its callee declares, and its two words are not a double this function was ' +
+                'handed, a runtime helper returned or a finite literal staged, moved whole'),
         );
       }
     }
   }
   if (!sites.length && !consumers.size && !returned.size) {
-    return false;
+    return rewrote;
   }
   const floatOf = new Map<Value, Value>();
   const float = (bits: number) => mkValue(bits > 32 ? T.f64() : T.f32());
@@ -302,7 +350,7 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
     }
   }
   for (const [op, at] of consumers) {
-    at.forEach((i) => retype(op.operands[i], 64));
+    at.forEach((width, i) => retype(op.operands[i], width));
   }
   const folded = new Map<Op, Op>();
   for (const [op, found] of tests) {
@@ -461,4 +509,25 @@ function compareTests(
     return null;
   }
   return found.length > 0 ? found : null;
+}
+
+/** The argument words a function's OWN declaration types as anything but a float, by entry slot (the
+ *  frontends mint every slot below the highest one read, so slot k is word k: `isArgumentPair`) —
+ *  empty where it states no typed list, or one this cannot lay out word for word (a by-value struct,
+ *  an unsized spelling, a hidden struct-return pointer ahead of it). */
+function ownIntegerWords(self: FnProto | undefined, target: TargetDescription): ReadonlySet<number> {
+  const out = new Set<number>();
+  const laid =
+    Array.isArray(self?.params) && !declaresAggregateReturn(self) ? declaredCallArgs(self, target) : undefined;
+  let word = 0;
+  laid?.widths.forEach((w, i) => {
+    const words = Math.max(1, Math.ceil(w / 32));
+    if (!laid.floats.has(i)) {
+      for (let k = 0; k < words; k++) {
+        out.add(word + k);
+      }
+    }
+    word += words;
+  });
+  return out;
 }

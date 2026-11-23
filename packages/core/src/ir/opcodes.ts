@@ -160,12 +160,14 @@ export const OPCODES = {
   fconst: { operands: 0, results: 1, requiredAttrs: ['bits'] },
   // The CROSSINGS between a float and an integer, C's conversions: `fptosi`/`fptoui` truncate toward
   // zero into a signed or unsigned integer of the result's width (32 or 64), `sitofp` converts a
-  // signed one, `fpext`/`fptrunc` move between the precisions. The only ops a float and an integer
-  // meet in (ir/verify.ts). No `uitofp`: no compiler here converts an unsigned integer in one step
-  // (agbcc open-codes it around `__floatsisf`), so it would be an opcode with no producer.
+  // signed one and `uitofp` an unsigned word, `fpext`/`fptrunc` move between the precisions. The only
+  // ops a float and an integer meet in (ir/verify.ts). No compiler here converts an unsigned word in
+  // one step: `uitofp` is agbcc's open-coding around `__floatsisf`, read whole
+  // (raise/unsigned-float.ts).
   fptosi: { operands: 1, results: 1 },
   fptoui: { operands: 1, results: 1 },
   sitofp: { operands: 1, results: 1 },
+  uitofp: { operands: 1, results: 1 },
   fpext: { operands: 1, results: 1 },
   fptrunc: { operands: 1, results: 1 },
   // The float COMPARES, a 0/1 integer out of two floats of one type. Ten and not six, because
@@ -328,7 +330,7 @@ export const FLOAT_OPS: ReadonlySet<string> = new Set(['fadd', 'fsub', 'fmul', '
 
 /** The conversions out of a float into an integer, and into a float out of an integer. */
 export const FLOAT_TO_INT: ReadonlySet<string> = new Set(['fptosi', 'fptoui']);
-export const INT_TO_FLOAT: ReadonlySet<string> = new Set(['sitofp']);
+export const INT_TO_FLOAT: ReadonlySet<string> = new Set(['sitofp', 'uitofp']);
 /** The conversions between the two precisions, each named by the width it converts from and to. */
 export const FLOAT_RESIZE: Readonly<Record<string, { from: 32 | 64; to: 32 | 64 }>> = {
   fpext: { from: 32, to: 64 },

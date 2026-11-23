@@ -6,6 +6,8 @@ import { type IrType, type StructField, T } from './ir/types';
 import {
   type AggregateLayout,
   type AggregateMember,
+  type DeclaredArgs,
+  type FloatWidth,
   type FnProto,
   type Prototypes,
   STANDARD_SIGNATURES,
@@ -355,9 +357,7 @@ export interface ByValueArg {
 }
 
 /** Where a declaration's by-value structs travel (`byValueCallArgs`), or why that is not known. */
-type ByValueLayout =
-  | { widths: readonly number[]; doubles: ReadonlySet<number>; byValue: readonly ByValueArg[] }
-  | { refused: string; param: number };
+type ByValueLayout = (DeclaredArgs & { byValue: readonly ByValueArg[] }) | { refused: string; param: number };
 
 /** THE ARGUMENT WORDS OF A DECLARATION WITH A STRUCT PASSED BY VALUE, where the target passes one
  *  in consecutive argument words (`compilerBehaviors.byValueAggregateArgWords`) and the declaration
@@ -370,7 +370,7 @@ export function byValueCallArgs(
   p: FnProto | undefined,
   target: TargetDescription,
   hidden = 0,
-): { widths: readonly number[]; doubles: ReadonlySet<number>; byValue: readonly ByValueArg[] } | undefined {
+): (DeclaredArgs & { byValue: readonly ByValueArg[] }) | undefined {
   const laid = layOutByValue(p, target, hidden);
   return laid === undefined || 'refused' in laid ? undefined : laid;
 }
@@ -402,7 +402,7 @@ function layOutByValue(p: FnProto | undefined, target: TargetDescription, hidden
     return { refused: 'this target states no rule for which argument words carry one', param: first };
   }
   const widths: number[] = [];
-  const doubles = new Set<number>();
+  const floats = new Map<number, FloatWidth>();
   const byValue: ByValueArg[] = [];
   for (const [i, t] of params.entries()) {
     if (paramClassOf(p, params, i) === 'by-value') {
@@ -449,10 +449,11 @@ function layOutByValue(p: FnProto | undefined, target: TargetDescription, hidden
         param: first,
       };
     }
-    if (one.doubles.size > 0) {
-      doubles.add(widths.length);
+    const f = one.floats.get(0);
+    if (f !== undefined) {
+      floats.set(widths.length, f);
     }
     widths.push(...one.widths);
   }
-  return { widths, doubles, byValue };
+  return { widths, floats, byValue };
 }

@@ -3698,6 +3698,13 @@ function structureRanked(
       const w = intWidth(d.results[0].type) === WIDE_BITS ? WIDE_BITS : 32;
       return { k: 'cast', to: T.int(w, d.opcode === 'fptosi'), e: e(d.operands[0]) };
     }
+    // The unsigned conversion casts its word to `u32` unless it already renders as one.
+    if (d.opcode === 'uitofp') {
+      const x = e(d.operands[0]);
+      const own = ['var', 'cast'].includes(x.k) ? exprCType(x, vtEnv) : undefined;
+      const unsigned = own?.kind === 'int' && own.width === 32 && !own.signed;
+      return { k: 'cast', to: d.results[0].type, e: unsigned ? x : { k: 'cast', to: T.u(32), e: x } };
+    }
     if (INT_TO_FLOAT.has(d.opcode)) {
       const x = e(d.operands[0]);
       const own = ['var', 'postincr', 'cast', 'index', 'field'].includes(x.k) ? exprCType(x, vtEnv) : undefined;

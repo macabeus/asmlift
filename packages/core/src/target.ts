@@ -1138,6 +1138,18 @@ export interface CallBehaviors {
   // load decides only where this is `false`. ABSENT ⇒ unmeasured, and read as `true`, which only
   // refuses more.
   discardedReadMayFillArgRegister?: boolean;
+  // DOES THIS COMPILER, AT THESE FLAGS, DELETE A RUNTIME HELPER CALL WHOSE RESULT NOTHING READS?
+  // agbcc at `-O1` and `-O2` emits a libcall as a const call (optabs.c `emit_libcall_block`), which
+  // flow's dead-code pass deletes with its unused value: COMPILED, `int s = a / b; g(); return 0;`
+  // and `float s = a * b; g(); return 0;` are `bl g` alone, where `-O0` keeps `bl __divsi3` /
+  // `bl __mulsf3`. So at those levels a helper's word result still in the return register at a
+  // following call whose arity is guessed, and read by nothing but such calls, IS that call's first argument
+  // (`g(a / b)` is `bl __divsi3; bl g`): frontend/call-plan.ts hands it on as one. A FLAG fact on a
+  // description: `targetFor` clears it at `-O0`.
+  //
+  // ABSENT ⇒ a helper's unread result says nothing about the call after it, which the trim reads
+  // as the call's own leftover (frontend/call-arity.ts `trimClobberedCallArgs`).
+  deletesDeadLibcalls?: boolean;
 }
 
 /** What the compiler does with NARROW VALUES and MEMORY READS: how a narrow parameter or store constant shows in the
@@ -1692,6 +1704,8 @@ export const ARMV4T_AGBCC: TargetDescription = {
     pollStoreMotion: 'sinks',
     // under `-O2`'s alias sets; cleared below it (`strictAliasingAt`)
     strictAliasing: true,
+    // at `-O1` and `-O2`; cleared at `-O0` (`deletesDeadLibcallsAt`)
+    deletesDeadLibcalls: true,
     coalesceLoopInit: false,
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,
@@ -2462,6 +2476,14 @@ export function keepsLoopInvariantReadsAt(family: FlagFamily, level: string | un
   return n === undefined || Number(n) < (family === 'mwcc' ? 3 : family === 'ido' ? 2 : 1);
 }
 
+/** Does agbcc at optimisation level `level` (the profile's `O` slot) delete a libcall whose result
+ *  nothing reads (`compilerBehaviors.deletesDeadLibcalls`)? At `-O1` and above and at `-Os` (flow's
+ *  dead-code pass runs whenever `optimize` is set); not at `-O0`. A profile with no `O` slot is
+ *  `-O0`. */
+export function deletesDeadLibcallsAt(level: string | undefined): boolean {
+  return level !== undefined && (level === 's' || Number(/^\d+/.exec(level)?.[0] ?? 0) >= 1);
+}
+
 /** Does agbcc at optimisation level `level` (the profile's `O` slot) keep alias sets
  *  (`compilerBehaviors.strictAliasing`)? From `-O2`, and at `-Os`, which forces `optimize` to 2
  *  (toplev.c:3576-3577, :3616); not at `-O0` or `-O1`. `flag` is the `-fstrict-aliasing` slot, which
@@ -2499,6 +2521,10 @@ export function targetFor(toolchain: ToolchainId, cflags: readonly string[]): Re
     !strictAliasingAt(profile.slots.O, profile.slots['-fstrict-aliasing'])
   ) {
     const { strictAliasing: _set, ...behaviors } = target.compilerBehaviors;
+    target = { ...target, compilerBehaviors: behaviors };
+  }
+  if (target.compilerBehaviors.deletesDeadLibcalls === true && !deletesDeadLibcallsAt(profile.slots.O)) {
+    const { deletesDeadLibcalls: _set, ...behaviors } = target.compilerBehaviors;
     target = { ...target, compilerBehaviors: behaviors };
   }
   if (profile.slots['-fshort-enums'] === 'on') {

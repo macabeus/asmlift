@@ -27,11 +27,13 @@ import {
   returnsInMemory,
   returnsWithoutHiddenPointer,
 } from '../aggregate';
-import { type Block, type Op, REGISTER_STRUCT, type Value, calleeName, mkOp, mkValue } from '../ir/core';
+import { type Block, FLOATS_ATTR, type Op, REGISTER_STRUCT, type Value, calleeName, mkOp, mkValue } from '../ir/core';
 import { qualified } from '../ir/discipline';
 import { OPCODES, type OpSig } from '../ir/opcodes';
 import { type IrType, T, structSpelling, typeToString } from '../ir/types';
 import {
+  type DeclaredArgs,
+  type FloatWidth,
   type FnProto,
   type ParamClass,
   type Prototypes,
@@ -89,8 +91,8 @@ interface StructReturn {
 export interface DeclaredCall {
   /** each argument's width, in bits, a hidden struct-return pointer first */
   readonly widths: readonly number[];
-  /** the indices into `widths` that are a `double` */
-  readonly doubles: ReadonlySet<number>;
+  /** the indices into `widths` that are floating, each to its width: a `double`'s 64, a `float`'s 32 */
+  readonly floats: ReadonlyMap<number, FloatWidth>;
   /** the declared parameter count, a hidden pointer aside */
   readonly params: number;
   readonly returned?: StructReturn | 'register';
@@ -113,8 +115,8 @@ export interface CallPlan {
   /** each argument's width, a hidden pointer first; null when nothing sizes them, so `lower`
    *  guesses */
   readonly widths: readonly number[] | null;
-  /** the indices into `widths` its declaration types `double` */
-  readonly doubles: ReadonlySet<number>;
+  /** the indices into `widths` its declaration types floating, each to its width */
+  readonly floats: ReadonlyMap<number, FloatWidth>;
   /** the structs its declaration passes by value, by their words in `widths` */
   readonly byValue?: readonly ByValueArg[];
   readonly returns:
@@ -332,6 +334,9 @@ export function callDeclarations(
   const pairCallee = new Map<Value, string>();
   /** the value each call to a callee declared void left in the return register */
   const voidResults = new Set<Value>();
+  /** each word a runtime helper handed back in the return register: a pure function's result, which
+   *  the compiler deletes with its call where nothing reads it (`compilerBehaviors.deletesDeadLibcalls`) */
+  const helperResults = new Set<Value>();
   // The compiler's own runtime, off the TARGET (runtime-helpers.ts): which helpers a compiler
   // emits is a compiler fact, and reading one table for every ISA is how a scan for `__*di3`
   // reports zero on a compiler whose runtime spells them `__ll_*`.
@@ -483,8 +488,8 @@ export function callDeclarations(
   };
   // A FLOATING PARAMETER THE DECLARATION STATES BUT NOTHING LAYS OUT REFUSES; IT IS NOT GUESSED.
   // Where the target has an FPU, `plan` refuses every floating parameter first (it travels in the
-  // FPU's registers). Where it has none — agbcc — a `double` is laid out in general words
-  // (`TargetDescription.doubleArgWords`) and a `float` or `long double` is not (`proto.ts`
+  // FPU's registers). Where it has none — agbcc — a `double` and a `float` are laid out in general
+  // words (`TargetDescription.doubleArgWords`, and no `fpu`) and a `long double` is not (`proto.ts`
   // `declaredCallArgs`), so the call would fall to the arity guess, which is wrong both ways: a
   // trailing argument passed through unchanged is dropped (`int g(int, float)`: `g(a + 1, b)` as
   // `g(a0 + 1)`), and a register left over from the caller is counted (`float h(float)`: `h(v)` as
@@ -521,8 +526,7 @@ export function callDeclarations(
     const own = known(prototypes, callee);
     const returned = declaresAggregateReturn(own) ? structReturnOf(name, target, callee, own!, fail) : undefined;
     const hidden = returned === undefined || returned === 'register' ? 0 : 1;
-    const declared:
-      { widths: readonly number[]; doubles: ReadonlySet<number>; byValue?: readonly ByValueArg[] } | undefined =
+    const declared: (DeclaredArgs & { byValue?: readonly ByValueArg[] }) | undefined =
       declaredCallArgs(declarationOf(callee), target) ?? byValueCallArgs(declarationOf(callee), target, hidden);
     const params = declared?.widths;
     if (params === undefined) {
@@ -561,7 +565,7 @@ export function callDeclarations(
       );
     }
     const widths = hidden === 0 ? params : [32, ...params];
-    const doubles = new Set([...declared!.doubles].map((i) => i + hidden));
+    const floats = new Map([...declared!.floats].map(([i, w]) => [i + hidden, w]));
     const byValue = (declared!.byValue ?? []).map((b) => ({
       ...b,
       word: b.word + hidden,
@@ -577,7 +581,7 @@ export function callDeclarations(
     }
     return {
       widths,
-      doubles,
+      floats,
       params: declared!.widths.length - byValue.reduce((n, b) => n + b.words - 1, 0),
       ...(returned === undefined ? {} : { returned }),
       ...(byValue.length === 0 ? {} : { byValue }),
@@ -687,7 +691,7 @@ export function callDeclarations(
     return {
       ...(floatReturn === undefined ? {} : { floatReturn }),
       widths: wide?.params ?? declared?.widths ?? null,
-      doubles: declared?.doubles ?? new Set(),
+      floats: declared?.floats ?? new Map(),
       ...(declared?.byValue === undefined ? {} : { byValue: declared.byValue }),
       returns: voided
         ? { kind: 'void' }
@@ -940,7 +944,7 @@ export function callDeclarations(
         ? plan(callee!)
         : {
             widths: bound < 0 ? null : Array.from({ length: bound }, () => 32),
-            doubles: new Set(),
+            floats: new Map(),
             returns: { kind: 'word' },
             clobbers: callClobbers,
             declaredVoid: false,
@@ -1312,11 +1316,20 @@ export function callDeclarations(
     }
     const sret = returns.kind === 'memory-struct' ? returns.type : undefined;
     const res = mkValue(sret ?? T.unk(returns.kind === 'pair' ? 64 : 32));
+    if (
+      callee !== undefined &&
+      returns.kind === 'word' &&
+      lookupHelper(target.runtimeHelpers, callee)?.returns === 32
+    ) {
+      helperResults.add(res);
+    }
     // A DECLARED `double` IS TWO WORDS THAT ARE NOT A `long long`: its first word holds the
     // sign and exponent (`TargetDescription.doubleArgWords`), so the pair read as an integer
     // spells a different number — `g(1.5)` as `g(1073217536, 0)`. The call names the operands
-    // that are doubles, and `raise/floathelpers.ts` retypes each or refuses it.
-    const doubles = p.doubles.size ? [...p.doubles] : undefined;
+    // that are floating as (operand, width) pairs (`FLOATS_ATTR`), and `raise/floathelpers.ts`
+    // retypes each or refuses it. A declared `float` is one word that is no integer either, named
+    // the same way at 32.
+    const floats = p.floats.size ? [...p.floats].flat() : undefined;
     // A STRUCT PASSED BY VALUE IS ITS WORDS HERE, one operand each, and the call names them as
     // (first operand, words) pairs: `foldByValueArgs` folds them into the one object passed whole
     // once the function is lifted, or refuses.
@@ -1328,7 +1341,7 @@ export function callDeclarations(
         ...(callee !== undefined ? { target: callee } : { indirect: true }),
         ...(sret === undefined ? {} : { sret: true }),
         ...(returns.kind === 'register-struct' && returns.image ? { [REGISTER_STRUCT]: true } : {}),
-        ...(doubles === undefined ? {} : { doubles }),
+        ...(floats === undefined ? {} : { [FLOATS_ATTR]: floats }),
         ...(p.floatReturn === undefined ? {} : { floatReturn: p.floatReturn }),
         ...(byValue === undefined ? {} : { byValueWords: byValue }),
       },
@@ -1354,6 +1367,17 @@ export function callDeclarations(
     // as `g(); p();`, which compiles to the same bytes. Kept, it lifts as `p(g())`, which passes what
     // the machine passes — unless `g` is declared void, and its result names nothing.
     //
+    // A NAMED CALL IS PASSED A RUNTIME HELPER'S RESULT NOTHING BUT GUESSED CALLS READS, where the
+    // compiler deletes a helper call whose result is dead (`compilerBehaviors.deletesDeadLibcalls`,
+    // agbcc from `-O1`): the call is there, so something read its result, and the only readers left
+    // are calls, which find it in argument 0. `g(a / b)` is `bl __divsi3; bl g`, and the trim would
+    // otherwise read it as `g();` with the division deleted. EVERY such call is passed it, not one of
+    // them: `if (c) g(s); else h();` and `if (c) g(s); else h(s);` are the same bytes, so nothing in
+    // the asm picks a call, and the reading must not depend on the order the trim takes the sites in
+    // (`SsaBuilder.readByGuessedCallsAlone`); `g(s); h(s)`, with `s` copied back into r0 for `h`, is
+    // read as written. A result something else also reads (`s = a / b; g(); return s;`, the same
+    // bytes as `g(s)`) stays the trim's to read.
+    //
     // …AND WHAT THE TRIM CUTS IS LEFT OUT TOO, so the frontend is asked the `leftOut` question of it
     // as well: a guess of four the check above passed can still lose a frame address in r2 when
     // the trim cuts it back to the run below an unfresh r1 (`v = f64(); g(v, &s)` with neither
@@ -1364,7 +1388,11 @@ export function callDeclarations(
         call,
         bi,
         target,
-        indirect === undefined ? undefined : (r) => !voidResults.has(r),
+        indirect !== undefined
+          ? (r) => !voidResults.has(r)
+          : target.compilerBehaviors.deletesDeadLibcalls === true
+            ? (r) => helperResults.has(r) && ssa.readByGuessedCallsAlone(r)
+            : undefined,
         leftOut === undefined
           ? undefined
           : (cut, kept) =>

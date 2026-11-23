@@ -29,6 +29,7 @@ import { demandedBits } from '../ir/bits';
 import {
   type Block,
   CALL_RETURN_OBJECT,
+  FLOATS_ATTR,
   type Fn,
   OWN_RETURN_OBJECT,
   type Op,
@@ -208,7 +209,7 @@ export function liftRegisterStructCalls(
       call.attrs = {
         ...attrs,
         sret: true,
-        ...shifted('doubles', 1),
+        ...shifted(FLOATS_ATTR, 2),
         ...shifted('byValue', 2),
         ...shifted('byValueWords', 2),
       };

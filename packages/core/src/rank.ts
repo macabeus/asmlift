@@ -813,6 +813,7 @@ export function enumerateCandidates(
         sharedLiftFoldedStore = true;
       },
     },
+    ownContext: ownContext.ownContextProto,
   });
   recoverTypes(sharedLift);
   const ptrIdx = new Set<number>(
@@ -880,6 +881,7 @@ export function enumerateCandidates(
           seen.foldedStore = true;
         },
       },
+      ownContext: ownContext.ownContextProto,
     });
     return seen;
   };
@@ -2421,6 +2423,7 @@ export function enumerateCandidates(
                 },
               },
               displaced: { keepStores: liftSetting.keepStores },
+              ownContext: ownContext.ownContextProto,
             },
           );
         } catch (e) {

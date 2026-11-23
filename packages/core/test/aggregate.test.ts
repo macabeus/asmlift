@@ -197,6 +197,20 @@ describe('a struct passed by value in argument words', () => {
     expect(laid?.byValue[0].type).toMatchObject({ kind: 'struct', name: 'A', size: 12, declared: 'struct A' });
   });
 
+  // a floating parameter beside it is named by its word, at its width, as `declaredCallArgs` names one
+  test('names a float or a double beside it at its width', () => {
+    const W = { kind: 'struct' as const, members: [{ name: 'x', type: 'u32' }] };
+    const f = byValueCallArgs({ params: ['struct W', 'float'], byValueLayouts: { 0: W } }, ARMV4T_AGBCC);
+    expect(f?.widths).toEqual([32, 32]);
+    expect([...f!.floats]).toEqual([[1, 32]]);
+    const d = byValueCallArgs({ params: ['float', 'struct W', 'double'], byValueLayouts: { 1: W } }, ARMV4T_AGBCC);
+    expect(d?.widths).toEqual([32, 32, 64]);
+    expect([...d!.floats]).toEqual([
+      [0, 32],
+      [2, 64],
+    ]);
+  });
+
   test('a typedef name it is listed under is its tag', () => {
     const laid = byValueCallArgs(
       { params: ['A_t'], byValueParams: [0], byValueLayouts: { 0: PASSED_A } },

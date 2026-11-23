@@ -14,6 +14,7 @@ const BEHAVIORS: Record<string, CompilerBehaviors> = {
   ARMV4T_AGBCC: {
     pollStoreMotion: 'sinks',
     strictAliasing: true,
+    deletesDeadLibcalls: true,
     // ControlFlowBehaviors
     coalesceLoopInit: false,
     preserveDivergentBranchSense: true,

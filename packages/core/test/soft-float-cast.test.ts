@@ -46,6 +46,13 @@ describe('the integer side is any integer', () => {
 
   // A cast does not promote its operand, so `(float)` of an `unsigned char` is the unsigned
   // conversion, which agbcc open-codes: the zero-extended byte is converted as the int it fits.
+  // agbcc has no unsigned-to-float helper: `(float)u` is open-coded around `__floatsisf`, the
+  // negative half halved and doubled through `__addsf3` across a branch, and read whole
+  // (raise/unsigned-float.ts; its near misses are soft-float-runtime.test.ts's).
+  test('an unsigned integer into a float, which agbcc open-codes', () => {
+    expect(lift('u2f')).toBe('float u2f(s32 a0) {\n    return (float)(u32)a0;\n}\n');
+  });
+
   test('a narrow unsigned integer is converted as a signed int', () => {
     expect(lift('uc2f')).toBe('float uc2f(u8 a0) {\n    return (float)(s32)a0;\n}\n');
   });
@@ -60,24 +67,19 @@ describe('the integer side is any integer', () => {
   test('a loaded integer is converted as a signed one', () => {
     expect(lift('gi2f')).toBe('float gi2f(void) {\n    return (float)(s32)gI;\n}\n');
   });
+
+  // agbcc -O2 deletes a helper call whose result nothing reads, so the conversion's result still in
+  // r0 at the guessed call after it is that call's argument (target.ts
+  // `deletesDeadLibcalls`, frontend/call-plan.ts), and the conversion is kept.
+  test('an integer result handed to the call after it', () => {
+    expect(lift('f2ipass')).toBe('s32 f2ipass(float a0) {\n    s32 v0;\n    v0 = (s32)a0;\n    return g1(v0);\n}\n');
+  });
 });
 
 describe('what refuses', () => {
   // `x` is read as a word too, so it is no float the ABI handed over whole.
   test('a float side the function also reads as a word', () => {
     expect(() => lift('fbits')).toThrow("no model for the runtime helper '__fixsfsi'");
-  });
-
-  // The guessed call after the conversion does not count r0, so the result is read by nothing;
-  // folded, `dce` would delete the conversion and print `return g1();`.
-  test('an integer result nothing reads', () => {
-    expect(() => lift('f2ipass')).toThrow("no model for the runtime helper '__fixsfsi'");
-  });
-
-  // agbcc has no unsigned-to-float helper: `(float)u` is open-coded around `__floatsisf`, whose
-  // result is halved and doubled through `__addsf3` across a branch.
-  test('an unsigned integer into a float, which agbcc open-codes', () => {
-    expect(() => lift('u2f')).toThrow("no model for the runtime helper '__floatsisf'");
   });
 });
 

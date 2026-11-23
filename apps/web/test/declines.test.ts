@@ -1083,6 +1083,7 @@ describe('a class may not outlive the message it classifies', () => {
     ['wide-call-arg', 'half of a 64-bit value', 'packages/core/src/frontend/call-plan.ts'],
     ['wide-call-arg', 'the other word of a 64-bit return', 'packages/core/src/frontend/ppc.ts'],
     ['wide-call-arg', 'is a `double` its callee declares', 'packages/core/src/raise/floathelpers.ts'],
+    ['float-call-arg', 'is a `float` its callee declares', 'packages/core/src/raise/floathelpers.ts'],
     ['opaque-ops', 'unmodelled effect instruction', 'packages/core/src/frontend/opaque.ts'],
     ['opaque-ops', 'no lowering for op', 'packages/core/src/structure/structure.ts'],
     ['loop-shapes', 'unrecovered back-edge', 'packages/core/src/structure/structure.ts'],
@@ -1303,6 +1304,9 @@ describe('the classifier is measured against the messages core can throw, not on
     // thumb.ts's refusals of a function-scope static read from a literal pool open with the pool
     // reader's own prefix, which `pool-word-shape` is keyed on; the static is the answer.
     'tu-scoped-name > pool-word-shape',
+    // floathelpers.ts's declared-floating-argument refusal is one throw with a `double` arm and a
+    // `float` arm, so the harvested template holds both; a published marker prints one.
+    'wide-call-arg > float-call-arg',
   ];
 
   test('every core message more than one class matches is attributed by a listed ordering', () => {

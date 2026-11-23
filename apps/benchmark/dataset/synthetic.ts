@@ -2861,11 +2861,15 @@ export const SYNTHETIC: SynthSpec[] = [
   })),
   // agbcc's single-precision runtime (core runtime-helpers.ts AGBCC_RUNTIME_HELPERS): `__negsf2`
   // folds to a negation, `__fixsfsi` to the cast (`fconv`); and a helper whose result reaches only a
-  // GUESSED call declines. That call does not count r0, which the helper wrote, so `g1(a * b)`
-  // reads `__mulsf3(); return g1();` and, folded, `return g1();`, the product deleted
-  // (raise/floathelpers.ts). The conversions to and from a long long are the 64-bit side of a
-  // helper; `u2f` has none, agbcc open-coding `(float)u` around `__floatsisf`, and declines. agbcc
-  // only: the other toolchains have a hardware FPU.
+  // GUESSED call is that call's argument, agbcc from -O1 deleting a helper call nothing reads (core
+  // target.ts `deletesDeadLibcalls`): `divcall` lifts `gv(a0 / a1)`. `fcall`'s product handed to an
+  // undeclared `g1` still declines: an undeclared callee is handed a `float` promoted to a `double`,
+  // and the candidate declares a callee only from the prototypes it is given, so nothing prints the
+  // `float g1(float)` the bytes need (`fcallarg` is the row with it declared). The conversions to
+  // and from a long long are the 64-bit side of a helper; `u2f` has none, agbcc open-coding
+  // `(float)u` around `__floatsisf` (gcc/optabs.c:3591-3622: the negative half halved with its low
+  // bit kept, converted and doubled through `__addsf3`), which the lift reads whole as
+  // `(float)(u32)x` (raise/unsigned-float.ts). agbcc only: the other toolchains have a hardware FPU.
   {
     sym: 'fneg',
     src: 'float fneg(float a){ return -a; }',
@@ -2901,6 +2905,14 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'float u2f(unsigned);',
   },
+  // Two conversions chain their diamonds, the second one's test in the first one's join.
+  {
+    sym: 'u2two',
+    src: 'float u2two(unsigned a,unsigned b){ return (float)a + (float)b; }',
+    features: ['float', 'cast', 'int-to-float', 'unsigned', 'arithmetic'],
+    toolchains: ['agbcc'],
+    ctx: 'float u2two(unsigned,unsigned);',
+  },
   // A byte compared with a float is promoted to `int` and converted with `__floatsisf`, which the lift
   // spells `(float)(s32)a0`: a bare `(float)a0` of the `u8` converts unsigned, which agbcc open-codes.
   // agbcc only: on O32 the float after an int arrives in `a1` (an `mtc1` bit cast the lift refuses),
@@ -2918,6 +2930,69 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['float', 'arithmetic'],
     toolchains: ['agbcc'],
     ctx: 'float fcall(float,float);',
+  },
+  {
+    sym: 'divcall',
+    src: 'void gv();\nvoid divcall(int a,int b){ gv(a/b); }',
+    features: ['arithmetic', 'signed'],
+    toolchains: ['agbcc'],
+    ctx: 'void divcall(int,int);',
+  },
+  // Two guessed calls the result reaches on exclusive paths: the bytes are those of `hv(s)` too, so
+  // nothing picks one, and both are passed it (core frontend/ssa.ts `readByGuessedCallsAlone`).
+  {
+    sym: 'divsel',
+    src: 'void gv(); void hv();\nvoid divsel(int a,int b,int c){ int s=a/b; if (c) gv(s); else hv(); }',
+    features: ['arithmetic', 'signed', 'branch'],
+    toolchains: ['agbcc'],
+    ctx: 'void divsel(int,int,int);',
+  },
+  // `fcall` with its callee declared: agbcc hands a declared `float` parameter its next one general
+  // word (core proto.ts `declaredCallArgs` `floats`), here r0, which holds the difference.
+  {
+    sym: 'fcallarg',
+    src: 'float g1(float);\nfloat fcallarg(float a,float b){ return g1(a-b); }',
+    features: ['float', 'arithmetic'],
+    toolchains: ['agbcc'],
+    ctx: 'float g1(float); float fcallarg(float,float);',
+    proto: { g1: { params: ['float'], returns: 'float' } },
+  },
+  // …spelled through a project's typedef of `float` (core proto.ts `floatingSpelling`), which the
+  // candidate declares with the keyword: a candidate's prelude has no `f32`.
+  {
+    sym: 'fcallf32',
+    src: 'typedef float f32;\nf32 g2(f32);\nf32 fcallf32(f32 a,f32 b){ return g2(a-b); }',
+    features: ['float', 'arithmetic'],
+    toolchains: ['agbcc'],
+    ctx: 'typedef float f32; f32 g2(f32); f32 fcallf32(f32,f32);',
+    proto: { g2: { params: ['f32'], returns: 'f32' } },
+  },
+  // …and beside a struct passed by value, the word after the struct's (core aggregate.ts
+  // `byValueCallArgs` carries `floats` as `declaredCallArgs` does).
+  {
+    sym: 'bvfloat',
+    src: 'struct W { u32 x; };\nvoid takeWF(struct W w, float f);\nextern struct W gW;\nvoid bvfloat(float f){ takeWF(gW, f); }',
+    features: ['float', 'global', 'multi-arg'],
+    toolchains: ['agbcc'],
+    ctx: 'struct W { u32 x; };\nvoid takeWF(struct W w, float f);\nvoid bvfloat(float f);',
+    proto: {
+      takeWF: {
+        params: ['struct W', 'float'],
+        byValueLayouts: { 0: { kind: 'struct', members: [{ name: 'x', type: 'u32' }] } },
+        returnsVoid: true,
+      },
+    },
+  },
+  // A function whose own declaration types an argument an integer is handed no float, whatever the
+  // callee it passes the word to takes: `bl pf` alone is also `void fpun(float x){ pf(x); }`, which
+  // conflicts with the header. A correct decline, pinned (core raise/floathelpers.ts `ownIntegerWords`).
+  {
+    sym: 'fpun',
+    src: 'void pf(float);\nvoid fpun(int x){ pf(*(float *)&x); }',
+    features: ['float', 'cast'],
+    toolchains: ['agbcc'],
+    ctx: 'void pf(float); void fpun(int);',
+    proto: { pf: { params: ['float'], returnsVoid: true }, fpun: { params: ['int'], returnsVoid: true } },
   },
   {
     sym: 'dadd',

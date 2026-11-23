@@ -368,17 +368,17 @@ describe('a declared callee whose parameters are not laid out does not lose its 
   const FJ = 'fj:\n\tpush\t{lr}\n\tadd\tr0, #0x1\n\tbl\tg\n\tpop\t{r1}\n\tbx\tr1\n';
   const lift = (prototypes: Prototypes) => decompile('fj', FJ, ARMV4T_AGBCC, { prototypes }).source;
 
-  // agbcc has no FPU, and lays out a `double` in general words but not a `float` or a `long double`:
-  // the guess would lift `int g(int, float);`'s call as `g(a0 + 1)`, and `float h(float);`'s `h(v)`
-  // as `h(a1, a1)`
-  test('a parameter declared float or long double refuses on agbcc', () => {
-    for (const t of ['float', 'f32', 'long double']) {
-      expect(() => lift({ g: { params: ['s32', t], returns: 's32' } })).toThrow(
-        new RegExp(`\`g\` is declared to take '${t}' as its parameter 2, which this target passes in general`),
-      );
-    }
-    // CONTROL: a `double` is laid out, as two words
+  // agbcc has no FPU, and lays out a `double` and a `float` in general words, a project typedef of
+  // one (`f32`) as the type it stands for, but not a `long double`: the guess would lift
+  // `int g(int, long double);`'s call as `g(a0 + 1)`
+  test('a parameter declared long double refuses on agbcc', () => {
+    expect(() => lift({ g: { params: ['s32', 'long double'], returns: 's32' } })).toThrow(
+      /`g` is declared to take 'long double' as its parameter 2, which this target passes in general/,
+    );
+    // CONTROL: a `double` is laid out, as two words, and a `float` as one, spelled either way
     expect(lift({ g: { params: ['s32', 'double'], returns: 's32' } })).toContain('g(a0 + 1, ');
+    expect(lift({ g: { params: ['s32', 'float'], returns: 's32' } })).toContain('g(a0 + 1, ');
+    expect(lift({ g: { params: ['s32', 'f32'], returns: 's32' } })).toContain('g(a0 + 1, ');
   });
 
   // `void h(int, Foo);` with `Foo` unresolved: the list is unsized, the guess stands in, and it
