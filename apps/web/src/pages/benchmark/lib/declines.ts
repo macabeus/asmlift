@@ -516,8 +516,9 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // A STRUCT LOCAL'S FLOATING MEMBER READ AS ITS INTEGER BITS (`structure/structure.ts`): a
     // declared struct's frame object — a call's return storage, a struct passed by value — whose
     // float member a word load reads. The only spelling here is `*(s32 *)&s`, which C converts
-    // wherever a float is read, so the read declines (gcc 2.7.2's `lw` off a struct returned
-    // through memory, `sretfl`). What it names to build is a float-typed member read.
+    // wherever a float is read, so the read declines unless every reader stores the bits into an
+    // integer lvalue the lift types (`floatBitsStoreTarget`). Uninhabited: `sretfl` is now such a
+    // store. What it names to build is a float-typed member read.
     key: 'struct-float-member',
     label: "A struct local's floating member read as its integer bits",
     pattern: /floating member/,
