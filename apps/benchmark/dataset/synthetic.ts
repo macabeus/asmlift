@@ -11432,8 +11432,11 @@ export const SYNTHETIC: SynthSpec[] = [
   //      sretname the same through a named local, which mwcc gives a home the bare call has not;
   //      sret2fwd the {u16} forwarded the same way, and sret2mod a {u16} modified before it is
   //      returned: on agbcc, which keeps the pad's bits, the call's local with its member written,
-  //      `sm_ret.h = …; return sm_ret;` (frontend/own-struct-return.ts `liftModifiedCallImage`);
-  //      on mwcc, whose r3 below the {u16} is no object, it still declines; sretfl a {float}, whose member is read as its bits and stored
+  //      `sm_ret.h = (u16)(sm_ret.h + 1); return sm_ret;` (frontend/own-struct-return.ts
+  //      `liftModifiedCallImage`), the member read off the image word because only its bits reach
+  //      the store (raise/aggmembers.ts demanded bits), and sretmsk that read through a mask into
+  //      a narrower store; on mwcc, whose r3 below the {u16} is no object, sret2mod still
+  //      declines; sretfl a {float}, whose member is read as its bits and stored
   //      through the global's own integer cell, `*(s32 *)&gF = *(s32 *)&s;`, which copies them
   //      whatever the project declares gF as (structure.ts `floatBitsStoreTarget`), on agbcc's r0
   //      and gcc's memory return alike, and declining on mwcc's lfs and ido's lwc1; sretfld the same
@@ -11968,6 +11971,32 @@ export const SYNTHETIC: SynthSpec[] = [
         proto: {
           mkfd: { params: [], returns: 'struct Fd', returnLayout: one('f', 'float') },
           sretfld: { returnsVoid: true },
+        },
+      },
+      // a member read through a mask into a narrower store: the word the call returned is read
+      // once, and only its low member's bits reach the store, so the read is that member's
+      // (raise/aggmembers.ts demanded bits), not `*(s32 *)&s`, which recompiles to other code
+      {
+        sym: 'sretmsk',
+        src:
+          'struct Hm { u16 h; u16 g; };\nextern struct Hm mkhm(s32 x);\nextern u8 gBm;\n' +
+          'void sretmsk(s32 x)\n{\n    struct Hm s = mkhm(x);\n    gBm = (s.h & 0xf0) | 1;\n}',
+        features: ['struct-return', 'field'],
+        ...at,
+        ctx: 'struct Hm { u16 h; u16 g; };\nstruct Hm mkhm(s32 x);\nvoid sretmsk(s32 x);',
+        proto: {
+          mkhm: {
+            params: ['s32'],
+            returns: 'struct Hm',
+            returnLayout: {
+              kind: 'struct',
+              members: [
+                { name: 'h', type: 'u16' },
+                { name: 'g', type: 'u16' },
+              ],
+            },
+          },
+          sretmsk: { returnsVoid: true },
         },
       },
       // a member stored through a POINTER global's value: the element is the pointee's, never the
