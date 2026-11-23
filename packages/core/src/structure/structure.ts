@@ -3448,12 +3448,13 @@ function structureRanked(
   };
   // …and the store side: the lvalue must be one whose type the lift spells, an integer of the
   // read's width: a cast cell (`((s32 *)&g)[1]`), or a local's or a parameter's cell. A bare global
-  // (`gF = …`, `gA[i] = …`) has the project's type, whatever that is.
-  const floatBitsStoreTarget = (value: Value, lval: Expr): void => {
+  // (`gF = …`, `gA[i] = …`) has the project's type, whatever that is. Answers the lvalue to store
+  // through: `lval` itself, or for a bare global nothing declares, its cast cell.
+  const floatBitsStoreTarget = (value: Value, lval: Expr): Expr => {
     const d = defs.get(value);
     const m = d === undefined ? null : floatMemberBits(d);
     if (m === null) {
-      return;
+      return lval;
     }
     let root: Expr = lval;
     while (root.k === 'index' || root.k === 'field') {
@@ -3461,20 +3462,29 @@ function structureRanked(
     }
     const t = ctype(lval);
     const own = root.k !== 'var' || varType.has(root.name);
-    // …or a bare global NOTHING declares — no context, map or static names it — which the lift's
-    // own declaration types as the integer of its access's width (rank-declare.ts): `gF =
-    // *(s32 *)&s;` against that `extern s32 gF;` copies the bits, as `str r0` does
+    // …or a bare global NOTHING declares — no context, map or static names it. The lift's own
+    // declaration types it as an integer, but the project's header is what a candidate compiles
+    // against, and there it is `float gF` as often as not: `gF = *(s32 *)&s;` would convert the
+    // bits there. So it is stored through its own cast cell, `*(s32 *)&gF = *(s32 *)&s;`, which
+    // copies the bits under any declaration of the word, as `str r0` does.
     const undeclared =
       lval.k === 'var' &&
       !varType.has(lval.name) &&
       symbols?.has(lval.name) !== true &&
       contextGlobals?.declared.has(lval.name) !== true;
     if (undeclared) {
-      return;
+      return {
+        k: 'index',
+        base: { k: 'addr', name: lval.name },
+        idx: { k: 'const', value: 0 },
+        width: m.width,
+        signed: true,
+      };
     }
     if (!own || (lval.k !== 'index' && lval.k !== 'field') || t?.kind !== 'int' || t.width !== m.width * 8) {
       refuseFloatBits(m);
     }
+    return lval;
   };
   // A STRUCT LOCAL'S BYTES STORED INTO A BARE ARRAY ELEMENT keep the cast cell. The bare `gA[i]`
   // (globalaccess.ts `bareArrayLead`) checks the element's width, not its kind, and the bytes of
@@ -4736,7 +4746,7 @@ function structureRanked(
           continue;
         }
         const baseExpr = expr(op.operands[0]);
-        const lval0 = structBytesCell(
+        const lvalBare = structBytesCell(
           op.operands[1],
           memAccess(
             op.operands[0],
@@ -4753,7 +4763,7 @@ function structureRanked(
             frameArrayFor(op),
           ),
         );
-        floatBitsStoreTarget(op.operands[1], lval0);
+        const lval0 = floatBitsStoreTarget(op.operands[1], lvalBare);
         if (lval0.k === 'var') {
           globalNames.add(lval0.name);
           out.push({ k: 'assign', name: lval0.name, value: intoPtrCell(lval0, expr(op.operands[1])) });

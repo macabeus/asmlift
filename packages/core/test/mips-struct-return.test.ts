@@ -571,16 +571,15 @@ describe('what the lowering does not build still declines', () => {
 });
 
 // `void sretfl(s32 x){ struct Fl s = mkfl(x); gW = s.f; }`: gcc reads the member as a word (`lw
-// v0,16(sp)`) and stores it, so the bits are copied as bits wherever the lift types the store's
-// lvalue: a global nothing declares is the word the lift's own declaration makes it, and one a
-// context declares `float` is stored through its integer cell, since `gW = *(s32 *)&sp16;` against
-// that declaration would convert them
+// v0,16(sp)`) and stores it, so the bits are copied as bits through the global's integer cell,
+// whether a context declares it `float` or nothing declares it at all: `gW = *(s32 *)&sp16;` against
+// a `float` declaration, the context's or the project's, would convert them
 test('a floating member read as the word it is is stored as its bits', () => {
   const asm = obj('sretfl', KMC_SRET1W.lines);
   const asmData = relocs([[0xc, 'R_MIPS_26', 'mkfl'], ...KMC_SRET1W.rs.slice(1)]);
   const prototypes: Prototypes = { ...PROTOS, sretfl: { returnsVoid: true } };
   expect(decompile('sretfl', asm, MIPS_GCC, { asmData, prototypes }).source).toMatch(
-    /sp16 = mkfl\(a0\);\s+gW = \*\(s32 \*\)&sp16;/,
+    /sp16 = mkfl\(a0\);\s+\*\(s32 \*\)&gW = \*\(s32 \*\)&sp16;/,
   );
   const contextGlobals = globalsFromContext('extern float gW;', 'c');
   expect(decompile('sretfl', asm, MIPS_GCC, { asmData, prototypes, contextGlobals }).source).toMatch(
