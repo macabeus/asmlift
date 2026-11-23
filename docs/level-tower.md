@@ -838,9 +838,20 @@ offset pick it by width through one helper (ir/types.ts `intFieldAt`, which stru
 memory where a device or a callee holds its address, or where nothing escapes and the per-object
 model refuses the frame (a by-value struct parameter, spilled word by word over the spill slots and
 read member by member through `mov rD, sp`, at two widths or two signednesses, or copied out a word
-at a time; `chooseFrameModel` offers it before any shape is judged). That read has a second
-inhabitant on Thumb, and the frontend tells them apart before the audit: agbcc promotes a `u8` or
-`u16` local to a word, spills it with `str`, and reloads only the narrow part through a copy of sp
+at a time; or a pointer that holds either of two locals, `p = c ? a : b` or `c ? a + n : b + n`,
+which names no one of them, read as a pointer into the lower one at no one displacement, which only
+the one object declares (frame-objects.ts `addressFlow` `merges`); `chooseFrameModel` offers it
+before any shape is judged). A pointer that may also hold an address from outside the frame, or that
+escapes, still refuses with the merge. A POINTER STEPPED THROUGH THE FRAME is read in either model:
+a loop over a local array that the compiler strength-reduces carries the array's address in a loop
+phi moved each trip (kmc `addiu s1,sp,16 … addiu s1,s1,4`, mwcc `addi r31,r1,8 … addi r31,r31,4`,
+agbcc `mov r5, sp / ldmia r5!, {r0}`), and `u16 *p = buf + n; *p-- = v` starts one at a runtime index.
+Such a value names a different byte each trip, so a load or store through it, at any displacement,
+is an access through a runtime index nothing bounds, which may reach every byte of the frame
+(`steppedPointers`); any other use of it (an escape, a compare) refuses. A phi that holds ONE
+object on every path is no such pointer but that object's address. The one-object read has a
+second inhabitant on Thumb, and the frontend tells them apart before the audit: agbcc promotes a
+`u8` or `u16` local to a word, spills it with `str`, and reloads only the narrow part through a copy of sp
 made for that one load (`mov r2, sp / ldrh r2, [r2, #4]`), because Thumb has no sp-relative
 `ldrb`/`ldrh`. Those bytes are the stored word's low-order part (the slot's own address on a
 little-endian target), so the load is the slot's value narrowed, a `zext` of the slot, and the copy
