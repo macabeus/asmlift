@@ -1814,15 +1814,24 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     });
 
     // …and a pointer a phi carries around a loop, stepped by a constant each trip (sa3's
-    // `sub_80B59E4`), names a different byte on each: no fold makes it one object.
-    test('a capture stepped around a loop is refused as the stepped pointer', () => {
-      const stepped =
+    // `sub_80B59E4`), names a different byte on each: an access through it is one through a
+    // runtime index nothing bounds, into the object it was set from.
+    test('a capture stepped around a loop is a pointer walking the object', () => {
+      const stepped = (step: string) =>
         'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr1, sp\n\tmovs\tr2, #0\n.L1:\n\tstrb\tr2, [r1]\n' +
-        '\tadds\tr1, #1\n\tadds\tr2, #1\n\tcmp\tr2, #8\n\tblt\t.L1\n\tmov\tr0, sp\n\tbl\tg\n\tadd\tsp, sp, #0x8\n' +
+        `\t${step}\n\tadds\tr2, #1\n\tcmp\tr2, #8\n\tblt\t.L1\n\tmov\tr0, sp\n\tbl\tg\n\tadd\tsp, sp, #0x8\n` +
         '\tpop\t{r1}\n\tbx\tr1\n';
+      const out = decompile('f', stepped('adds\tr1, #1'), ARMV4T_AGBCC, {
+        prototypes: { g: { params: 1, returnsVoid: true } },
+      }).source;
+      expect(out).toContain('u8 sp0[8];');
+      expect(out).toMatch(/v0 = \(u8 \*\)sp0;[^]*\*v0 = v1;[^]*v0 = v0 \+ 1;/);
+      // …and compared, the pointer is a value the audit does not follow
       expect(() =>
-        decompile('f', stepped, ARMV4T_AGBCC, { prototypes: { g: { params: 1, returnsVoid: true } } }),
-      ).toThrow('the captured address at [sp,#0) reaches a phi and is then moved by a constant');
+        decompile('f', stepped('adds\tr1, #1\n\tcmp\tr1, r0\n\tbeq\t.L1'), ARMV4T_AGBCC, {
+          prototypes: { g: { params: 1, returnsVoid: true } },
+        }),
+      ).toThrow('a pointer stepped through the frame from the object at [sp,#0) flows into');
     });
 
     // …but a phi that merges the capture with a PARAMETER steps nothing: agbcc's own output for

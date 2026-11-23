@@ -1128,6 +1128,9 @@ function frameObjects(laddrs: readonly Op[], owned: FrameRange, fail: Refuse): M
 interface AddressFlow {
   readonly taint: ReadonlyMap<Value, number>;
   readonly frameOnEveryPath: ReadonlySet<Value>;
+  /** the values that hold an address INTO the object at their offset, at no one displacement from
+   *  it: a pointer stepped through the frame (`steppedPointers`) */
+  readonly stepped: ReadonlyMap<Value, number>;
 }
 
 function addressFlow(
@@ -1214,7 +1217,132 @@ function addressFlow(
       }
     }
   }
-  return { taint, frameOnEveryPath };
+  return { taint, frameOnEveryPath, stepped: steppedPointers(irBlocks, objects, taint, incoming, facts) };
+}
+
+/** A POINTER STEPPED THROUGH THE FRAME. Strength reduction turns `for (i = 0; i < n; i++)
+ *  use(a[i])` over a local array into a pointer that starts at the array and moves by the element
+ *  size each trip — kmc's `addiu s1,sp,16 / lw a0,0(s1) / … / addiu s1,s1,4`, mwcc's `addi r31,r1,8
+ *  / lwz r3,0(r31) / addi r31,r31,4`, agbcc's `mov r5, sp / ldmia r5!, {r0}` — and `u16 *p = buf + n;
+ *  *p-- = v` starts it at a runtime index. Such a value is a loop phi whose every incoming value is
+ *  this frame's address: the object's own (`exact`, a phi of nothing else included), a runtime
+ *  index into it (`indexedAccess` judges the sum), or the phi itself, or another such pointer,
+ *  moved by a constant or by a runtime value. It names a different byte on each trip, so an access
+ *  through it is an access through a runtime index nothing bounds (`classifyFrameUses`): in C it is
+ *  `p` walking the array it was set from, which stays inside that array.
+ *
+ *  A GREATEST FIXPOINT, because the step feeds the phi it steps: a phi or an `add`/`sub` is a
+ *  candidate once one value it carries or moves names the object, and one is struck while an
+ *  incoming value is no frame address of that same object — a pointer from outside the frame (`p =
+ *  cnt ? cnt : a`), another object (`p = c ? a : b`, refused in `addressFlow`), a load. An exact
+ *  phi moved by a constant is one too: its displacement is known, but the access through it is read
+ *  as unbounded, which only widens what it may touch. */
+function steppedPointers(
+  irBlocks: readonly Block[],
+  objects: ReadonlyMap<number, readonly Op[]>,
+  taint: ReadonlyMap<Value, number>,
+  incoming: ReadonlyMap<Value, readonly Value[]>,
+  { defOf, constOf }: LiteralAddresses,
+): Map<Value, number> {
+  // the object values, and the phis that carry exactly one of them on every path
+  const exact = new Map<Value, number>();
+  for (const [off, ops] of objects) {
+    for (const op of ops) {
+      exact.set(op.results[0], off);
+    }
+  }
+  const phis = [...incoming.keys()].filter((p) => !defOf.has(p));
+  const exactPhis = new Map(phis.flatMap((p) => (taint.has(p) ? [[p, taint.get(p)!] as const] : [])));
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const [p, off] of exactPhis) {
+      if (!incoming.get(p)!.every((a) => (exact.get(a) ?? exactPhis.get(a)) === off)) {
+        exactPhis.delete(p);
+        changed = true;
+      }
+    }
+  }
+  const exactOf = (v: Value): number | undefined => exact.get(v) ?? exactPhis.get(v);
+  // the runtime index sums `indexedAccess` judges: an exact value plus a value that is no constant
+  const indexSum = (v: Value): number | undefined => {
+    const d = defOf.get(v);
+    if (d?.opcode !== 'add' || d.operands.length !== 2) {
+      return undefined;
+    }
+    const [x, y] = d.operands;
+    const off = exactOf(x) ?? exactOf(y);
+    const other = exactOf(x) !== undefined ? y : x;
+    return off !== undefined && !taint.has(other) && constOf(other) === undefined ? off : undefined;
+  };
+  // the candidates, each with the object it would point into, from a value it carries or moves
+  const stepped = new Map<Value, number>();
+  const moves: Op[] = [];
+  for (const blk of irBlocks) {
+    for (const op of blk.ops) {
+      if ((op.opcode === 'add' || op.opcode === 'sub') && op.operands.length === 2 && op.results.length === 1) {
+        moves.push(op);
+      }
+    }
+  }
+  // …and a move of an index sum, where what it moves to is handed to a phi: one used any other way
+  // is the indexed element at a displacement, which `indexedAccess` judges
+  const handed = new Set([...incoming.values()].flat());
+  const startOf = (v: Value, r: Value): number | undefined =>
+    stepped.get(v) ?? exactPhis.get(v) ?? (handed.has(r) ? indexSum(v) : undefined);
+  // the pointer a move moves, and what it is moved by
+  const moved = (op: Op): { from: Value; by: Value } | undefined => {
+    const [x, y] = op.operands;
+    const r = op.results[0];
+    const tx = startOf(x, r) !== undefined;
+    const ty = op.opcode === 'add' && startOf(y, r) !== undefined;
+    return tx === ty ? undefined : tx ? { from: x, by: y } : { from: y, by: x };
+  };
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const p of phis) {
+      const off = exactPhis.has(p)
+        ? undefined
+        : incoming
+            .get(p)!
+            .map((a) => stepped.get(a) ?? exactOf(a) ?? indexSum(a))
+            .find((o) => o !== undefined);
+      if (off !== undefined && !stepped.has(p)) {
+        stepped.set(p, off);
+        changed = true;
+      }
+    }
+    for (const op of moves) {
+      const m = moved(op);
+      const r = op.results[0];
+      if (m === undefined || taint.has(m.by) || stepped.has(m.by) || exactOf(m.by) !== undefined) {
+        continue;
+      }
+      // an exact phi moves only by a constant here: plus a runtime value, it is an index sum
+      const off =
+        stepped.get(m.from) ??
+        (constOf(m.by) !== undefined ? (exactPhis.get(m.from) ?? startOf(m.from, r)) : undefined);
+      if (off !== undefined && !stepped.has(r)) {
+        stepped.set(r, off);
+        changed = true;
+      }
+    }
+  }
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const [v, off] of stepped) {
+      const d = defOf.get(v);
+      const m = d === undefined ? undefined : moved(d);
+      const holds =
+        d === undefined
+          ? incoming.get(v)!.every((a) => (stepped.get(a) ?? exactOf(a) ?? indexSum(a)) === off)
+          : m !== undefined && startOf(m.from, v) === off;
+      if (!holds) {
+        stepped.delete(v);
+        changed = true;
+      }
+    }
+  }
+  return stepped;
 }
 
 /** One fixed-offset access at an object's own address. */
@@ -1343,7 +1471,7 @@ function mayWrite(uses: FrameUses, off: number): boolean {
 function classifyFrameUses({
   irBlocks,
   objects,
-  flow: { taint, frameOnEveryPath },
+  flow: { taint, frameOnEveryPath, stepped },
   facts,
   splitRefusal,
   oneObject,
@@ -1477,11 +1605,15 @@ function classifyFrameUses({
   for (const blk of irBlocks) {
     for (const op of blk.ops) {
       for (const [idx, v] of op.operands.entries()) {
-        const off = taint.get(v);
+        const off = stepped.get(v) ?? taint.get(v);
         if (off === undefined) {
           continue;
         }
         useCount.set(off, (useCount.get(off) ?? 0) + 1);
+        if (stepped.has(v)) {
+          steppedUse(op, idx, { off, through: v }, { indexed, accessOps }, stepped, fail);
+          continue;
+        }
         if (op.opcode === 'load' && idx === 0) {
           scalar('load', op, off, v);
           accessOps.set(op, { off, through: v });
@@ -1567,7 +1699,7 @@ function classifyFrameUses({
             { indexed, accessOps },
             { off, through: v },
             { sum: op.results[0], range: facts.addressRangeOf(other, blk, 'narrowest') },
-            facts.constOf,
+            { constOf: facts.constOf, stepped },
             fail,
           );
           continue;
@@ -1699,7 +1831,7 @@ function indexedAccess(
   { indexed, accessOps }: { indexed: Map<number, IndexedAccess[]>; accessOps: Map<Op, FrameAccessOp> },
   object: FrameAccessOp,
   { sum, range }: { sum: Value; range: StridedRange | undefined },
-  constOf: (v: Value) => number | undefined,
+  { constOf, stepped }: { constOf: (v: Value) => number | undefined; stepped: ReadonlyMap<Value, number> },
   fail: Refuse,
 ): void {
   const { off } = object;
@@ -1711,11 +1843,18 @@ function indexedAccess(
   const judge = (at: Value, by: number): void => {
     for (const blk of irBlocks) {
       for (const op of blk.ops) {
+        // …save the start of a pointer stepped from the indexed element (`steppedPointers`), whose
+        // own accesses are judged where it is used
         const roles = [
           ...op.operands.flatMap((v, i) => (v === at ? [i] : [])),
-          ...(op.successors ?? []).flatMap((s) => (s.args.includes(at) ? [-1] : [])),
+          ...(op.successors ?? []).flatMap((s) =>
+            s.args.some((a, i) => a === at && !(by === 0 && stepped.get(s.block.params[i]) === off)) ? [-1] : [],
+          ),
         ];
         for (const i of roles) {
+          if (i >= 0 && by === 0 && op.results.length === 1 && stepped.get(op.results[0]) === off) {
+            continue;
+          }
           const k =
             at === sum && op.opcode === 'add' && op.operands.length === 2 && i >= 0
               ? constOf(op.operands[1 - i])
@@ -1747,6 +1886,35 @@ function indexedAccess(
     }
   };
   judge(sum, 0);
+}
+
+/** One use of a pointer stepped through the frame object at `off` (`steppedPointers`): a load or
+ *  store through it, at any displacement, is a runtime-indexed access whose reach nothing bounds; a
+ *  move of it is another such pointer, judged where it is used. Anything else — an escape, a
+ *  compare — is not modelled. */
+function steppedUse(
+  op: Op,
+  idx: number,
+  object: FrameAccessOp,
+  { indexed, accessOps }: { indexed: Map<number, IndexedAccess[]>; accessOps: Map<Op, FrameAccessOp> },
+  stepped: ReadonlyMap<Value, number>,
+  fail: Refuse,
+): void {
+  if ((op.opcode === 'load' || op.opcode === 'store') && idx === 0) {
+    const width = op.attrs.width as number;
+    const index = { width, signed: op.opcode === 'load' && op.attrs.signed === true, reach: null };
+    (indexed.get(object.off) ?? indexed.set(object.off, []).get(object.off)!).push(index);
+    accessOps.set(op, { ...object, index });
+    return;
+  }
+  if (op.results.length === 1 && stepped.get(op.results[0]) === object.off) {
+    return;
+  }
+  fail(
+    `a pointer stepped through the frame from the object at [sp,#${object.off}) flows into ` +
+      `\`${op.opcode}\`${op.opcode === 'store' || op.opcode === 'call' ? ' as a value' : ''} — ` +
+      'only a load or store through it is modelled',
+  );
 }
 
 /** Why two access types on one byte refuse, as every refusal of it words it. THE RULE IS AGBCC'S
