@@ -1134,9 +1134,9 @@ interface AddressFlow {
   /** why one value may hold the address of two objects: a pointer into the one object at no one
    *  member, which only that answer declares (`chooseFrameModel`) */
   readonly merges: string | undefined;
-  /** the values `taint` gives a merge of two objects, or a phi of one, and the phis over two objects
-   *  `steppedPointers` finds: a pointer stepped through the frame (`stepped`) where every value it
-   *  carries is this frame's, whose uses but an access refuse as the merge, and refused otherwise */
+  /** the values that may hold two objects: a phi `taint` sees meet two or carry such a phi, and the
+   *  values `steppedPointers` finds over two (`twoObjects`). Where one is `stepped` every use of it
+   *  but an access refuses as the merge; otherwise every use refuses */
   readonly merged: ReadonlySet<Value>;
 }
 
@@ -1245,7 +1245,7 @@ function addressFlow(
  *  use(a[i])` over a local array into a pointer that starts at the array and moves by the element
  *  size each trip — kmc's `addiu s1,sp,16 / lw a0,0(s1) / … / addiu s1,s1,4`, mwcc's `addi r31,r1,8
  *  / lwz r3,0(r31) / addi r31,r31,4`, agbcc's `mov r5, sp / ldmia r5!, {r0}` — and `u16 *p = buf + n;
- *  *p-- = v` starts it at a runtime index. Such a value is a loop phi whose every incoming value is
+ *  *p-- = v` starts it at a runtime index. Such a value is a phi whose every incoming value is
  *  this frame's address: the object's own (`exact`, a phi of nothing else included), a runtime
  *  index into it (`indexedAccess` judges the sum), or the phi itself, or another such pointer,
  *  moved by a constant or by a runtime value. It names a different byte on each trip, so an access
@@ -1259,9 +1259,9 @@ function addressFlow(
  *  so does every pointer stepped or moved from it, each carrying the higher one too: such a value
  *  is named in `merges` — only the one object, where both are its bytes, declares it — and is
  *  returned in `twoObjects`, which `addressFlow` adds to `merged`, so every use but an access
- *  refuses as that merge. A phi of one object on every path
- *  (`mergedFrameAddresses`) is no stepped pointer but that object's address, whose constant move
- *  is named before the audit (`nameMergedFrameAddresses`). */
+ *  refuses as that merge. A phi of one object on every path (`mergedFrameAddresses`) is no stepped
+ *  pointer but that object's address, whose constant move is named before the audit
+ *  (`nameMergedFrameAddresses`). */
 function steppedPointers(
   irBlocks: readonly Block[],
   objects: ReadonlyMap<number, readonly Op[]>,
@@ -1955,7 +1955,7 @@ function indexedAccess(
 /** One use of a pointer stepped through the frame object at `off` (`steppedPointers`): a load or
  *  store through it, at any displacement, is a runtime-indexed access whose reach nothing bounds; a
  *  move of it is another such pointer, judged where it is used. Anything else — an escape, a
- *  compare — is not modelled, and a phi of two objects (`merges`) refuses as that merge. */
+ *  compare — is not modelled, and a value over two objects (`merges`) refuses as that merge. */
 function steppedUse(
   op: Op,
   idx: number,
@@ -3829,7 +3829,7 @@ export function nameMergedFrameAddresses(irBlocks: Block[]): void {
  *  hidden pointer forwarded by `return f(..)` — is another spelling, which nothing here states. A
  *  merge of frame addresses never reaches here: one that names one address on every path was handed
  *  that address's `laddr` before the audit (`nameMergedFrameAddresses`), and a merge of two names no one
- *  storage, which the audit refuses (`steppedUse`: `a phi merges the frame objects`). Asked
+ *  storage, which the audit refuses (`classifyFrameUses`: `a phi merges the frame objects`). Asked
  *  of every frontend whose call lowering passes the hidden pointer
  *  (`CallLowering.memoryReturn`). */
 export function refuseSretOutsideFrame(name: string, irBlocks: readonly Block[], target: TargetDescription): void {

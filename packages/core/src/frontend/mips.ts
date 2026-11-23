@@ -3506,8 +3506,8 @@ function buildHandedFrameSums(irBlocks: Block[], sums: ReadonlyMap<Value, FrameS
   }
 }
 
-/** A frame sum is a VALUE no op defines — every use builds its own `laddr` and `add` — so one that
- *  reached anything neither the fill nor `buildHandedFrameSums` built refuses. */
+/** A frame sum is a VALUE no op defines — every use builds its own `laddr` and `add` — so a use of
+ *  one that neither the fill nor `buildHandedFrameSums` built refuses. */
 function refuseEscapedFrameSums(name: string, irBlocks: readonly Block[], sums: ReadonlyMap<Value, FrameSum>): void {
   for (const blk of irBlocks) {
     for (const op of blk.ops) {
