@@ -663,7 +663,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // places the aggregate in argument words (the target states none, the declaration does not
     // lay it out, it is a union, another parameter is unsized, or the declaration is variadic), it
     // runs past the argument registers, its words are not one frame object, one global or the
-    // pointee of one pointer nothing else reads, read whole at the call, or they are one global C
+    // pointee of one pointer parameter nothing else reads, read whole at the call, or they are one global C
     // cannot spell bare as the struct (a section symbol, a function-scope static, or a symbol the
     // declarations type as an array, an enclosing struct or another type).
     //

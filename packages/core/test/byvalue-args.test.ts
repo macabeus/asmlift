@@ -205,11 +205,22 @@ describe('a struct passed by value in argument registers', () => {
     const stored =
       'ptr:\n\tpush\t{lr}\n\tadd\tr3, r0, #0\n\tldr\tr0, [r3]\n\tldr\tr1, [r3, #0x4]\n\tldr\tr2, [r3, #0x8]\n' +
       '\tstr\tr1, [r3]\n\tbl\ttake2\n\tpop\t{r0}\n\tbx\tr0\n';
+    // `void ptr(struct A *p, s32 i) { take2(p[i]); }` (agbcc -O2): the words come off a computed
+    // pointer, which prints as its own `add`, and `*` over that dereferences an integer
+    const indexed =
+      'ptr:\n\tpush\t{lr}\n\tlsl\tr2, r1, #0x1\n\tadd\tr2, r2, r1\n\tlsl\tr2, r2, #0x2\n\tadd\tr2, r2, r0\n' +
+      '\tldr\tr0, [r2]\n\tldr\tr1, [r2, #0x4]\n\tldr\tr2, [r2, #0x8]\n\tbl\ttake2\n\tpop\t{r0}\n\tbx\tr0\n';
+    // `void ptr(struct A **pp) { take2(**pp); }` (agbcc -O2): a loaded pointer prints as its load
+    const loaded =
+      'ptr:\n\tpush\t{lr}\n\tldr\tr2, [r0]\n\tldr\tr0, [r2]\n\tldr\tr1, [r2, #0x4]\n\tldr\tr2, [r2, #0x8]\n' +
+      '\tbl\ttake2\n\tpop\t{r0}\n\tbx\tr0\n';
     const own = { ptr: { params: ['struct A *'], returns: 's32' } };
     for (const [asm, protos] of [
       [past, {}],
       [after, own],
       [stored, {}],
+      [indexed, {}],
+      [loaded, {}],
     ] as const) {
       expect(() => decompile('ptr', asm, ARMV4T_AGBCC, { prototypes: { take2, ...protos } })).toThrow(
         /the call to `take2` passes struct A by value, and its words are not one frame object, one global/,
