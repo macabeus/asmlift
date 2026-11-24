@@ -5198,14 +5198,34 @@ function structureRanked(
   // beside such an edge consult this.
   const continueFallsToBottom = (frame: LoopFrame, stop: Block | null): boolean => stop === frame.header;
 
+  // THE EXIT REGION OF A BREAK out of `frame` for `exit`: the blocks the exit reaches without
+  // entering the loop again. A path that comes back round an enclosing loop enters through the
+  // header, which binds its parameters afresh, and every other loop value a block past it reads is
+  // defined again on the way (it is defined in the body, which the header dominates), so nothing
+  // there reads a name this iteration rewrote. Walked past the header, the region took in the arms
+  // of a switch that leave the loop from inside it (sub_080349AC's `bl` arms to the outer latch),
+  // which read the re-bound pointer, and refused a break they never see.
+  const exitRegionOf = (frame: LoopFrame, exit: Block): Set<Block> => {
+    const region = new Set<Block>();
+    for (const stack = [exit]; stack.length > 0;) {
+      const x = stack.pop()!;
+      if (x === frame.header || frame.body.has(x) || region.has(x)) {
+        continue;
+      }
+      region.add(x);
+      stack.push(...successorsOf(x));
+    }
+    return region;
+  };
+
   // THE BREAK RULE, for a `break` from block `from` out of `frame`'s body wherever the edge sits. A
   // `break` lands after the loop, where the header→exit copies render and then the exit region, raw.
   // Refused:
   //   • a `do-while`: its exit copies live post-loop too, but are judged differently;
   //   • the header→exit edge has copies the break cannot share: the break path runs them too, and
   //     they would overwrite what the break carried;
-  //   • the exit region reads a loop value under a loop variable's name that `writes` holds —
-  //     the names this iteration has rewritten by the time the break leaves.
+  //   • the exit region (`exitRegionOf`) reads a loop value under a loop variable's name that
+  //     `writes` holds — the names this iteration has rewritten by the time the break leaves.
   //
   // A BREAK THAT CARRIES WHAT THE HEADER CARRIES shares them. When every argument the break edge
   // hands the exit is the very value the header's exit edge hands it, the break needs no copies of
@@ -5238,7 +5258,7 @@ function structureRanked(
     // region reads under its name (`emitForever`) is no re-derivation.
     const fl = foreverLoops.get(frame.header);
     if (fl !== undefined) {
-      const exitRegion = new Set([exit, ...reachFrom(exit)].filter((x) => !frame.body.has(x)));
+      const exitRegion = exitRegionOf(frame, exit);
       const { sub } = latchInnerSub(fl.header, fl.body, [...fl.breaks], exitRegion);
       return loopEscapeHazard(frame.body, sub, writes, exitRegion)
         ? { refusal: 'reaches an exit region that reads a loop value under a name this iteration already rewrote' }
@@ -5264,7 +5284,7 @@ function structureRanked(
         return { refusal: 'would run the copies the loop header hands its exit' };
       }
     }
-    const exitRegion = new Set([exit, ...reachFrom(exit)].filter((x) => !frame.body.has(x)));
+    const exitRegion = exitRegionOf(frame, exit);
     if (loopEscapeHazard(frame.body, new Map(), writes, exitRegion)) {
       return { refusal: 'reaches an exit region that reads a loop value under a name this iteration already rewrote' };
     }
