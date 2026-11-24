@@ -441,7 +441,8 @@ interface JumpRanking {
 }
 
 /** Whether a case body's exit out of its loop past the switch's end is spelled with the exit flag
- *  (`caseExitBreak`), and whether a structuring without it met one. Asked only in the runs
+ *  (`caseExitBreak`), and an exit to an enclosing switch's merge with its flag
+ *  (`switchMergeExit`), and whether a structuring without them met one. Asked only in the runs
  *  `structure` makes after every run without it declined and one met such an exit, so it turns a
  *  decline into a lift and never one lift into another: where the code from the exit on can be
  *  copied into the arm, or a last-resort rung reads the loop, that spelling is published already. */
@@ -795,9 +796,9 @@ function structureLadder(
     return sfn;
   };
   let sfn = jumpRanked();
-  // the case bodies' exit flags, asked once every run without them declined and one met an exit
-  // they spell; those runs read every switch at least as far, so where they decline too, theirs is
-  // the refusal that stands
+  // the case bodies' exit flags and the exits to an enclosing switch's merge, asked once every run
+  // without them declined and one met an exit they spell; those runs read every switch at least as
+  // far, so where they decline too, theirs is the refusal that stands
   if (sfn === null && caseExit.wanted && hooks.caseExitFlags !== false) {
     refused = undefined;
     caseExit = { asked: true, wanted: false };
@@ -5011,10 +5012,12 @@ function structureRanked(
       [{ k: 'break', ...(ofSwitch ? { ofSwitch: true } : {}) }],
       [],
     );
+  // A flag of an exit to an enclosing switch's merge (`switchMergeFlag`) leaves the next switch out
+  // after each switch it is handed through; every other flag leaves the loop.
   const aroundSwitch = (flags: ReadonlySet<string>, sw: Stmt): Stmt[] => [
     ...[...flags].map((name): Stmt => ({ k: 'assign', name, value: { k: 'const', value: 0 } })),
     sw,
-    ...[...flags].map((name) => breakOnFlag(name, false)),
+    ...[...flags].map((name) => breakOnFlag(name, switchMergeFlagNames.has(name))),
   ];
   // THE ONE RULE THAT BINDS A `break;` TO A SWITCH ARM: does a `break;` written here reach `b`? It
   // does where `b` is the merge of the innermost arm with a region and no loop was entered since
@@ -5036,6 +5039,10 @@ function structureRanked(
       return undefined;
     }
     if (!switchBreaks(b)) {
+      const mergeExit = switchMergeExit(b, i);
+      if (mergeExit !== undefined) {
+        return mergeExit;
+      }
       // a `while (1)` some ladder rung read, refused here, needs the hit rung's flag where that
       // rung would read it (`LastResortRanking.needs`), as `wantFor` notes a loop for the `for`
       // rerun: sub_0800D188's search loop, read by the last rung's ret-tail copy starting here
@@ -5053,6 +5060,34 @@ function structureRanked(
       );
     }
     return [{ k: 'break', ofSwitch: true }];
+  };
+  // AN EXIT TO AN ENCLOSING SWITCH'S MERGE FROM A SWITCH NESTED IN ONE OF ITS ARMS, which the
+  // `break;` there would bind to the inner switch: `f = 1; break;`, with `f = 0;` ahead of each
+  // switch between and a switch-scoped `if (f != 0) break;` right after it (`aroundSwitch`), so the
+  // last one leaves the switch `b` ends (agbcc, IDO and GCC 2.7.2 lay sw_gotocase_inner's inner
+  // `goto shared;` out this way). Taken only where no loop was entered since that switch's arm began
+  // (each test's `break;` binds to the next switch out) and every switch between has its own flag
+  // scope. Asked only in the reruns made once every run without it declined (`CaseExitRanking`), so
+  // a published lift never moves.
+  const switchMergeExit = (b: Block, i: number): Stmt[] | undefined => {
+    const between = switchFrames.slice(i + 1);
+    const flagged =
+      between.length > 0 &&
+      [switchFrames[i], ...between].every((f) => f.loop === loopCtx && f.flags !== null) &&
+      new Set([switchFrames[i], ...between].map((f) => f.flags)).size === between.length + 1;
+    if (!flagged) {
+      return undefined;
+    }
+    caseExit.wanted ||= !caseExit.asked;
+    if (!caseExit.asked) {
+      return undefined;
+    }
+    const flag = switchMergeFlag(b);
+    between.forEach((f) => f.flags!.add(flag));
+    return [
+      { k: 'assign', name: flag, value: { k: 'const', value: 1 } },
+      { k: 'break', ofSwitch: true },
+    ];
   };
   // A CASE BODY'S JUMP OUT OF THE LOOP ITS SWITCH SITS IN, past the switch's end (the merge is
   // `switchBreakAt`'s): `f = 1; break;`, and the flag goes to the switch's scope, whose
@@ -8345,6 +8380,19 @@ function structureRanked(
     }
     return name;
   };
+  // The flag of an exit to the merge `b` of an enclosing switch (`switchMergeExit`): one per merge.
+  const switchMergeFlags = new Map<Block, string>();
+  const switchMergeFlagNames = new Set<string>();
+  const switchMergeFlag = (b: Block): string => {
+    let name = switchMergeFlags.get(b);
+    if (name === undefined) {
+      name = `v${fresh++}`;
+      varType.set(name, T.s(32));
+      switchMergeFlags.set(b, name);
+      switchMergeFlagNames.add(name);
+    }
+    return name;
+  };
   const twoLevelFlag = (header: Block): string => {
     let name = twoLevelFlags.get(header);
     if (name === undefined) {
@@ -8836,6 +8884,7 @@ function structureRanked(
       ...[...varType.keys()].filter((n) => /^t\d+$/.test(n)),
       ...twoLevelFlags.values(),
       ...caseExitFlags.values(),
+      ...switchMergeFlags.values(),
     ]),
   ].filter((n) => /^[vt]\d+$/.test(n) && !globalNames.has(n));
   // THE FRAME COORDINATES OF EACH DECLARED LOCAL (ir/core.ts `SlotHomes`, stamped by the SSA
