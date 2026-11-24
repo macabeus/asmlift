@@ -1552,7 +1552,7 @@ test('without second-target-elsewhere a third exit target is still refused where
   ).toThrow(/a break out of block #\d+ has no edge beside it that stays in the loop/);
 });
 
-test('a second exit out of a case body sets the case body\'s exit flag beside its own, and the program is the IR', () => {
+test("a second exit out of a case body sets the case body's exit flag beside its own, and the program is the IR", () => {
   const { src, agreement, shipped } = judged(SECOND_EXIT_FROM_A_CASE_BODY);
   expect(src).toMatch(/if \(a\(v\d+\) == a2\) \{\n\s*(v\d+) = 1;\n\s*(v\d+) = 1;\n\s*break;\n\s*\}/);
   expect(src).toMatch(/}\n\s*if \((v\d+) != 0\) break;/);
