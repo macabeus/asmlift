@@ -750,7 +750,21 @@ describe('a pointer stepped from below the local area', () => {
       compilerBehaviors: { ...PPC_MWCC.compilerBehaviors, captureBelowLocalsRebases: 'indexed' as const },
     };
     expect(() => decompile('f', fn('f', LCOPY), INDEXED, { prototypes: UPD })).toThrow(
-      /the captured address at \[sp,#4\) is below the reserved local area, which starts at \[sp,#8\)/,
+      /the captured address at \[sp,#4\) is below the reserved local area, which starts at \[sp,#8\), .*a pointer is stepped from it/,
     );
+  });
+
+  // `u32 a[3]; u32 *p = a - 1; for (…) use1(*p++);` at mwcc_242_81 is `addi r31,r1,4 / lwz
+  // r3,0(r31)`: the first trip reads the LR-save word at 4, and `*p++ = x` writes it the same way.
+  test('…and only where every access through it lands inside the locals on the first trip', () => {
+    const at = (old: string, now: string) => LCOPY.map((l) => (l === old ? now : l));
+    const beneath =
+      /\[sp,#4\) is below the reserved local area, .*through a pointer stepped from it lands beneath the locals on its first trip, at \[sp,#4\)/;
+    expect(() =>
+      decompile('f', fn('f', at('stw     r3,4(r5)', 'stw     r3,0(r5)')), PPC_MWCC, { prototypes: UPD }),
+    ).toThrow(beneath);
+    expect(() =>
+      decompile('f', fn('f', at('lwz     r3,4(r4)', 'lwz     r3,0(r5)')), PPC_MWCC, { prototypes: UPD }),
+    ).toThrow(beneath);
   });
 });

@@ -856,8 +856,10 @@ from the capture up only across blocks, by a must-hold, and only with every late
 (thumb.ts `steppedFrameReads`). A capture BELOW the locals is the one object's address moved down
 where the target says nothing C names lives there (`captureBelowLocalsRebases`: O32 and PPC, which
 fold `a[i - 1]`'s constant into the base; PPC also for a pointer stepped from it, mwcc's update-form
-copy), and only where it escapes nowhere and no constant-displacement access through it lands
-beneath the locals. A phi that holds ONE object on every path is no such pointer but that object's
+copy, where every access through it lands inside the locals on its first trip), and only where
+it escapes nowhere, no constant-displacement access through it lands beneath the locals, and no
+word between it and the locals is stored to directly (a staged stack argument, or a local a
+callee declared with too many stack words pushed out of the area). A phi that holds ONE object on every path is no such pointer but that object's
 address. The one-object read has a
 second inhabitant on Thumb, and the frontend tells them apart before the audit: agbcc promotes a
 `u8` or `u16` local to a word, spills it with `str`, and reloads only the narrow part through a copy of sp

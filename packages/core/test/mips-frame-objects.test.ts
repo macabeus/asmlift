@@ -292,6 +292,65 @@ describe('a capture below the local area is the object above it, moved down', ()
     };
     expect(lift(FIVE_IDO, FIVE_RELOCS, NO_REBASE, FIVE_PROTOS)).toThrow(below);
   });
+
+  // `void f(s32 i){ u32 a[2], b[2]; a[0] = gA; a[1] = gB; b[0] = gC; b[1] = gD; four(1, 2, 3, 4);
+  // use1(a[i] + b[i]); }` at gcc2.7.2 -O2: `a` at 16, `b` at 24. gcc draws the area from the
+  // declared stack words, so a `four` declared with a fifth parameter it is not passed starts it at
+  // 24, and `a`'s own capture is beneath it. Its stores at 16 and 20 are slot stores, the first one
+  // read as four's fifth argument; rebasing the capture onto `b` would read `a[i]` before `b`.
+  test('…and not where a word between it and the locals is stored to directly', () => {
+    const QOD = [
+      '0:\taddiu\tsp,sp,-40',
+      '4:\tsw\tra,36(sp)',
+      '8:\tsw\ts0,32(sp)',
+      'c:\tmove\ts0,a0',
+      '10:\tlui\tv0,0x0',
+      '14:\tlw\tv0,0(v0)',
+      '18:\tsw\tv0,16(sp)',
+      '1c:\tlui\tv0,0x0',
+      '20:\tlw\tv0,0(v0)',
+      '24:\tsw\tv0,20(sp)',
+      '28:\tlui\tv0,0x0',
+      '2c:\tlw\tv0,0(v0)',
+      '30:\tsw\tv0,24(sp)',
+      '34:\tlui\tv0,0x0',
+      '38:\tlw\tv0,0(v0)',
+      '3c:\tsw\tv0,28(sp)',
+      '40:\tli\ta0,1',
+      '44:\tli\ta1,2',
+      '48:\tli\ta2,3',
+      '4c:\tjal\t0 <f>',
+      '50:\tli\ta3,4',
+      '54:\tsll\ts0,s0,0x2',
+      '58:\taddiu\tv0,sp,16',
+      '5c:\taddu\ts0,s0,v0',
+      '60:\tlw\tv0,0(s0)',
+      '64:\tlw\ta0,8(s0)',
+      '68:\tjal\t0 <f>',
+      '6c:\taddu\ta0,v0,a0',
+      '70:\tlw\tra,36(sp)',
+      '74:\tlw\ts0,32(sp)',
+      '78:\tjr\tra',
+      '7c:\taddiu\tsp,sp,40',
+    ];
+    const rs: [number, string, string][] = [
+      ...['gA', 'gB', 'gC', 'gD'].flatMap((g, i): [number, string, string][] => [
+        [0x10 + 12 * i, 'R_MIPS_HI16', g],
+        [0x14 + 12 * i, 'R_MIPS_LO16', g],
+      ]),
+      [0x4c, 'R_MIPS_26', 'four'],
+      [0x68, 'R_MIPS_26', 'use1'],
+    ];
+    const protos = (params: number): Prototypes => ({
+      f: { params: ['s32'], returnsVoid: true },
+      four: { params: Array<string>(params).fill('s32'), returnsVoid: true },
+      use1: { params: ['u32'], returnsVoid: true },
+    });
+    expect(lift(QOD, rs, MIPS_GCC, protos(5))).toThrow(
+      /\[sp,#16\) is below the reserved local area, which starts at \[sp,#24\), .*the word at \[sp,#16\) between it and the locals is stored to directly/,
+    );
+    expect(src(QOD, rs, MIPS_GCC, protos(4))).toContain('u8 sp16[16];');
+  });
 });
 
 describe('a frame word that is not a local refuses', () => {

@@ -1005,15 +1005,17 @@ export interface FrameLayoutBehaviors {
   // parameter words and the callee's LR-save word at 4(r1) — and below sp itself (mwcc bases
   // `(b - 3)[i]` at -4). The frame-object audit then keeps the locals as one object and rebases such
   // a capture onto it as `(u8 *)obj - k` (frontend/frame-objects.ts `belowRebaseRefusal`), where it
-  // escapes nowhere and every constant-displacement access through it lands inside the object. The
-  // two values say what else may go through it:
+  // escapes nowhere, every constant-displacement access through it lands inside the object, and no
+  // word between it and the locals is stored to directly. The two values say what else may go
+  // through it:
   //   'indexed' — a runtime index: a load or store at the base plus a register, whose reach and
   //               width the audit judges per byte. Not a pointer stepped from it: O32 passes a struct
   //               by value in a0..a3 and the stack words, and a copy of one into the outgoing area
   //               through a stepped pointer is a write no object owns.
   //   'stepped' — that, and a pointer stepped from it (mwcc's update-form copy, `addi r5,r1,4 /
-  //               stwu r0,8(r5)`). PPC passes an aggregate by reference to a copy in the caller's
-  //               locals, so nothing writes the outgoing words through a pointer.
+  //               stwu r0,8(r5)`) whose every access lands inside the locals on its first trip.
+  //               PPC passes an aggregate by reference to a copy in the caller's locals, so nothing
+  //               writes the outgoing words through a pointer.
   // Absent (Thumb) => such a capture refuses: agbcc adds an array's offset after the index, so it
   // forms no such base (`corpus/agbcc-indexed.s`), and a pointer the source forms below its array
   // is at a word an outgoing argument may own (`stagedStackWordReachesOnlyItsCall`).
