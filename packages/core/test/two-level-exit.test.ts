@@ -1016,8 +1016,8 @@ const TARGET_IS_THE_ENCLOSING_HEADER = `fn outerheader {
 /** The hit sits in a case body of a switch inside the inner loop, a case that falls into the next
  *  one when it misses (agbcc -O2's layout of `switch (probe(j)) { case 0: if (a(j) == x) goto
  *  next; case 1: b(j); }`). `break` there leaves only the switch, so the hit sets the two-level
- *  flag, and that flag's test after the switch leaves the loop. Asked
- *  only once every run without that flag declined (structure.ts `CaseExitRanking`), where the
+ *  flag, and that flag's test after the switch leaves the loop. Asked only once every run without
+ *  that flag declined (structure.ts `CaseExitRanking`), where the
  *  two-level refusal and the one for a case body that leaves its switch for a loop exit past the
  *  switch's end each decline it. */
 const SECOND_EXIT_FROM_A_CASE_BODY = `fn casebody {
@@ -1059,8 +1059,8 @@ const SECOND_EXIT_FROM_A_CASE_BODY = `fn casebody {
  *  (j…) { switch (probe(j)) { case 0: if (a(j) < z) goto out; case 1: b(j); break; … } } k(i); }
  *  out: after(i);`. The hit sets the outward flag, and `break;` leaves the switch; the flag's test
  *  after the switch leaves the inner loop, and its test after the inner loop (`emitForeverExit`)
- *  leaves the outer one in turn, so no rule of
- *  the break table refuses it. The switch reads `j`, so the seeds reach the hit, on `j == 0`. */
+ *  leaves the outer one in turn, so no rule of the break table refuses it. The switch reads `j`,
+ *  so the seeds reach the hit, on `j == 0`. */
 const OUTWARD_FROM_A_CASE_BODY = `fn outcase {
 ^bb0(%0: s32, %1: s32, %2: s32):
   %3: s32 = const {value=0}

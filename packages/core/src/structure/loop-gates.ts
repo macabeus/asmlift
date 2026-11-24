@@ -187,9 +187,9 @@ export interface TwoLevelBreak {
 
 /** When a block's edge to a two-level exit's second target is written `flag = 1; break;`. The
  *  argument is at the refusal in `structureBlock`. In a case body the `break` leaves the switch, and
- *  the case body's exit flag, set beside the two-level one, leaves the loop after it. An outward exit
+ *  the two-level flag's test right after the switch leaves the loop. An outward exit
  *  (`TwoLevelExit.outward`) needs no rule of its own: its flag's test after this loop
- *  (`emitForeverExit`) follows the case body's, and leaves the enclosing loop in turn. */
+ *  (`emitForeverExit`) leaves the enclosing loop in turn. */
 export const TWO_LEVEL_BREAK_GATES: readonly Gate<TwoLevelBreak>[] = [
   {
     id: 'from-a-case-body',

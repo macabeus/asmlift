@@ -5056,18 +5056,15 @@ function structureRanked(
   };
   // A CASE BODY'S JUMP OUT OF THE LOOP ITS SWITCH SITS IN, past the switch's end (the merge is
   // `switchBreakAt`'s): `f = 1; break;`, and the flag goes to the switch's scope, whose
-  // `if (f != 0) break;` right after the switch leaves the loop (`aroundSwitch`). To the loop's
-  // exit, and to a two-level exit's second target, which takes the two-level flag for it: that one
-  // is 0 before the loop and set only on this path, so the test after the switch reads it as well,
-  // and `emitForeverExit`'s after the loop skips the code between. Taken where the test is in this
-  // loop's own body (`caseExitFrame`). Elsewhere the code from the exit on is copied into the arm, which is the same
-  // program wherever that copy ends in a `return`, so the flag is taken only where it could not
-  // (`exitTakesCaseFlag`). Not an outward two-level exit's second target (`TwoLevelExit.outward`):
-  // an edge into it is not the branch `structureBlock` spells with the code from the target and the
-  // enclosing loop's break rule, and setting the flags here would skip that code. Without this
-  // exclusion and `flagTargets`' beside it, agbcc -O2's `case 0: a(j); goto out;` out of two loops
-  // in a third drops `a(j)`, and `case 0: if (a(j) < z) { w(j); goto out; }`, which
-  // `structureBlock` lifts, declines.
+  // `if (f != 0) break;` right after the switch leaves the loop (`aroundSwitch`). Taken only where
+  // that test is in this loop's own body (`caseExitFrame`). To the loop's exit, where the code from
+  // it on cannot be copied into the arm (`exitTakesCaseFlag`); and to a two-level exit's second
+  // target, with the two-level flag: 0 before the loop and set only on this path, so the test after
+  // the switch reads it as well, and `emitForeverExit`'s after the loop skips the code between. Not
+  // an outward two-level exit's second target (`TwoLevelExit.outward`): `structureBlock` spells
+  // that edge with the code from the target and the enclosing loop's break rule, and a flag set
+  // here skips that code (agbcc -O2's `case 0: a(j); goto out;` out of two loops in a third would
+  // drop `a(j)`).
   const caseExitBreak = (b: Block): Stmt[] | undefined => {
     const lc = loopCtx;
     if (lc === null) {
@@ -5583,11 +5580,10 @@ function structureRanked(
             ? undefined
             : (loopCtx.forLatch ??
               (foreverLoops.has(loopCtx.header) && forRank.asked.has(loopCtx.header) ? loopCtx.header : undefined));
-        // Asked (`CaseExitRanking`), nor are the blocks a case body's exit flag leaves the loop
-        // for (`caseExitBreak`), where this switch is the first opened in that loop: the loop's
-        // exit, and a two-level exit's second target, not an outward one's (`caseExitBreak` says
-        // why). One that is a case arm's own entry is a jump,
-        // and the others ends (`analyzeArmExit`).
+        // Nor, once the rerun asks the flag (`CaseExitRanking`) and this switch is the first opened
+        // in its loop, are the blocks a case body's exit flag leaves the loop for (`caseExitBreak`):
+        // the loop's exit, and a non-outward two-level exit's second target. One that is a case
+        // arm's own entry is a jump, and the others are ends (`analyzeArmExit`).
         const lc = loopCtx;
         const flagTargets =
           lc === null || !switchFrames.every((f) => f.loop !== lc)
@@ -6593,9 +6589,9 @@ function structureRanked(
     // A TWO-LEVEL EXIT out of this block (`TwoLevelExit`): its edge to the second target is the
     // `break`, and sets the flag first. Any refusal of it is loud: if-recovery would structure the
     // code from the second target inside the loop. In a case body opened in this loop, where
-    // `break` leaves only the switch, it also sets the case body's exit flag below, whose test after
-    // the switch leaves the loop; refused where that cannot hold (`TWO_LEVEL_BREAK_GATES`). agbcc -O2
-    // lays out a case that falls through after `if (h(j)) goto T;` that way.
+    // `break` leaves only the switch, the flag is also tested right after the switch (below), which
+    // leaves the loop; refused where that cannot hold (`TWO_LEVEL_BREAK_GATES`). agbcc -O2 lays out
+    // a case that falls through after `if (h(j)) goto T;` that way.
     // An arm that runs code before it breaks (`codeBreakArm`) is rendered inside the `if`, ahead of
     // the `break`, and its last block's copies into its exit are the break's: the loop's, or a
     // two-level exit's second target where the hit runs code on the way there (`BreakArm.exit`).
@@ -7107,10 +7103,9 @@ function structureRanked(
   // loop tests at its header or latch), an early-`return` arm the loop owns, or the edge into a
   // `break` arm that runs code (`BreakArm`), which renders inside its `if`, ahead of the `break`.
   // Any other edge out leaves for code that is copied wherever it is reached, and a join inside the
-  // body would write that tail into the arm as well. The break arm's edge is the default
-  // reading's, not only the case body's exit flag's: `if (p(i)) { if (d(i)) { x2(x(i)); break; } }
-  // y(i);` joins its `if` at `y(i)` (loop-break-exit.test.ts, `synthetic:brkarm_ifjoin`), and
-  // without it `synthetic:sw_caseexit_goto` declines on agbcc and mwcc_242_81 with the flag asked.
+  // body would write that tail into the arm as well. The break arm's edge holds on the default
+  // reading too: `if (p(i)) { if (d(i)) { x2(x(i)); break; } } y(i);` joins its `if` at `y(i)`
+  // (`synthetic:brkarm_ifjoin`).
   const leavesByOwnedEdges = (frame: LoopFrame, b: Block): boolean => {
     const exitFrom = whileLoops.get(frame.header)?.header ?? doWhileLoops.get(frame.header)?.latch;
     const seen = new Set<Block>();

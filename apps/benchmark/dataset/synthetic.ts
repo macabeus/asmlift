@@ -18138,10 +18138,9 @@ export const SYNTHETIC: SynthSpec[] = [
     },
   },
   // sw_caseexit_outward: a case body's `goto` out of BOTH loops its switch sits in, past the code
-  // after the inner loop (`TwoLevelExit.outward`). The hit sets the outward flag beside the case
-  // body's exit flag; the case flag's test after the switch leaves the inner loop and the outward
-  // flag's test after it leaves the outer one. agbcc -O2 lays the case out falling into `case 1`
-  // when it misses, and declined there before (structure.ts `TWO_LEVEL_BREAK_GATES`).
+  // after the inner loop (`TwoLevelExit.outward`). The hit sets the outward flag alone: its test
+  // after the switch leaves the inner loop, and its test after that loop leaves the outer one.
+  // agbcc -O2 lays the case out falling into `case 1` when it misses.
   {
     sym: 'sw_caseexit_outward',
     src:
@@ -18205,8 +18204,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // brkarm_ifjoin: a tested loop's `break` that runs code under two nested `if`s, with no switch.
   // The CFG joins the outer `if` at the loop's exit, through the arm; the arm renders inside the
   // `if`, ahead of its `break`, so the `if` joins at `y(i)` in the body (structure.ts
-  // `leavesByOwnedEdges`). It declined on agbcc and mwcc_242_81 before that (an unrecovered back-edge),
-  // which keep the loop's test at its top; the other three rotate the loop and lifted already.
+  // `leavesByOwnedEdges`). Without that, agbcc and mwcc_242_81, which keep the loop's test at its
+  // top, decline it (an unrecovered back-edge); the other three rotate the loop.
   {
     sym: 'brkarm_ifjoin',
     src:

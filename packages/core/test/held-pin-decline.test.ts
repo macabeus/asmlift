@@ -1,6 +1,6 @@
 // THE UNSIGNED PIN'S DECLINE, HELD FOR THE SIGNED ONE (rank.ts). `bound-plus-one-counter-wraps` is
 // the one structure refusal that reads how the signedness pin declared a counter, so IDO's counted
-// loop takes its `for` under the `s32` pin and not the `u32` one; the case body's exit flag now
+// loop takes its `for` under the `s32` pin and not the `u32` one; the case body's exit flag
 // spells the `u32` reading, so `sw_gotocase2` holds nothing. The fixtures are the benchmark's
 // own `synthetic:sw_gotocase2` and `synthetic:sw_gotocase_inner` objects on ido7.1. Toolchain-free.
 import { readFileSync } from 'node:fs';
@@ -24,7 +24,7 @@ const enumerate = (sym: string, stem: string) => {
   return { run, threw };
 };
 
-test('the counter rule no longer declines the unsigned pin: the case exit flag spells its loop', () => {
+test('the unsigned pin builds candidates: the case exit flag spells its loop', () => {
   // under the `u32` pin the counted loop takes no `for`, and its switch's exit past the code after
   // it is spelled with the case body's exit flag (structure.ts `CaseExitRanking`), so nothing is
   // held and both pins build candidates
