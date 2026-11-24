@@ -387,6 +387,14 @@ export function floatOperands(op: Op): ReadonlyMap<number, number> {
   return out;
 }
 
+/** The `call` attribute of L1 on a call through a register whose arguments the register bounds
+ *  (frontend/call-plan.ts, `CallLowering.argRegisterBoundsArity`): a call through argument register
+ *  rK takes at most r0..r(K-1) and no stack word, and it was lowered reading every one of them. So
+ *  its operands are every argument the machine can hand it, which is all frontend/callee-body.ts
+ *  needs of a call to count what the body around it reads. A call through any other register, or
+ *  on a lowering that does not state the bound, does not carry it. */
+export const ARGS_BOUND_BY_ADDRESS = 'argsBoundByAddress';
+
 /** The `call` attribute of L1 that says its result is the IMAGE of a struct its callee is declared
  *  to return in the return register (frontend/call-plan.ts `registerStructLocal`): a word the
  *  frontend reads as any call's, which `liftRegisterStructCalls` (frontend/register-struct-call.ts)

@@ -34,7 +34,7 @@ import type { ContextGlobals } from '../proto-context';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import { ARM_REGISTER_ALIASES, type TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
-import { type CallDeclarations, type CallLowering, callDeclarations } from './call-plan';
+import { type CallDeclarations, type CallLowering, argRegisterBound, callDeclarations } from './call-plan';
 import { type CalleeStackWords, asksCalleeBody } from './callee-body';
 import { CONTROL_BYTE, asciiTrim, isNonAscii } from './control-byte';
 import { unreadPairHalf } from './dead-reads';
@@ -3496,8 +3496,7 @@ function liftOnce(
     | 'contextOwnWords'
     | 'contextOwnProto'
     | 'ownMemoryReturn'
-    | 'calleeBodyBound'
-    | 'calleeStackWords'
+    | 'calleeBody'
     | 'stackSized'
     | 'entryReadCalls'
     | 'asmIncludes'
@@ -4338,8 +4337,8 @@ function measureThumbFrame({
    *  leaves the operand in place. */
   dropsVoidReturn: boolean;
   /** the incoming stack words a callee nothing declares loads, off its own body
-   *  (`LiftOptions.calleeStackWords`): the outgoing-argument analysis's `bodyReads`, which asks it
-   *  only where the code stages a block */
+   *  (`LiftOptions.calleeBody`'s `stackWords`): the outgoing-argument analysis's `bodyReads`, which
+   *  asks it only where the code stages a block */
   stackWordsOf?: CalleeStackWords;
 }): ThumbFrame {
   // THE FRAME BASE PASSED TO A CALLEE. What this computes is exactly what its name says and nothing
@@ -5582,10 +5581,12 @@ function frameAddressesAt(
 // A CALL hands over the argument registers its callee's DECLARATION reads — one per 32-bit word,
 // so `g(void)` is handed nothing — and every argument register where nothing declares it. A call
 // through a register (`blx r3`, a `_call_via_r3` thunk) branches THROUGH that register; it does not
-// pass it. "Every register" is wider than what the lift passes an undeclared callee — a guessed
-// count, or the bound of a call through an argument register — and the two agree on a frame address
-// only because the lowering refuses to leave one out (`lowerCall`'s `leftOut`, over
-// `frameAddressesAt`, which holds at each call a superset of what the walks here hold) — of
+// pass it, and through argument register rK it hands over r0..r(K-1) alone, the bound the lowering
+// reads it at (agbcc's `*call_indirect` puts the address in a register no argument is live in, and
+// fills the arguments from r0 up). "Every register" is wider than what the lift passes an
+// undeclared callee — a guessed count — and the two agree on a frame address only because the
+// lowering refuses to leave one out (`lowerCall`'s `leftOut`, over `frameAddressesAt`, which holds
+// at each call a superset of what the walks here hold) — of
 // the registers its guess leaves out, of those the trim cuts afterwards (`GuessedCallSite.
 // trimmed`), and of those the call's own block wrote that the ranked `/setup-args` reading would
 // cut, which is withheld for that site instead (it runs in the ranker, after the audit below). Where
@@ -5619,7 +5620,12 @@ function frameAddressReceivers(
   if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
     const targetReg = calleeRegister(ins, target);
     const declared = targetReg === null ? calls.declaredCall(ins.ops[0] ?? '?') : null;
-    const words = declared?.widths.reduce((n, w) => n + Math.ceil(w / 32), 0) ?? target.argRegs.length;
+    // …and through argument register rK, r0..r(K-1) alone: the lowering reads no more, from the
+    // same answer (`argRegisterBound` of `THUMB_CALL_LOWERING`), and agbcc passes no more
+    // (`_call_via_rK`)
+    const through = typeof targetReg === 'string' ? argRegisterBound(THUMB_CALL_LOWERING, target, targetReg) : -1;
+    const words =
+      declared?.widths.reduce((n, w) => n + Math.ceil(w / 32), 0) ?? (through < 0 ? target.argRegs.length : through);
     return target.argRegs.slice(0, words).filter((r) => r !== targetReg);
   }
   if (ins.mnemonic !== 'str') {
@@ -6768,8 +6774,7 @@ function thumbFillOf(
     contextOwnWords,
     contextOwnProto,
     ownMemoryReturn,
-    calleeBodyBound,
-    calleeStackWords,
+    calleeBody,
     stackSized,
     entryReadCalls,
     asmIncludes,
@@ -6778,8 +6783,7 @@ function thumbFillOf(
     | 'contextOwnWords'
     | 'contextOwnProto'
     | 'ownMemoryReturn'
-    | 'calleeBodyBound'
-    | 'calleeStackWords'
+    | 'calleeBody'
     | 'stackSized'
     | 'entryReadCalls'
     | 'asmIncludes'
@@ -6798,7 +6802,7 @@ function thumbFillOf(
       throw new FrontendUnsupportedError(message);
     },
     () => ownDeclarationOf(name, prototypes, contextOwnProto),
-    calleeBodyBound,
+    calleeBody,
     entryReadCalls,
     stackSized,
   );
@@ -6813,7 +6817,7 @@ function thumbFillOf(
     dropsVoidReturn: declaresVoidReturn(prototypes[name]),
     stackWordsOf: (callee) =>
       asksCalleeBody(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined)
-        ? calleeStackWords?.(callee)
+        ? calleeBody?.stackWords?.(callee)
         : undefined,
   });
 
@@ -8017,10 +8021,10 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
     // definition test). A count that leaves out a register holding one lifts the call without the
     // address, and the object's reads come back as a local nothing wrote (`func(p0, p1, p2, &d[1])`
     // as `func()`, then `*data = sp1`). A GUESSED count leaves one out only past a register it did
-    // not set, which is a gap the guess refuses first (`guess` below); what reaches here is a call
-    // through r1, which stops at the bound r1 sets and leaves r2 out (`CallDeclarations.lower`'s
-    // KNOWN GAP), and the `/setup-args` cut (`asksEveryCut`). Which count is right the register
-    // file cannot say, so this refuses.
+    // not set, which is a gap the guess refuses first (`guess` below); what reaches here is the
+    // `/setup-args` cut (`asksEveryCut`) and the trim (`GuessedCallSite.trimmed`). Which count is
+    // right the register file cannot say, so this refuses. A call through argument register rK is
+    // not asked: no register at or past rK is an argument of it (`frameAddressReceivers`).
     //
     // …UNLESS A REGISTER IT DOES PASS HOLDS THE SAME ADDRESS, in the call's own block: the callee is
     // handed the object either way, and agbcc leaves a capture it addressed through in r3 beside
@@ -8209,12 +8213,31 @@ function fallLabel(asmBlocks: readonly AsmBlock[], name: string, bi: number): st
   return nb.label;
 }
 
+/** Whether some return of `callee` in `text` that its entry reaches is a `bx` through the return
+ *  register (agbcc's `pop {r0}; bx r0`), every return read as the lift reads it: a `bx` the CFG
+ *  cannot show to jump to the caller's lr is no return, and answers false
+ *  (`refuseReturnsNotThroughCallersLr`), as does a text the lift's decode refuses. */
+function returnsThroughReturnReg(callee: string, text: string, target: TargetDescription): boolean {
+  try {
+    const read = readThumbText(callee, text, target.compilerBehaviors.farJumpRelay?.comment);
+    const cfg = thumbCfg(callee, read.blocks, read.tables);
+    refuseReturnsNotThroughCallersLr(callee, cfg);
+    return [...cfg.entryReachable].some((b) => {
+      const last = cfg.asmBlocks[b].instrs.at(-1);
+      return last?.mnemonic === 'bx' && last.ops[0] === target.returnReg;
+    });
+  } catch {
+    return false;
+  }
+}
+
 /** The ARMv4T / Thumb (agbcc) frontend, registered for the `armv4t` target. */
 export const thumbFrontend: Frontend = {
   id: 'thumb',
   inputFormat: 'gnu-as',
   lift,
   entryStackWords: thumbEntryWordsFromText,
+  returnsThroughReturnReg,
 };
 
 /** Internal surface for this module's own tests, and for nothing else. `@asmlift/core` exports

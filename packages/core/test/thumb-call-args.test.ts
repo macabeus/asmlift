@@ -476,14 +476,25 @@ describe('a frame address an undeclared arity leaves out refuses', () => {
     );
   });
 
-  // A call through r1 passes r0 alone (`argRegisterBoundsArity`), which is only a bound.
-  test('a capture above the bound of a call through an argument register declines', () => {
-    const bnd =
-      'bnd:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr4, sp\n\tadd\tr2, r4, #0\n\tmov\tr0, #0x1\n' +
-      '\tbl\t_call_via_r1\n\tldrb\tr0, [r4]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
-    expect(() => decompile('bnd', bnd, ARMV4T_AGBCC)).toThrow(
-      /'bl _call_via_r1' has no prototype, and the arity lifted without one leaves out r2/,
+  // A call through argument register rK passes r0..r(K-1) at most (`argRegisterBoundsArity`): agbcc's
+  // `*call_indirect` puts the address in a register no argument is live in and fills the arguments
+  // from r0 up, so a frame address left at or past rK is no argument of it. agbcc's own output for
+  // `extern void (*gfp2)(int, int); void take(u16 *); void cf(int a, int b, u16 c) { u16 s; s = c;
+  // gfp2(a, b); take(&s); }` leaves the `mov r3, sp` it stored `c` through in r3 at the call through
+  // r2, and `take` alone is handed the object.
+  test('a capture at or past the register a call goes through is no argument of it', () => {
+    const cf =
+      'cf:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr3, sp\n\tstrh\tr2, [r3]\n\tldr\tr2, .L3\n\tldr\tr2, [r2]\n' +
+      '\tbl\t_call_via_r2\n\tmov\tr0, sp\n\tbl\ttake\n\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n.L3:\n\t.word\tgfp2\n';
+    expect(decompile('cf', cf, ARMV4T_AGBCC).source).toContain(
+      '    sp0 = a2;\n    ((s32 (*)())gfp2)(a0, a1);\n    take(&sp0);\n',
     );
+    // CONTROL: through r4 nothing bounds the call, so its arity is guessed, and the guess refuses
+    const r4 = cf.replace(
+      'r2, .L3\n\tldr\tr2, [r2]\n\tbl\t_call_via_r2',
+      'r4, .L3\n\tldr\tr4, [r4]\n\tbl\t_call_via_r4',
+    );
+    expect(() => decompile('cf', r4, ARMV4T_AGBCC)).toThrow(/'bl _call_via_r4' in block 'cf' has no prototype/);
   });
 
   // r1 is captured into AFTER the first call, so at that call it still holds the caller's value.

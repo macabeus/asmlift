@@ -8,7 +8,7 @@ import type { ContextGlobals } from '../proto-context';
 import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
-import type { CalleeBodyBound, CalleeStackWords, EntryStackWords } from './callee-body';
+import type { CalleeBodyReaders, EntryStackWords } from './callee-body';
 import type { AsmTextFormat } from './format';
 
 export interface Frontend {
@@ -39,6 +39,11 @@ export interface Frontend {
    *  frontend's input format, loads (frontend/callee-body.ts `CalleeStackWords`), asked of a callee
    *  whose body does not lift; absent where this frontend reads no entry */
   entryStackWords?: EntryStackWords;
+  /** whether some return of a callee, in a text of this frontend's input format, that its entry
+   *  reaches branches through the return register, which then holds the return address and no value
+   *  (frontend/callee-body.ts `CalleeReturnsNoHiddenPointer`), asked of a callee whose body does not
+   *  lift; absent where no return of this ISA can */
+  returnsThroughReturnReg?: (callee: string, text: string, target: TargetDescription) => boolean;
 }
 
 /** THE FUNCTION'S OWN DECLARATION, as a call lowering reads it (frontend/call-plan.ts
@@ -101,16 +106,16 @@ export interface LiftOptions {
   /** Called when the lift met such a slot, whichever way it answered: what rank.ts asks before
    *  enumerating `/kept-slot` at all. */
   onTailSlot?: () => void;
-  /** The argument words a callee's own body in the same input can read at most
-   *  (frontend/callee-body.ts), asked of a call whose arity no declaration states. pipeline.ts
-   *  `liftStamped` supplies it on every lift; absent, nothing is bounded. */
-  calleeBodyBound?: CalleeBodyBound;
-  /** The incoming stack words a callee's own body, in the input or handed in, is proven to load
-   *  (frontend/callee-body.ts `CalleeStackWords`), asked of a call no declaration lays out that
-   *  stages words in the outgoing area. pipeline.ts `liftStamped` supplies it on every lift. */
-  calleeStackWords?: CalleeStackWords;
+  /** What a callee's own body, in the input or handed in, says of a call no declaration lays out
+   *  (frontend/callee-body.ts `CalleeBodyReaders`): the argument words it reads at most (`bound`),
+   *  the incoming stack words it is proven to load (`stackWords`), whether it proves it returns no
+   *  struct through a hidden pointer (`returnsNoHiddenPointer`), and whether it reads its first
+   *  argument register's incoming value (`readsFirstArgument`). pipeline.ts `liftStamped` supplies
+   *  every reader on every lift, off one lift of each body, and fills any one a caller leaves out;
+   *  a reader absent here answers nothing. */
+  calleeBody?: Partial<CalleeBodyReaders>;
   /** Told of each call nothing declares that the lift laid out at every argument register and the
-   *  stack words its callee's body loads (`calleeStackWords`), with that word count. */
+   *  stack words its callee's body loads (`calleeBody.stackWords`), with that word count. */
   stackSized?: (callee: string, words: number) => void;
   /** The callees whose calls are taken at every argument register that may still hold this
    *  function's own incoming value at the call, where no declaration lays the call out: how

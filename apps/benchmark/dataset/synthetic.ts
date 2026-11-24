@@ -106,6 +106,8 @@ const MWCC_O0P = [
 ];
 // The same set at -O4,p, which the update-form rows (`upd_*`) build at.
 const MWCC_O4P = MWCC_O0P.map((f) => (f === '-O0,p' ? '-O4,p' : f));
+// …and with `-inline off`, for a row whose callee `-inline auto` would fold into the caller.
+const MWCC_O4P_INLINE_OFF = MWCC_O4P.map((f) => (f === 'auto' ? 'off' : f));
 // The float compare rows that branch rather than return the relation, and those of them the source
 // declares void (each a float block below).
 const FCMP_BRANCH_ROWS: ReadonlySet<string> = new Set([
@@ -4749,6 +4751,207 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'extern int gy;\nvoid cb();\nvoid bxr0_call(int a, int b);',
     proto: { bxr0_call: { returnsVoid: true }, cb: { returnsVoid: true } },
+  },
+  // A CALLEE BODY HOLDING A CALL THROUGH A THUNK REGISTER STILL BOUNDS (frontend/callee-body.ts,
+  // `ARGS_BOUND_BY_ADDRESS`). agbcc calls through a function pointer with `bl _call_via_rK`, and
+  // with K below r4 the call takes at most r0..r(K-1) and no stack word (compiled: 0..3 arguments
+  // go through r0..r3 at -O1 and -O2), so `h`, which hands `a + 1` to `gfp` through r1, reads r0
+  // alone. Read as a body proving nothing, the caller's guess counts every register a value reaches
+  // and lifts `h(b, b, &gy)`, the `&gy` its store left in r2; bounded by the body, `h(b)` (kl2dct
+  // sub_0804E8CC's callee sub_0804A2B4 is such a body). agbcc only: no other lowering states that the
+  // address register bounds the call.
+  {
+    sym: 'callvia_body',
+    src:
+      'extern void (*gfp)(int);\nextern int gy, gz;\nvoid h(int a)\n{\n    gfp(a + 1);\n    gz = 0;\n}\n' +
+      'void callvia_body(int *p, int b)\n{\n    p[3] = b;\n    gy = 7;\n    h(b);\n}',
+    features: ['fnptr'],
+    toolchains: ['agbcc'],
+    ctx: 'extern void (*gfp)(int);\nextern int gy, gz;\nvoid h();\nvoid callvia_body(int *p, int b);',
+    proto: { callvia_body: { returnsVoid: true }, h: { returnsVoid: true } },
+  },
+  // A FRAME ADDRESS LEFT AT OR PAST THE REGISTER A CALL GOES THROUGH IS NO ARGUMENT OF IT
+  // (frontend/call-plan.ts, the `leftOut` question; frontend/thumb.ts `frameAddressReceivers`).
+  // agbcc stores `c` through `mov r3, sp` (strh has no sp form) and calls `gfp2` through r2 with
+  // r3 still holding the frame address. `bl _call_via_r2` takes r0 and r1 at most, so `take` alone
+  // is handed `&s`, and r3 is not asked about as an argument the arity left out (kl2dct
+  // sub_0800E8A0, whose `add r3, sp, #8` reaches its `_call_via_r2` calls). agbcc only.
+  {
+    sym: 'callvia_frame',
+    src:
+      'extern void (*gfp2)(int, int);\nextern void take(u16 *);\n' +
+      'void callvia_frame(int a, int b, u16 c)\n{\n    u16 s;\n    s = c;\n    gfp2(a, b);\n    take(&s);\n}',
+    features: ['fnptr', 'stack-addr'],
+    toolchains: ['agbcc'],
+    ctx: 'extern void (*gfp2)(int, int);\nextern void take(u16 *);\nvoid callvia_frame(int a, int b, u16 c);',
+    proto: { callvia_frame: { returnsVoid: true }, take: { params: ['u16 *'], returnsVoid: true } },
+  },
+  // A CALLEE'S BODY PROVES IT TAKES NO HIDDEN STRUCT-RETURN POINTER (frontend/callee-body.ts
+  // `CalleeReturnsNoHiddenPointer`). An out-parameter at argument 0 and a struct returned through
+  // memory are the same caller bytes, so with `g` undeclared the frame audit declines on `b`
+  // (`hiddenReturnPointerStands`). agbcc hands the pointer back in r0 at every return of a struct
+  // return (`structReturnHandsBackPointer`; compiled `struct R mk(int *)` is `pop {r1}; bx r1` with r0
+  // still the pointer at -O0..-Os), and `g` returns through `pop {r0}; bx r0`, which holds the return
+  // address: `g` is no struct return, and `b` is the 16 bytes it fills (kl2dct sub_0801D104's callee
+  // sub_0801C234 is such a body). Nothing declares `g` in the context: a declared return answers
+  // without the body. agbcc only: the return through the return register is ARM's.
+  {
+    sym: 'sretbody_void',
+    src:
+      'extern void h(void);\nvoid g(unsigned char *d, unsigned char *s, int n)\n{\n' +
+      '    while (n-- > 0) *d++ = *s++;\n    h();\n}\n' +
+      'void sretbody_void(unsigned char *src)\n{\n    unsigned char b[16];\n    g(b, src, 16);\n}',
+    features: ['struct-return'],
+    toolchains: ['agbcc'],
+    ctx: 'extern void h(void);\nvoid sretbody_void(unsigned char *src);',
+    proto: { sretbody_void: { returnsVoid: true }, h: { params: [], returnsVoid: true } },
+  },
+  // …and a body that returns a constant is no struct return either, on every compiler that hands the
+  // pointer back at each return: agbcc and the three O32 ones (`move v0, a0`, measured at the field).
+  // mwcc reloads r3 from a frame word before the `blr` (`structReturnHandsBackPointer: false`), so a
+  // constant there proves nothing and the row stays declined.
+  {
+    sym: 'sretbody_const',
+    src:
+      'int g(unsigned char *d, unsigned char *s, int n)\n{\n    while (n-- > 0) *d++ = *s++;\n    return 0;\n}\n' +
+      'void sretbody_const(unsigned char *src)\n{\n    unsigned char b[16];\n    g(b, src, 16);\n}',
+    features: ['struct-return'],
+    toolchains: [...FIVE],
+    ctx: 'void sretbody_const(unsigned char *src);',
+    proto: { sretbody_const: { returnsVoid: true } },
+  },
+  // AN EARLIER CALL'S RESULT HANDED ON TO A CALLEE WHOSE BODY READS IT IS AN ARGUMENT
+  // (frontend/call-plan.ts, the named call's `passesCalleeResult`). `mkbuf`'s result is still in the
+  // return register at the call to `fill`, and `f(); g();` and `g(f())` are the same bytes where that
+  // register is the first argument register (agbcc r0, mwcc r3), so the trim drops it as no argument:
+  // `fill()`, a buffer nothing fills. `fill`'s body reads it as a parameter, so the call takes that
+  // word and lifts `fill(v0)` (pokeemerald GenerateBattlePyramidFloorLayout passes AllocZeroed's
+  // buffer to GetPyramidFloorLayoutOffsets so). mwcc, the other compiler whose return register is
+  // the first argument one, inlines `fill` at its canonical `-inline auto`, so its rows build at
+  // `-inline off`, where the call stays and its body is read the same way (`fill(v0)`).
+  {
+    sym: 'resultbody',
+    src:
+      'extern int gk;\nextern unsigned char *mkbuf(int);\n' +
+      'void fill(unsigned char *p)\n{\n    int i;\n    for (i = 0; i < 4; i++) p[i] = gk + i;\n}\n' +
+      'int resultbody(int a)\n{\n    unsigned char *o = mkbuf(16);\n    fill(o);\n    return o[a];\n}',
+    features: [],
+    toolchains: ['agbcc'],
+    ctx: 'extern int gk;\nint resultbody(int a);',
+  },
+  {
+    sym: 'resultbody',
+    src:
+      'extern int gk;\nextern unsigned char *mkbuf(int);\n' +
+      'void fill(unsigned char *p)\n{\n    int i;\n    for (i = 0; i < 4; i++) p[i] = gk + i;\n}\n' +
+      'int resultbody(int a)\n{\n    unsigned char *o = mkbuf(16);\n    fill(o);\n    return o[a];\n}',
+    features: [],
+    toolchains: ['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'],
+    cflags: MWCC_O4P_INLINE_OFF,
+    ctx: 'extern int gk;\nint resultbody(int a);',
+  },
+  // …AND NONE IS HANDED ON WHERE THE BODY READS THE REGISTER ONLY THROUGH A JOIN WITH A VALUE IT
+  // WROTE (frontend/callee-body.ts `readsFirstArgument`): `settle`'s uninitialised `x` sits in the
+  // first argument register (agbcc r0, mwcc r3), read where the loop never ran, the same bytes as a
+  // reassigned parameter, so `mkval(); settle();` lifts as written, where reading it as a
+  // parameter lifted `settle(mkval())`, which the source's `void settle(void)` does not compile.
+  // Both spellings are the same caller bytes, so the score cannot tell them apart; the unit test in
+  // callee-body.test.ts pins the spelling, and this row the lift.
+  {
+    sym: 'resultuninit',
+    src:
+      'extern int gk, gy;\nextern int mkval(void);\n' +
+      'void settle(void)\n{\n    int x;\n    while (gk) { gk--; x = gk; }\n    gy = x + 1;\n}\n' +
+      'void resultuninit(void)\n{\n    mkval();\n    settle();\n}',
+    features: [],
+    toolchains: ['agbcc'],
+    ctx: 'extern int gk, gy;\nvoid resultuninit(void);',
+    proto: { resultuninit: { returnsVoid: true } },
+  },
+  {
+    sym: 'resultuninit',
+    src:
+      'extern int gk, gy;\nextern int mkval(void);\n' +
+      'void settle(void)\n{\n    int x;\n    while (gk) { gk--; x = gk; }\n    gy = x + 1;\n}\n' +
+      'void resultuninit(void)\n{\n    mkval();\n    settle();\n}',
+    features: [],
+    toolchains: ['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'],
+    cflags: MWCC_O4P_INLINE_OFF,
+    ctx: 'extern int gk, gy;\nvoid resultuninit(void);',
+    proto: { resultuninit: { returnsVoid: true } },
+  },
+  // …WHILE A JOIN OF THE REGISTER WITH THE BODY'S OWN STEP OF IT IS A READ: a loop-carried
+  // parameter reaches its loop header merged with `p + 3` or `a + 1`, which the body computed from
+  // that header and a literal alone, no uninitialised local's bytes. Reading such a join as none
+  // lifted `fill()` (a buffer nothing fills) and `cnt()`.
+  {
+    sym: 'resultwalk',
+    src:
+      'extern int gk;\nextern unsigned char *mkbuf(int);\n' +
+      'void fill(unsigned char *p)\n{\n    while (gk) { gk--; *p = 7; p += 3; }\n}\n' +
+      'int resultwalk(int a)\n{\n    unsigned char *o = mkbuf(16);\n    fill(o);\n    return o[a];\n}',
+    features: [],
+    toolchains: ['agbcc'],
+    ctx: 'extern int gk;\nint resultwalk(int a);',
+  },
+  {
+    sym: 'resultwalk',
+    src:
+      'extern int gk;\nextern unsigned char *mkbuf(int);\n' +
+      'void fill(unsigned char *p)\n{\n    while (gk) { gk--; *p = 7; p += 3; }\n}\n' +
+      'int resultwalk(int a)\n{\n    unsigned char *o = mkbuf(16);\n    fill(o);\n    return o[a];\n}',
+    features: [],
+    toolchains: ['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'],
+    cflags: MWCC_O4P_INLINE_OFF,
+    ctx: 'extern int gk;\nint resultwalk(int a);',
+  },
+  {
+    sym: 'resultcount',
+    src:
+      'extern int gk, gy;\nextern int mkval(void);\n' +
+      'void cnt(int a)\n{\n    while (gk) { gk--; gy += a; a++; }\n}\n' +
+      'void resultcount(void)\n{\n    cnt(mkval());\n}',
+    features: [],
+    toolchains: ['agbcc'],
+    ctx: 'extern int gk, gy;\nvoid resultcount(void);',
+    proto: { resultcount: { returnsVoid: true } },
+  },
+  {
+    sym: 'resultcount',
+    src:
+      'extern int gk, gy;\nextern int mkval(void);\n' +
+      'void cnt(int a)\n{\n    while (gk) { gk--; gy += a; a++; }\n}\n' +
+      'void resultcount(void)\n{\n    cnt(mkval());\n}',
+    features: [],
+    toolchains: ['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'],
+    cflags: MWCC_O4P_INLINE_OFF,
+    ctx: 'extern int gk, gy;\nvoid resultcount(void);',
+    proto: { resultcount: { returnsVoid: true } },
+  },
+  // …and so is one stepped by a constant built from literals alone: agbcc makes `a += 300` past
+  // imm8 as `mov r2, #0x96; lsl r2, r2, #0x1` above the loop, which lifted `mkval(); cnt();`.
+  {
+    sym: 'resultstep',
+    src:
+      'extern int gk, gy;\nextern int mkval(void);\n' +
+      'void cnt(int a)\n{\n    while (gk) { gk--; a += 300; }\n    gy = a;\n}\n' +
+      'void resultstep(void)\n{\n    cnt(mkval());\n}',
+    features: [],
+    toolchains: ['agbcc'],
+    ctx: 'extern int gk, gy;\nvoid resultstep(void);',
+    proto: { resultstep: { returnsVoid: true } },
+  },
+  {
+    sym: 'resultstep',
+    src:
+      'extern int gk, gy;\nextern int mkval(void);\n' +
+      'void cnt(int a)\n{\n    while (gk) { gk--; a += 300; }\n    gy = a;\n}\n' +
+      'void resultstep(void)\n{\n    cnt(mkval());\n}',
+    features: [],
+    toolchains: ['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'],
+    cflags: MWCC_O4P_INLINE_OFF,
+    ctx: 'extern int gk, gy;\nvoid resultstep(void);',
+    proto: { resultstep: { returnsVoid: true } },
   },
   // `spillarg` is `spill10` with a genuine outgoing argument under the spills: `five(i, 1, 2, 3,
   // v0)` stages argument 5 at [sp,#0] before every call and agbcc moves the spills above it, to

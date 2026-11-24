@@ -27,7 +27,17 @@ import {
   returnsInMemory,
   returnsWithoutHiddenPointer,
 } from '../aggregate';
-import { type Block, FLOATS_ATTR, type Op, REGISTER_STRUCT, type Value, calleeName, mkOp, mkValue } from '../ir/core';
+import {
+  ARGS_BOUND_BY_ADDRESS,
+  type Block,
+  FLOATS_ATTR,
+  type Op,
+  REGISTER_STRUCT,
+  type Value,
+  calleeName,
+  mkOp,
+  mkValue,
+} from '../ir/core';
 import { qualified } from '../ir/discipline';
 import { OPCODES, type OpSig } from '../ir/opcodes';
 import { type IrType, T, structSpelling, typeToString } from '../ir/types';
@@ -55,7 +65,7 @@ import { type ContextGlobals, structNamed } from '../proto-context';
 import { floatSidesOf, helperPrototypes, isFloatHelper, isWideHelper, lookupHelper } from '../runtime-helpers';
 import { type SymbolMap, symbolsByName } from '../symbols';
 import { type TargetDescription, argRegisterHoles } from '../target';
-import { type CalleeBodyBound, asksCalleeBody } from './callee-body';
+import { type CalleeBodyReaders, asksCalleeBody } from './callee-body';
 import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 import { type OwnDeclaration, ownDeclarationOf } from './frontend';
 import type { HighHalves } from './high-half';
@@ -148,7 +158,8 @@ export interface CallDeclarations {
   /** what any call leaves holding nothing this function can name (`clobberedByCall`) */
   readonly callClobbers: readonly string[];
   /** whether a declaration rules out a struct returned through a hidden pointer at argument 0
-   *  (`returnsWithoutHiddenPointer`, aggregate.ts) */
+   *  (`returnsWithoutHiddenPointer`, aggregate.ts), or, where none declares the callee's return, its
+   *  own compiled body does (`CalleeReturnsNoHiddenPointer`, frontend/callee-body.ts) */
   returnsWithoutHiddenPointer(callee: string): boolean;
   /** the callee's declared argument widths, for a frontend that places them before it lowers the
    *  call; null where no declaration sizes them */
@@ -251,10 +262,11 @@ export interface CallSite {
      *  frontend's frame model already refuses every word such a guess could leave out */
     refuse?(argc: number): void;
   };
-  /** handed the argument registers an UNDECLARED arity leaves out although a value reaches them —
-   *  past a guessed count, or past the bound of a call through an argument register — and the ones
-   *  it passes. The call drops what the left-out ones hold, so a frontend that knows one to be an
-   *  argument all the same refuses here. */
+  /** handed the argument registers a GUESSED arity leaves out although a value reaches them — past
+   *  the guessed count — and the ones it passes. The call drops what the left-out ones hold, so a
+   *  frontend that knows one to be an argument all the same refuses here. Not asked of a call
+   *  through an argument register where the lowering states that register bounds the arity
+   *  (`CallLowering.argRegisterBoundsArity`): no register at or past it is an argument. */
   readonly leftOut?: (regs: readonly string[], passed: readonly string[]) => void;
   /** whether the frontend withholds the shorter `/setup-args` reading from THIS CALL whatever it
    *  cuts; the frontend says why where it sets it. A thunk: it is asked once every block is lowered. */
@@ -274,6 +286,14 @@ export interface IndirectCallee {
   readonly reg: string;
 }
 
+/** How many argument words a call through register `reg` passes where its lowering states that
+ *  register bounds the arity (`CallLowering.argRegisterBoundsArity`): its index among the argument
+ *  registers. -1 where the lowering states no bound or `reg` is no argument register. The lowering
+ *  (`CallDeclarations.lower`) and a frontend's own escape model read this one answer. */
+export function argRegisterBound(lowering: CallLowering, target: TargetDescription, reg: string): number {
+  return lowering.argRegisterBoundsArity ? target.argRegs.indexOf(reg) : -1;
+}
+
 /** How a frontend builds a 64-bit value out of two words and splits one. */
 export interface CallPairs {
   fuse(lo: Value, hi: Value): Value;
@@ -290,15 +310,22 @@ export function callDeclarations(
   fail: FrontendRefusal,
   /** the function's own declaration, where one binds its body — asked as a call is lowered */
   ownDeclaration: () => OwnDeclaration | undefined = () => ownDeclarationOf(name, prototypes, undefined),
-  /** the argument words a callee's own body reads at most, where it is in the input
-   *  (frontend/callee-body.ts) — asked of a named call no declaration lays out */
-  calleeBodyBound?: CalleeBodyBound,
+  /** what a callee's own body says (`LiftOptions.calleeBody`), asked of a named call no declaration
+   *  lays out: the argument words it reads at most, whether it proves it returns no struct through
+   *  a hidden pointer (where no declaration rules one out), and whether it reads its first argument
+   *  register (where the trim would drop an earlier call's result there) */
+  calleeBody: Partial<CalleeBodyReaders> = {},
   /** the callees taken at every argument register that may still hold its entry value
    *  (`LiftOptions.entryReadCalls`) */
   entryReadCalls?: ReadonlySet<string>,
   /** told of each call laid out at the stack words its callee's body loads (`LiftOptions.stackSized`) */
   stackSized?: (callee: string, words: number) => void,
 ): CallDeclarations {
+  const {
+    bound: calleeBodyBound,
+    returnsNoHiddenPointer: calleeReturnsNoHiddenPointer,
+    readsFirstArgument: calleeReadsFirstArgument,
+  } = calleeBody;
   // What a call leaves holding nothing this function can name — checked against `argRegs` there.
   const callClobbers = clobberedByCall(target);
   // `refuseDispatchUnlockedPassThrough`'s two facts, gathered as each call is lowered: whether a
@@ -937,8 +964,7 @@ export function callDeclarations(
     // (`void f(int x, void (*g)(void)) { g(); }` calls through r1, the bytes `g(x)` compiles to), so
     // the registers in between read as arguments the source never passed. Only the pointer's
     // declared type decides the arity, and nothing reads one.
-    const bound =
-      indirect === undefined || !lowering.argRegisterBoundsArity ? -1 : target.argRegs.indexOf(indirect.reg);
+    const bound = indirect === undefined ? -1 : argRegisterBound(lowering, target, indirect.reg);
     const p: CallPlan =
       indirect === undefined
         ? plan(callee!)
@@ -1218,13 +1244,16 @@ export function callDeclarations(
       }
     }
     // WHAT THE ARITY LEFT OUT, where no declaration stated it: an argument register past a guessed
-    // count, or past the bound a call through an argument register sets, that a value reaches.
-    // The gap refusal has already fired on any such register past a guess; past the bound, the
-    // register leaves the call silently, and the frontend says whether it knows that one to be an
-    // argument all the same. A register at or past what the callee's own body reads is no
-    // argument of it whatever it holds, so it is not asked: read only where the count already asked
-    // the body, the one place the bound left a register out (`fallbackArgc`'s `bound`).
-    if (site.leftOut !== undefined && (widths === null || bound >= 0)) {
+    // count that a value reaches. The gap refusal has already fired on any such register; the
+    // frontend says whether it knows that one to be an argument all the same. A register at or past
+    // what the callee's own body reads is no argument of it whatever it holds, so it is not asked:
+    // read only where the count already asked the body, the one place the bound left a register out
+    // (`fallbackArgc`'s `bound`). Nor is a register at or past the one a call goes through where the
+    // lowering states that it bounds the arity (`argRegisterBoundsArity`): that statement is that
+    // none of them is an argument, so a frame address left in one is not handed to the callee
+    // (agbcc's `_call_via_r2` takes r0 and r1 at most, and an `add r3, sp, #k` left over is no
+    // argument of it).
+    if (site.leftOut !== undefined && widths === null) {
       const readTo = bodyMemo?.words ?? target.argRegs.length;
       site.leftOut(
         target.argRegs
@@ -1339,6 +1368,7 @@ export function callDeclarations(
       results: [res],
       attrs: {
         ...(callee !== undefined ? { target: callee } : { indirect: true }),
+        ...(bound >= 0 ? { [ARGS_BOUND_BY_ADDRESS]: true } : {}),
         ...(sret === undefined ? {} : { sret: true }),
         ...(returns.kind === 'register-struct' && returns.image ? { [REGISTER_STRUCT]: true } : {}),
         ...(floats === undefined ? {} : { [FLOATS_ATTR]: floats }),
@@ -1382,17 +1412,35 @@ export function callDeclarations(
     // as well: a guess of four the check above passed can still lose a frame address in r2 when
     // the trim cuts it back to the run below an unfresh r1 (`v = f64(); g(v, &s)` with neither
     // declared, which otherwise lifts as `g(v)`).
+    //
+    // A NAMED CALL IS PASSED AN EARLIER CALLEE'S RESULT ITS OWN BODY READS AS A PARAMETER: `f(); g();`
+    // and `g(f())` are the same bytes, and the trim reads the first (call-arity.ts
+    // `trimClobberedCallArgs`), but where g's body reads its first argument register's incoming
+    // value (`CalleeReadsFirstArgument`, a lower bound: a read other than a return or a call its
+    // lift forced) the call takes at least that word, and nothing since the earlier call wrote it,
+    // so the word is that call's result. `o = AllocZeroed(16); fill(o); return o[a];` lifts
+    // `fill(v0)`, where the trim alone reads `fill()` and leaves the buffer unfilled. A result
+    // declared void names nothing a call can be passed. The register bound is an upper one, and is
+    // not asked: it counts r0 for a body whose undeclared call or untouched return reads it, which no
+    // parameter need be (`int g(void)` returns through `pop {r1}; bx r1` too). KNOWN GAP: the one
+    // `CalleeReadsFirstArgument` states.
     if (widths === null) {
       const leftOut = site.leftOut;
+      const libcallResult =
+        target.compilerBehaviors.deletesDeadLibcalls === true
+          ? (r: Value) => helperResults.has(r) && ssa.readByGuessedCallsAlone(r)
+          : undefined;
+      let readsFirst: boolean | undefined;
+      const bodyReadsFirst = (): boolean => (readsFirst ??= calleeReadsFirstArgument!(callee!) === true);
       ssa.recordGuessedCall(
         call,
         bi,
         target,
         indirect !== undefined
           ? (r) => !voidResults.has(r)
-          : target.compilerBehaviors.deletesDeadLibcalls === true
-            ? (r) => helperResults.has(r) && ssa.readByGuessedCallsAlone(r)
-            : undefined,
+          : unstated && calleeReadsFirstArgument !== undefined
+            ? (r) => (!voidResults.has(r) && bodyReadsFirst()) || libcallResult?.(r) === true
+            : libcallResult,
         leftOut === undefined
           ? undefined
           : (cut, kept) =>
@@ -1432,7 +1480,9 @@ export function callDeclarations(
   };
   return {
     callClobbers,
-    returnsWithoutHiddenPointer: (callee) => returnsWithoutHiddenPointer(callee, prototypes, target),
+    // a declaration, or else the callee's own body (one declared to return a struct is not read)
+    returnsWithoutHiddenPointer: (callee) =>
+      returnsWithoutHiddenPointer(callee, prototypes, target) || calleeReturnsNoHiddenPointer?.(callee) === true,
     declaredCall,
     declaredParams,
     plan,

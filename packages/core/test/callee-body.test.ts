@@ -8,7 +8,7 @@
 import { describe, expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
-import { type CalleeBodies, calleeBodyBounds } from '../src/frontend/callee-body';
+import { type CalleeBodies, calleeBodyBounds, calleeBodyReads } from '../src/frontend/callee-body';
 import { frontendFor } from '../src/frontend/registry';
 import { decompile, liftStamped } from '../src/pipeline';
 import type { Prototypes } from '../src/proto';
@@ -28,7 +28,7 @@ const boundsOf = (
     prototypes,
     (callee, table, entryReadCalls, text) =>
       liftStamped(callee, text, target, table, text === asm ? asmData : undefined, undefined, undefined, {
-        calleeBodyBound: () => undefined,
+        calleeBody: { bound: () => undefined },
         entryReadCalls,
       }),
     external,
@@ -131,7 +131,36 @@ describe('the argument words a callee in the same input reads at most', () => {
   test('agbcc: none, the first, every register through a forwarding thunk, and no proof otherwise', () => {
     expect(
       read(boundsOf(thumb, TOOLCHAIN_TARGETS.agbcc.description), ['rnd', 'rd1', 'thk', 'ind', 'wk', 'st']),
-    ).toEqual({ rnd: 0, rd1: 1, thk: 4, ind: 'none', wk: 'none', st: 'none' });
+    ).toEqual({ rnd: 0, rd1: 1, thk: 4, ind: 2, wk: 'none', st: 'none' });
+  });
+  // agbcc's `bl _call_via_rK` with K below r4 passes at most r0..r(K-1) and no stack word (its
+  // `*call_indirect` takes the address in a register no argument is live in, and it fills r0 up), so
+  // the call reads every argument it can take and the body around it still bounds; through r4 or
+  // past it, the call may take every argument register and stack words, and nothing bounds it
+  test.each([
+    // reads r0 as the call's argument and r1 as its address
+    ['in2', '\tpush\t{lr}\n\tbl\t_call_via_r1\n\tpop\t{r0}\n\tbx\tr0\n', 2],
+    // the address loaded, r0 set: the call reads r0 and r1 of its own, and the body none
+    [
+      'own',
+      '\tpush\t{lr}\n\tldr\tr1, .Lp\n\tmov\tr0, #0x1f\n\tbl\t_call_via_r1\n\tpop\t{r0}\n\tbx\tr0\n.Lp:\n\t.word\tgP\n',
+      0,
+    ],
+    // r2 passed on, r0 and r1 its own: the third argument word is the body's
+    [
+      'r2',
+      '\tpush\t{lr}\n\tldr\tr3, .Lp\n\tmov\tr0, #0\n\tmov\tr1, #0\n\tbl\t_call_via_r3\n\tpop\t{r0}\n\tbx\tr0\n.Lp:\n\t.word\tgP\n',
+      3,
+    ],
+    [
+      'r4',
+      '\tpush\t{r4, lr}\n\tldr\tr4, .Lp\n\tmov\tr0, #0\n\tbl\t_call_via_r4\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.Lp:\n\t.word\tgP\n',
+      undefined,
+    ],
+  ])('agbcc: a body holding a call through a thunk register (%s)', (n, body, bound) => {
+    expect(
+      boundsOf(`\t.code\t16\n\t.text\n\t.thumb_func\n${n}:\n${body}`, TOOLCHAIN_TARGETS.agbcc.description)(n),
+    ).toBe(bound);
   });
   // A call the first one destroyed every argument register before holds none of the callee's
   // arguments: taken at all four, h would read registers g destroyed, and the lift of `two` refuse
@@ -386,5 +415,213 @@ describe('the argument words a callee body handed in from outside the input read
     expect(decompile('f', f, t, { calleeBodies: { rd0: { kind: 'listing', text: rd0 } } }).source).toBe(
       decompile('f', `${rd0}${f}`, t).source,
     );
+  });
+  // agbcc -O2's own output for `static void fill(u8 *p) { int i; for (i = 0; i < 4; i++) p[i] = gk + i; }
+  // int f(int a) { u8 *o = AllocZeroed(16); fill(o); return o[a]; }`: AllocZeroed's result is still
+  // in r0 at `bl fill`, which the trim drops as no argument (`f(); g();` and `g(f())` are the same
+  // bytes). fill's body reads r0 as a parameter, so the call takes it: dropping it lifted `fill()`
+  // and a buffer nothing fills
+  test('decompile: an earlier call`s result the callee`s body reads is passed, one it reads none of is dropped', () => {
+    const t = TOOLCHAIN_TARGETS.agbcc.description;
+    const fill =
+      '\t.thumb_func\nfill:\n\tpush\t{lr}\n\tadd\tr2, r0, #0\n\tldr\tr0, .L8\n\tldr\tr0, [r0]\n' +
+      '\tadd\tr0, r0, #0x3\n\tadd\tr1, r2, #0x3\n.L6:\n\tstrb\tr0, [r1]\n\tsub\tr0, r0, #0x1\n' +
+      '\tsub\tr1, r1, #0x1\n\tcmp\tr1, r2\n\tbge\t.L6\n\tpop\t{r0}\n\tbx\tr0\n.L8:\n\t.word\tgk\n';
+    const f =
+      '\t.thumb_func\nf:\n\tpush\t{r4, r5, lr}\n\tadd\tr4, r0, #0\n\tmov\tr0, #0x10\n\tbl\tAllocZeroed\n' +
+      '\tadd\tr5, r0, #0\n\tbl\tfill\n\tadd\tr5, r5, r4\n\tldrb\tr0, [r5]\n\tpop\t{r4, r5}\n' +
+      '\tpop\t{r1}\n\tbx\tr1\n';
+    const head = '\t.code\t16\n\t.text\n';
+    expect(decompile('f', head + fill + f, t).source).toContain('    fill(v0);\n');
+    // a body handed in decides it the same way, and the result names it (`calleeBodyFacts`)
+    const handed = decompile('f', head + f, t, { calleeBodies: { fill: { kind: 'listing', text: head + fill } } });
+    expect(handed.source).toContain('    fill(v0);\n');
+    expect(handed.calleeBodyFacts).toEqual({ fill: ['readsFirst'] });
+    // …unless that result is declared void, which names nothing a call is passed
+    expect(
+      decompile('f', head + fill + f, t, { prototypes: { AllocZeroed: { params: 1, returnsVoid: true } } }).source,
+    ).toContain('    fill();\n');
+    // with no body, or one that reads no argument register, the result stays the trim's to drop
+    expect(decompile('f', head + f, t).source).toContain('    fill();\n');
+    const rd0 = '\t.thumb_func\nfill:\n\tmov\tr0, #0x1\n\tbx\tlr\n';
+    expect(decompile('f', head + rd0 + f, t).source).toContain('    fill();\n');
+    // …or one whose bound covers r0 only through an undeclared call it makes, or a return of r0
+    // untouched: the bound is an upper one, and neither is a read of a parameter
+    const fwd = '\t.thumb_func\nfill:\n\tpush\t{lr}\n\tbl\th\n\tpop\t{r0}\n\tbx\tr0\n';
+    expect(decompile('f', head + fwd + f, t).source).toContain('    fill();\n');
+    const id = '\t.thumb_func\nfill:\n\tbx\tlr\n';
+    expect(decompile('f', head + id + f, t).source).toContain('    fill();\n');
+    // A CALL THROUGH A THUNK REGISTER ON AN ADDRESS THE BODY LOADS passes what is below it: agbcc
+    // -O2's `static void fill(u8 *p) { gfn1(p); }` is `ldr r1, =gfn1; ldr r1, [r1]; bl _call_via_r1`,
+    // where a call passing nothing loads the address into r0 (`gS.fn()` is `bl _call_via_r0`)
+    const thunk =
+      '\t.thumb_func\nfill:\n\tpush\t{lr}\n\tldr\tr1, .L3\n\tldr\tr1, [r1]\n\tbl\t_call_via_r1\n' +
+      '\tpop\t{r0}\n\tbx\tr0\n.L3:\n\t.word\tgfn1\n';
+    expect(decompile('f', head + thunk + f, t).source).toContain('    fill(v0);\n');
+    // …while one called where it arrived may pass nothing below it: `void fill(int u, void (*fn)(void))
+    // { fn(); }` is `bl _call_via_r1` on the entry r1
+    const inPlace = '\t.thumb_func\nfill:\n\tpush\t{lr}\n\tbl\t_call_via_r1\n\tpop\t{r0}\n\tbx\tr0\n';
+    expect(decompile('f', head + inPlace + f, t).source).toContain('    fill();\n');
+    // A READ THROUGH A JOIN THAT ALSO MERGES A VALUE THE BODY WROTE is none: agbcc -O2's
+    // `void fill(void) { int x; while (gk) { gk--; x = gk; } gy = x + 1; }` keeps x in r0 and adds
+    // to the entry r0 where the loop never ran, the same bytes as a reassigned parameter
+    const uninit =
+      '\t.thumb_func\nfill:\n\tldr\tr2, .L8\n\tldr\tr1, [r2]\n\tldr\tr3, .L8+0x4\n\tcmp\tr1, #0\n' +
+      '\tbeq\t.L4\n.L5:\n\tsub\tr1, r1, #0x1\n\tadd\tr0, r1, #0\n\tcmp\tr0, #0\n\tbne\t.L5\n' +
+      '\tstr\tr0, [r2]\n.L4:\n\tadd\tr0, r0, #0x1\n\tstr\tr0, [r3]\n\tbx\tlr\n' +
+      '.L8:\n\t.word\tgk\n\t.word\tgy\n';
+    expect(decompile('f', head + uninit + f, t).source).toContain('    fill();\n');
+    // …BUT A JOIN WITH THE BODY'S OWN STEP OF THE INCOMING VALUE IS A READ: agbcc -O2's
+    // `void fill(u8 *p) { int i; for (i = 0; i < 16; i++) *p++ = 7; }` reaches the store through a
+    // loop header that merges the entry r0 with `r0 + 1`, computed from that header alone
+    const walk =
+      '\t.thumb_func\nfill:\n\tmov\tr2, #0x7\n\tmov\tr1, #0xf\n.L6:\n\tstrb\tr2, [r0]\n' +
+      '\tadd\tr0, r0, #0x1\n\tsub\tr1, r1, #0x1\n\tcmp\tr1, #0\n\tbge\t.L6\n\tbx\tlr\n';
+    expect(decompile('f', head + walk + f, t).source).toContain('    fill(v0);\n');
+    // …and so is a step by a constant agbcc builds from literals alone: `p += 1000` past imm8 is
+    // `mov r2, #0xfa; lsl r2, r2, #0x2`, hoisted above the loop (agbcc -O2, `void fill(u8 *p) {
+    // while (gk) { gk--; *p = 7; p += 1000; } }`)
+    const far =
+      '\t.thumb_func\nfill:\n\tpush\t{r4, lr}\n\tldr\tr2, .L8\n\tldr\tr1, [r2]\n\tcmp\tr1, #0\n' +
+      '\tbeq\t.L4\n\tadd\tr4, r2, #0\n\tmov\tr3, #0x7\n\tmov\tr2, #0xfa\n\tlsl\tr2, r2, #0x2\n' +
+      '.L5:\n\tsub\tr1, r1, #0x1\n\tstrb\tr3, [r0]\n\tadd\tr0, r0, r2\n\tcmp\tr1, #0\n\tbne\t.L5\n' +
+      '\tstr\tr1, [r4]\n.L4:\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.L8:\n\t.word\tgk\n';
+    expect(decompile('f', head + far + f, t).source).toContain('    fill(v0);\n');
+  });
+  test('decompile: a parameter stepped by a shifted immediate is read, and so is an uninitialised local stepped alike', () => {
+    const t = TOOLCHAIN_TARGETS.agbcc.description;
+    const head = '\t.code\t16\n\t.text\n';
+    const c = '\t.thumb_func\nc:\n\tpush\t{lr}\n\tbl\th\n\tbl\tu\n\tpop\t{r0}\n\tbx\tr0\n';
+    // agbcc -O2's `void u(int a) { while (gk) { gk--; a += 300; } gy = a; }`: the step is
+    // `mov r2, #0x96; lsl r2, r2, #0x1`, computed from literals alone, so `u(h())` passes the result
+    const step =
+      '\t.thumb_func\nu:\n\tpush\t{r4, lr}\n\tldr\tr2, .L8\n\tldr\tr1, [r2]\n\tldr\tr4, .L8+0x4\n' +
+      '\tcmp\tr1, #0\n\tbeq\t.L4\n\tadd\tr3, r2, #0\n\tmov\tr2, #0x96\n\tlsl\tr2, r2, #0x1\n' +
+      '.L5:\n\tsub\tr1, r1, #0x1\n\tadd\tr0, r0, r2\n\tcmp\tr1, #0\n\tbne\t.L5\n\tstr\tr1, [r3]\n' +
+      '.L4:\n\tstr\tr0, [r4]\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.L8:\n\t.word\tgk\n\t.word\tgy\n';
+    expect(decompile('c', head + step + c, t).source).toContain('    u(h());\n');
+    // KNOWN COST: agbcc -O2's `void u(void) { unsigned char x; while (gk) { gk--; x++; } gy = x; }`
+    // has the bytes of `void u(int x)` stepping `x = (u8)(x + 1)`, so it reads as a parameter and the
+    // source's `h(); u();` lifts as `u(h())`, the mirror of a reassigned parameter read as none
+    const uninit =
+      '\t.thumb_func\nu:\n\tldr\tr2, .L8\n\tldr\tr1, [r2]\n\tldr\tr3, .L8+0x4\n\tcmp\tr1, #0\n' +
+      '\tbeq\t.L4\n.L5:\n\tsub\tr1, r1, #0x1\n\tadd\tr0, r0, #0x1\n\tlsl\tr0, r0, #0x18\n' +
+      '\tlsr\tr0, r0, #0x18\n\tcmp\tr1, #0\n\tbne\t.L5\n\tstr\tr1, [r2]\n.L4:\n\tstr\tr0, [r3]\n' +
+      '\tbx\tlr\n.L8:\n\t.word\tgk\n\t.word\tgy\n';
+    expect(decompile('c', head + uninit + c, t).source).toContain('    u(h());\n');
+  });
+});
+
+// A CALLEE'S BODY PROVES IT TAKES NO HIDDEN STRUCT-RETURN POINTER where its compiler hands the pointer
+// back at every return of a struct return (`structReturnHandsBackPointer`): a return that hands back
+// nothing, or a constant, is no return of one. agbcc's `pop {r0}; bx r0` holds the return address;
+// compiled, `struct R mk(int *)` returns through `pop {r1}; bx r1` with r0 the pointer at -O0..-Os.
+describe('a callee body that proves it is no struct return through a hidden pointer', () => {
+  const noPointer = (asm: string, target: TargetDescription, asmData?: AsmData, prototypes: Prototypes = {}) =>
+    calleeBodyReads(
+      'f',
+      asm,
+      target,
+      prototypes,
+      (callee, table, entryReadCalls, text) =>
+        liftStamped(callee, text, target, table, text === asm ? asmData : undefined, undefined, undefined, {
+          calleeBody: { bound: () => undefined, stackWords: () => undefined, returnsNoHiddenPointer: () => false },
+          entryReadCalls,
+        }),
+      undefined,
+      frontendFor(target),
+    ).returnsNoHiddenPointer;
+  const bodies = (fns: Array<[string, string]>) =>
+    `\t.code\t16\n\t.text\n${fns.map(([n, b]) => `\t.thumb_func\n${n}:\n${b}`).join('')}`;
+  const thumbBodies = bodies([
+    ['vd', '\tpush\t{lr}\n\tbl\th\n\tpop\t{r0}\n\tbx\tr0\n'],
+    ['cst', '\tstr\tr1, [r0]\n\tmov\tr0, #0x0\n\tbx\tlr\n'],
+    // a leaf hands r0 back untouched, and a value-returning epilogue keeps r0: either may be the pointer
+    ['leaf', '\tstr\tr1, [r0]\n\tbx\tlr\n'],
+    ['kp', '\tpush\t{lr}\n\tbl\th\n\tpop\t{r1}\n\tbx\tr1\n'],
+    // a body the lift refuses (an instruction it does not model) still returns through r0
+    ['unmodelled', '\tpush\t{lr}\n\tswi\t#0x5\n\tpop\t{r0}\n\tbx\tr0\n'],
+    // `bx r0` after `pop {r1}` jumps to no lr: no return, so nothing is proved
+    ['jump', '\tpush\t{lr}\n\tbl\th\n\tpop\t{r1}\n\tbx\tr0\n'],
+  ]);
+  test('agbcc: a return through r0 or of a constant proves it, a return of r0 does not', () => {
+    const t = TOOLCHAIN_TARGETS.agbcc.description;
+    const answer = noPointer(thumbBodies, t);
+    expect(
+      Object.fromEntries(['vd', 'cst', 'leaf', 'kp', 'unmodelled', 'jump', 'absent'].map((n) => [n, answer(n)])),
+    ).toEqual({ vd: true, cst: true, leaf: false, kp: false, unmodelled: true, jump: false, absent: false });
+  });
+  // where the return register is the first argument register, a bare `ret` that did not branch
+  // through it hands that register back untouched, which in a struct return is the hidden pointer
+  test('a bare return proves it only where it branched through the return register', () => {
+    const t = TOOLCHAIN_TARGETS.agbcc.description;
+    const answer = calleeBodyReads(
+      'f',
+      thumbBodies,
+      t,
+      {},
+      (callee, table, entryReadCalls, text) => {
+        const fn = liftStamped(callee, text, t, table, undefined, undefined, undefined, {
+          calleeBody: { bound: () => undefined, stackWords: () => undefined, returnsNoHiddenPointer: () => false },
+          entryReadCalls,
+        });
+        fn.blocks.forEach((b) => b.ops.forEach((o) => delete o.attrs.viaReturnReg));
+        return fn;
+      },
+      undefined,
+      frontendFor(t),
+    ).returnsNoHiddenPointer;
+    expect([answer('vd'), answer('cst')]).toEqual([false, true]);
+  });
+  test('a callee declared to return a struct is not asked', () => {
+    const members = ['a', 'b', 'c'].map((name) => ({ name, type: 's32' }));
+    const big: Prototypes = { vd: { returns: 'struct Big', returnLayout: { kind: 'struct', members } } };
+    expect(noPointer(thumbBodies, TOOLCHAIN_TARGETS.agbcc.description, undefined, big)('vd')).toBe(false);
+  });
+  // O32's struct return is `move v0, a0`: a return no path wrote v0 for is none
+  test.each(['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'] as const)(
+    '%s: a return of nothing or of a constant proves it',
+    (id) => {
+      const t = TOOLCHAIN_TARGETS[id].description;
+      const head = '\ncorpus.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n';
+      const text =
+        `${head}00000000 <st>:\n   0:\tjr\tra\n   4:\tsw\ta1,0(a0)\n` +
+        '00000008 <cst>:\n   8:\tsw\ta1,0(a0)\n   c:\tjr\tra\n  10:\tmove\tv0,zero\n' +
+        '00000014 <cp>:\n  14:\tsw\ta1,0(a0)\n  18:\tjr\tra\n  1c:\tmove\tv0,a0\n';
+      const answer = noPointer(text, t);
+      expect([answer('st'), answer('cst'), answer('cp')]).toEqual([true, true, false]);
+    },
+  );
+  // mwcc reloads r3 from a frame word before the `blr` of a struct return: nothing it returns proves it
+  test.each(['mwcc_242_81', 'mwcc_247_107'] as const)('%s: a constant return proves nothing', (id) => {
+    const t = TOOLCHAIN_TARGETS[id].description;
+    expect(noPointer('00000000 <cst>:\n   0:\tstw     r4,0(r3)\n   4:\tli      r3,0\n   8:\tblr\n', t)('cst')).toBe(
+      false,
+    );
+  });
+  // agbcc's own output for `void g(u8 *d, u8 *s, int n) { while (n-- > 0) *d++ = *s++; h(); } void
+  // f(u8 *src) { u8 b[16]; g(b, src, 16); }`: `b` is handed to `g` at argument 0 and never read here
+  test('decompile: the frame a body proves no struct return is handed is that body`s out-parameter', () => {
+    const t = TOOLCHAIN_TARGETS.agbcc.description;
+    const g =
+      '\t.thumb_func\ng:\n\tpush\t{lr}\n\tadd\tr3, r0, #0\n\tb\t.L7\n.L5:\n\tldrb\tr0, [r1]\n\tstrb\tr0, [r3]\n' +
+      '\tadd\tr1, r1, #0x1\n\tadd\tr3, r3, #0x1\n.L7:\n\tadd\tr0, r2, #0\n\tsub\tr2, r2, #0x1\n\tcmp\tr0, #0\n' +
+      '\tbgt\t.L5\n\tbl\th\n\tpop\t{r0}\n\tbx\tr0\n';
+    const f =
+      '\t.thumb_func\nf:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x10\n\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tmov\tr2, #0x10\n' +
+      '\tbl\tg\n\tadd\tsp, sp, #0x10\n\tpop\t{r0}\n\tbx\tr0\n';
+    const head = '\t.code\t16\n\t.text\n';
+    expect(() => decompile('f', head + f, t)).toThrow(
+      /`g` takes it at argument 0 and nothing says what that callee returns/,
+    );
+    expect(decompile('f', head + g + f, t).source).toContain('    u8 sp0[16];\n    g(sp0, a0, 16);\n');
+    expect(decompile('f', head + f, t, { calleeBodies: { g: { kind: 'listing', text: head + g } } }).source).toBe(
+      decompile('f', head + g + f, t).source,
+    );
+    // …and the result names the body handed in that decided it (`calleeBodyFacts`), not one in the input
+    expect(
+      decompile('f', head + f, t, { calleeBodies: { g: { kind: 'listing', text: head + g } } }).calleeBodyFacts,
+    ).toEqual({ g: ['noHiddenPointer'] });
+    expect(decompile('f', head + g + f, t).calleeBodyFacts).toEqual({});
   });
 });

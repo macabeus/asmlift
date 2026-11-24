@@ -17,7 +17,7 @@ import { returnedStruct, structLocalType } from './frontend/call-plan';
 import {
   type CalleeBodies,
   type CalleeBodyBound,
-  type CalleeStackWords,
+  type CalleeBodyReaders,
   calleeBodyReads,
 } from './frontend/callee-body';
 import { FrontendUnsupportedError } from './frontend/errors';
@@ -194,11 +194,21 @@ export interface DecompileResult {
    *  entry states no parameter list (frontend/call-plan.ts `bodyWords`), so a body handed in that no
    *  call asked, or that answered nothing, is not here. Empty where no bodies were handed in. */
   calleeBodiesAsked: Record<string, number>;
+  /** WHAT ELSE A BODY HANDED IN DECIDED OF A CALL'S SPELLING, beside the register bound above: each
+   *  callee whose body, asked, answered that it returns no struct through a hidden pointer
+   *  (`noHiddenPointer`, frontend/callee-body.ts `CalleeReturnsNoHiddenPointer`) or that it reads its
+   *  first argument register, so the call is passed an earlier call's result left there
+   *  (`readsFirst`, `CalleeReadsFirstArgument`). Only a yes decides anything, so only a yes is here.
+   *  Empty where no bodies were handed in. */
+  calleeBodyFacts: Record<string, CalleeBodyFact[]>;
   /** WHICH CALLEES NOTHING DECLARES THE LIFT SIZED OFF THEIR OWN BODIES, with the stack words each was
    *  laid out at past the argument registers (frontend/callee-body.ts `CalleeStackWords`): a call to
    *  one takes every argument register and those words, no guess. Empty where none was. */
   calleeStackSized: Record<string, number>;
 }
+
+/** One thing a callee's body handed in decided of a call to it (`DecompileResult.calleeBodyFacts`). */
+export type CalleeBodyFact = 'noHiddenPointer' | 'readsFirst';
 
 export function decompile(
   name: string,
@@ -236,6 +246,7 @@ function runTower(
   // (1) lift: ISA frontend (resolved by target) → L1 with block-argument SSA
   const ownArityNotes: string[] = [];
   const bodiesAsked = new Map<string, number | undefined>();
+  const bodyFacts = new Map<string, Set<CalleeBodyFact>>();
   const stacksSized = new Map<string, number>();
   const fn = liftStamped(
     name,
@@ -245,7 +256,7 @@ function runTower(
     opts.asmData,
     opts.symbols,
     opts.contextGlobals,
-    { calleeBodies: opts.calleeBodies, asmIncludes: opts.asmIncludes, bodiesAsked, stacksSized },
+    { calleeBodies: opts.calleeBodies, asmIncludes: opts.asmIncludes, bodiesAsked, bodyFacts, stacksSized },
     own.ownContextProto,
     ownArityNotes,
   );
@@ -343,8 +354,23 @@ function runTower(
     walkedNames,
     ownArityNotes,
     calleeBodiesAsked: answeredBodies(bodiesAsked, opts.calleeBodies),
+    calleeBodyFacts: handedInFacts(bodyFacts, opts.calleeBodies),
     calleeStackSized: Object.fromEntries(stacksSized),
   };
+}
+
+/** The bodies handed in that decided something else of a call (`DecompileResult.calleeBodyFacts`). */
+function handedInFacts(
+  facts: ReadonlyMap<string, ReadonlySet<CalleeBodyFact>>,
+  bodies: CalleeBodies | undefined,
+): Record<string, CalleeBodyFact[]> {
+  const out: Record<string, CalleeBodyFact[]> = {};
+  for (const [callee, said] of facts) {
+    if (bodies !== undefined && Object.hasOwn(bodies, callee)) {
+      out[callee] = [...said].sort();
+    }
+  }
+  return out;
 }
 
 /** The bodies handed in that a lift asked and that answered (`DecompileResult.calleeBodiesAsked`). */
@@ -361,8 +387,8 @@ function answeredBodies(
   return out;
 }
 
-/** The `calleeBodiesAsked` and `calleeStackSized` (`DecompileResult`) of one lift under `opts`, for a
- *  caller whose result carries none — the ranked path, whose every candidate lifts as this one does.
+/** The `calleeBodiesAsked`, `calleeBodyFacts` and `calleeStackSized` (`DecompileResult`) of one lift
+ *  under `opts`, for a caller whose result carries none — the ranked path, whose every candidate lifts as this one does.
  *  Empty where the lift fails: the run reports that failure itself. */
 export function calleeBodyNotesOf(
   name: string,
@@ -372,9 +398,10 @@ export function calleeBodyNotesOf(
     DecompileOptions,
     'prototypes' | 'asmData' | 'symbols' | 'contextGlobals' | 'ownContextProto' | 'calleeBodies' | 'asmIncludes'
   >,
-): Pick<DecompileResult, 'calleeBodiesAsked' | 'calleeStackSized'> {
+): Pick<DecompileResult, 'calleeBodiesAsked' | 'calleeBodyFacts' | 'calleeStackSized'> {
   const own = splitOwnContext(opts.prototypes, name, opts.ownContextProto);
   const asked = new Map<string, number | undefined>();
+  const bodyFacts = new Map<string, Set<CalleeBodyFact>>();
   const stacksSized = new Map<string, number>();
   try {
     liftStamped(
@@ -385,14 +412,15 @@ export function calleeBodyNotesOf(
       opts.asmData,
       opts.symbols,
       opts.contextGlobals,
-      { calleeBodies: opts.calleeBodies, asmIncludes: opts.asmIncludes, bodiesAsked: asked, stacksSized },
+      { calleeBodies: opts.calleeBodies, asmIncludes: opts.asmIncludes, bodiesAsked: asked, bodyFacts, stacksSized },
       own.ownContextProto,
     );
   } catch {
-    return { calleeBodiesAsked: {}, calleeStackSized: {} };
+    return { calleeBodiesAsked: {}, calleeBodyFacts: {}, calleeStackSized: {} };
   }
   return {
     calleeBodiesAsked: answeredBodies(asked, opts.calleeBodies),
+    calleeBodyFacts: handedInFacts(bodyFacts, opts.calleeBodies),
     calleeStackSized: Object.fromEntries(stacksSized),
   };
 }
@@ -460,10 +488,12 @@ export function offsetNameBehaviorsFor(
 
 /** What `liftStamped` is handed besides the frontend's own options: the bodies of callees found
  *  outside the input, which only the callee-body readers read (`bodyReadsIn`), and a record of each
- *  callee whose bound a call asked, with its answer (`DecompileResult.calleeBodiesAsked`). */
+ *  callee whose bound a call asked, with its answer (`DecompileResult.calleeBodiesAsked`), and of
+ *  each whose body, asked anything else, answered yes (`DecompileResult.calleeBodyFacts`). */
 export type StampedLiftOptions = LiftOptions & {
   calleeBodies?: CalleeBodies;
   bodiesAsked?: Map<string, number | undefined>;
+  bodyFacts?: Map<string, Set<CalleeBodyFact>>;
   /** each callee a call was sized at off its body, with its stack words (`DecompileResult.calleeStackSized`) */
   stacksSized?: Map<string, number>;
 };
@@ -486,7 +516,7 @@ export function liftStamped(
   ownContext?: FnProto,
   notes?: string[],
 ): Fn {
-  const { calleeBodies, bodiesAsked, stacksSized, ...liftOptions } = stampedOptions ?? {};
+  const { calleeBodies, bodiesAsked, bodyFacts, stacksSized, ...liftOptions } = stampedOptions ?? {};
   // Its callers split the table already; split again here, where every lift passes, so that no
   // frontend is handed a marked context entry to read as a stated, hard bound.
   const split = splitOwnContext(prototypes, name, ownContext);
@@ -498,9 +528,14 @@ export function liftStamped(
   const bytes = ownReturn?.register === true ? undefined : ownReturn?.type.size;
   // what each callee whose body is in this input, or handed in, reads of its arguments, lifted from
   // that body as a call to it is first lowered (frontend/callee-body.ts); the callee's own lift reads
-  // no bodies, and, off the same lift, what each one loads of its incoming stack words
+  // no bodies, and, off the same lift, what each one loads of its incoming stack words, whether it
+  // returns no struct through a hidden pointer, and whether it reads its first argument register
+  const given = liftOptions.calleeBody ?? {};
   const read =
-    liftOptions.calleeBodyBound === undefined || liftOptions.calleeStackWords === undefined
+    given.bound === undefined ||
+    given.stackWords === undefined ||
+    given.returnsNoHiddenPointer === undefined ||
+    given.readsFirstArgument === undefined
       ? bodyReadsIn(
           name,
           asm,
@@ -515,7 +550,7 @@ export function liftStamped(
           liftOptions.asmIncludes,
         )
       : undefined;
-  const bound = liftOptions.calleeBodyBound ?? read!.bound;
+  const bound = given.bound ?? read!.bound;
   const calleeBodyBound: CalleeBodyBound =
     bodiesAsked === undefined
       ? bound
@@ -524,10 +559,24 @@ export function liftStamped(
           bodiesAsked.set(callee, words);
           return words;
         };
+  // a yes from any other reader decided a call's spelling, so it is recorded as the bound is
+  const noting =
+    (fact: CalleeBodyFact, reader: (callee: string) => boolean) =>
+    (callee: string): boolean => {
+      const yes = reader(callee);
+      if (yes && bodyFacts !== undefined) {
+        bodyFacts.set(callee, (bodyFacts.get(callee) ?? new Set()).add(fact));
+      }
+      return yes;
+    };
   const options = {
     ...liftOptions,
-    calleeBodyBound,
-    calleeStackWords: liftOptions.calleeStackWords ?? read!.stackWords,
+    calleeBody: {
+      bound: calleeBodyBound,
+      stackWords: given.stackWords ?? read!.stackWords,
+      returnsNoHiddenPointer: noting('noHiddenPointer', given.returnsNoHiddenPointer ?? read!.returnsNoHiddenPointer),
+      readsFirstArgument: noting('readsFirst', given.readsFirstArgument ?? read!.readsFirstArgument),
+    } satisfies CalleeBodyReaders,
     ...(stacksSized === undefined
       ? {}
       : { stackSized: (callee: string, words: number) => stacksSized.set(callee, words) }),
@@ -565,9 +614,6 @@ export function liftStamped(
   return fn;
 }
 
-/** Both readers of a callee's body (frontend/callee-body.ts `calleeBodyReads`). */
-type BodyReaders = { bound: CalleeBodyBound; stackWords: CalleeStackWords };
-
 /** The readers already built, per caller table as handed to `liftStamped`, each with what else it was
  *  read under. A ranked run lifts one function a dozen times under one table, and each callee body
  *  is a lift of the whole input, so reading it once per lift would double the lift time of a large
@@ -576,7 +622,7 @@ const readsRead = new WeakMap<
   Prototypes,
   Array<{
     key: readonly unknown[];
-    reads: BodyReaders;
+    reads: CalleeBodyReaders;
   }>
 >();
 
@@ -598,7 +644,7 @@ function bodyReadsIn(
   contextGlobals: ContextGlobals | undefined,
   calleeBodies: CalleeBodies | undefined,
   asmIncludes: ReadonlyMap<string, string> | undefined,
-): BodyReaders {
+): CalleeBodyReaders {
   const key = [name, asm, target, ownContext, asmData, symbols, contextGlobals, calleeBodies, asmIncludes];
   const read = readsRead.get(prototypes) ?? [];
   readsRead.set(prototypes, read);
@@ -621,8 +667,12 @@ function bodyReadsIn(
         symbols,
         contextGlobals,
         {
-          calleeBodyBound: () => undefined,
-          calleeStackWords: () => undefined,
+          calleeBody: {
+            bound: () => undefined,
+            stackWords: () => undefined,
+            returnsNoHiddenPointer: () => false,
+            readsFirstArgument: () => false,
+          },
           entryReadCalls,
           ...(text === asm ? { asmIncludes } : {}),
         },
@@ -1545,6 +1595,7 @@ export function stubResult(name: string, asm: string, backend: LanguageBackend, 
     walkedNames: [],
     ownArityNotes: [],
     calleeBodiesAsked: {},
+    calleeBodyFacts: {},
     calleeStackSized: {},
   };
 }

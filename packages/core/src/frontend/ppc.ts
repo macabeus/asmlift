@@ -70,7 +70,7 @@ import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable } from './asmdata';
 import { type CallDeclarations, type ParamClass, callDeclarations } from './call-plan';
-import type { CalleeBodyBound } from './callee-body';
+import type { CalleeBodyReaders } from './callee-body';
 import { type Declarations, computedOnlyToReturn, leftInDiscardRegister, unreadPairHalf } from './dead-reads';
 import { type DisasmInstr, parseDisasm as parseSharedDisasm, parseMem as parseSharedMem, sliceSymbol } from './disasm';
 import { mkEmitKit, pushSwitchBr } from './emit';
@@ -1335,7 +1335,7 @@ function liftPrelude(
   prototypes: Prototypes,
   jts: Map<number, PpcJT>,
   ownDeclaration?: () => OwnDeclaration | undefined,
-  calleeBodyBound?: CalleeBodyBound,
+  calleeBody?: Partial<CalleeBodyReaders>,
   entryReadCalls?: ReadonlySet<string>,
 ) {
   const recoveredBctr = new Set([...jts.values()].map((j) => j.bctrAddr));
@@ -1392,7 +1392,7 @@ function liftPrelude(
     PPC_CALL_LOWERING,
     ppcRefusal,
     ownDeclaration,
-    calleeBodyBound,
+    calleeBody,
     entryReadCalls,
   );
   // THE LOCAL AREA, where a function takes a frame address, reaches its frame below a word, or
@@ -1449,9 +1449,9 @@ function liftOnce(
   {
     contextOwnWords,
     contextOwnProto,
-    calleeBodyBound,
+    calleeBody,
     entryReadCalls,
-  }: Pick<LiftOptions, 'contextOwnWords' | 'contextOwnProto' | 'calleeBodyBound' | 'entryReadCalls'>,
+  }: Pick<LiftOptions, 'contextOwnWords' | 'contextOwnProto' | 'calleeBody' | 'entryReadCalls'>,
 ): Fn | FrameObjectRelift {
   assertInputFormat('ppc', 'objdump', asm);
   const instrs = parseDisasm(sliceSymbol(asm, name)); // ONE function only — an absent symbol declines loud
@@ -1532,7 +1532,7 @@ function liftOnce(
     prototypes,
     jts,
     () => (!ownDeclared ? undefined : ownDeclarationOf(name, prototypes, contextOwnProto)),
-    calleeBodyBound,
+    calleeBody,
     entryReadCalls,
   );
   const lrUnproven = linkRegisterProof(blocks, succIdx, r1At, target);

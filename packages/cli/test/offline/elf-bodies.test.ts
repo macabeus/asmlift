@@ -112,7 +112,7 @@ describe('a function range in the linked ELF', () => {
         {},
         (callee, table, entryReadCalls, text) =>
           liftStamped(callee, text, t, table, undefined, undefined, undefined, {
-            calleeBodyBound: () => undefined,
+            calleeBody: { bound: () => undefined },
             entryReadCalls,
           }),
         bodies,
@@ -294,7 +294,7 @@ describe('PowerPC: a body read off the ELF names its calls in the listing, as `o
       { rd1: { params: ['s32'] }, st: { params: [] } },
       (c, table, entryReadCalls, text) =>
         liftStamped(c, text, t, table, undefined, undefined, undefined, {
-          calleeBodyBound: () => undefined,
+          calleeBody: { bound: () => undefined },
           entryReadCalls,
         }),
       bodies,

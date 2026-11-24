@@ -994,6 +994,30 @@ are arguments changes nothing the callee computes. A counted register there whos
 something else read since stops the count there, so `gH = 5; gA = rnd()` with rnd reading nothing
 lifts `rnd()`. The question is about the WRITE, not the value: `g4(a, b, c, d); un(a, b, c, d)`
 copies a..d back from their homes for `un`, values `g4` read first, and those copies stay arguments.
+A call the body makes through an argument register that bounds its own arity
+(`ARGS_BOUND_BY_ADDRESS`, agbcc's `bl _call_via_r1`, which takes at most r0) is read at every
+register below that one, as a forced call is, so it no longer costs the body its bound. Any other
+call through a register still does. The same lift says whether the body returns a struct through
+a hidden pointer ("A struct returned by value, across the tower" below). An earlier call's result
+left in the return register, which the trim drops as no argument (`bl f; bl g` read as
+`f(); g();`), is passed on where the callee's body reads that register in an op other than a
+return, a call its lift forced, or a bound call on an address that arrived where it is called
+(`CalleeReadsFirstArgument`, a lower bound where the bound is an upper one): the call then takes at
+least that word, and nothing but the earlier call wrote it, so `fill(AllocZeroed(16))` lifts as
+written where the trim read `fill()`. A bound call on an address the body loads or computes is a
+read: agbcc calls such an address through the first register past the arguments (`s->fn()` loads
+it into r0 and calls `_call_via_r0`), so `bl _call_via_r1` there passes r0. A read through a join
+that also merges a value the body wrote is none: that is an uninitialised local left in the
+register on the path that never set it (agbcc's `void g(void) { int x; while (gk) x = --gk; gy =
+x + 1; }` adds to the entry r0) in the same bytes as a reassigned parameter, so the result stays
+the trim's to drop, as with no body. A value the body computes from the incoming one and literals
+alone is no such write: a loop-carried parameter reaches its header merged with its own step
+(`*p++ = 7`, `a++`), which still reads it, so `fill(o)` with a walking `fill` lifts as written.
+A literal is a constant or a value computed from constants alone: agbcc builds `a += 300` with
+`mov r2, #0x96; lsl r2, r2, #0x1` hoisted above the loop. The cost is the mirror of the reassigned
+parameter: an uninitialised local left in the register and stepped by a literal alone (agbcc's
+`void u(void) { unsigned char x; while (gk) { gk--; x++; } gy = x; }`) has the bytes of
+`void u(int x)` stepping it, so it reads as a parameter and `h(); u();` lifts as `u(h())`.
 The bound counts the body's entry parameters, so it is none where that count is not one per argument
 word: a floating-point parameter (o32's `$f12` double covers a0 and a1), or a struct return handed
 back through a hidden pointer. Nor is a lift holding an `opaque` op any bound: which registers an
@@ -1189,11 +1213,22 @@ everywhere, a storage size that is not `declaredWidth`'s register count). `aggre
 reading of them: `returnsInMemory`, asked by the call lowering, and `returnsWithoutHiddenPointer`,
 asked by the frame-object audit, so the two cannot disagree about one call.
 
-**Whether a callee returns a struct at all is a declaration**, never an inference: the
+**That a callee returns a struct is a declaration**, never an inference from the caller: the
 out-parameter call `add sp,#-4 / mov r0,sp / bl f` and the struct return are the same instructions,
 and a register count cannot tell them apart (frontend/frame-objects.ts says why). `FnProto.returns`
 and `returnLayout` state it — from a context's declaration and the struct it defines, from a
-symbol map by size alone (a layout with no members), or from `--proto`.
+symbol map by size alone (a layout with no members), or from `--proto`. **That it returns none**
+the callee's own body may also say, where nothing declares its return and the body is in the input
+or the project (frontend/callee-body.ts `CalleeReturnsNoHiddenPointer`): on a compiler that hands
+the hidden pointer back in the return register at every return
+(`compilerBehaviors.structReturnHandsBackPointer`, agbcc and the three O32 compilers), a return
+that hands back nothing or a constant is no return of a struct-returning function. agbcc returns a
+struct through `pop {r1}; bx r1` with r0 still the pointer, at -O0 to -Os, so a body ending
+`pop {r0}; bx r0` returns none. The answer joins the declaration's in `returnsWithoutHiddenPointer`.
+It only ever rules a struct out, so a declared struct return is never read off a body. A
+hand-written body that ends `pop {r0}; bx r0` after filling a struct is read the same way, and the
+two readings of its caller are the same bytes and the same machine behaviour, since an agbcc caller
+never reads r0 after a struct return.
 
 **L1 — the call's value is the struct.** A memory return types the call's result as the declared
 struct, laid out on the target (`aggregateType`), with a field for each member the IR can type and

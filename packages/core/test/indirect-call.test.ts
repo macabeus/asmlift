@@ -304,7 +304,8 @@ describe('a call names its callee or calls a value, never both', () => {
 describe('Thumb lowers `bl _call_via_<reg>` as a call through <reg>', () => {
   test('the pointer is the callee, and no register at or above it is an argument', () => {
     const r = decompile('fresh', FRESH, ARMV4T_AGBCC);
-    expect(r.ir.raw).toMatch(/= call %\d+, %\d+, %\d+ \{indirect=true\}/);
+    // …and the call says the register bounds its arguments (`ARGS_BOUND_BY_ADDRESS`)
+    expect(r.ir.raw).toMatch(/= call %\d+, %\d+, %\d+ \{argsBoundByAddress=true, indirect=true\}/);
     // r3 still holds the `ldrsh` offset 48, and is no argument: it is above the pointer's r2
     expect(r.source).toBe('s32 fresh(s32 a0, s16 *a1) {\n    return (u8)((s32 (*)())tbl[*(a1 + 24)])(&g1, &g2);\n}\n');
   });

@@ -45,7 +45,10 @@
 //     which registers it names, and which of them it reads is a guess (PowerPC `mtmsr r3` and MIPS
 //     `mtc0 a0, c0_sr` each read the argument the decode takes for written), so a lift holding one
 //     proves no more than one that fails;
-//   - the callee makes a call through a register, whose arity nothing here can force;
+//   - the callee makes a call through a register, whose arity nothing here can force, unless the
+//     register itself bounds it (`ARGS_BOUND_BY_ADDRESS`, ir/core.ts): agbcc's `bl _call_via_r1`
+//     takes at most r0 and no stack word, and the lowering already reads every register below the
+//     address, which is what forcing a named call does;
 //   - the callee's entry declares a struct or union return: one handed back through memory takes a
 //     hidden pointer the lift reads as no entry parameter, so its count is one argument word short
 //     (`struct Big mk(x)` reads r0 and r1 and lifts one parameter);
@@ -71,7 +74,17 @@
 // KNOWN GAP: an objdump listing (MIPS, PowerPC) shows no symbol binding, so a weak definition there
 // is read as the one the link keeps. A weak copy of one inline definition is that definition; a weak
 // default some other object overrides is not, and no row here has one.
-import { type Block, type Fn, successorsOf } from '../ir/core';
+import {
+  ARGS_BOUND_BY_ADDRESS,
+  type Block,
+  type Fn,
+  type Op,
+  type Value,
+  callArgs,
+  calleeValue,
+  successorsOf,
+} from '../ir/core';
+import { OPCODES } from '../ir/opcodes';
 import {
   type FnProto,
   type Prototypes,
@@ -116,7 +129,7 @@ export type CalleeLift = (
 ) => Fn;
 
 /** The argument words callee `callee`'s own body can read at most, or `undefined` where its body
- *  proves nothing (frontend/frontend.ts `LiftOptions.calleeBodyBound`). */
+ *  proves nothing (frontend/frontend.ts `LiftOptions.calleeBody`). */
 export type CalleeBodyBound = (callee: string) => number | undefined;
 
 /** Whether a call to a callee with entry `entry` asks its body at all, where nothing lays the call
@@ -126,12 +139,24 @@ export function asksCalleeBody(entry: FnProto | undefined): boolean {
   return !declaresParams(entry) && entry?.variadicParams === undefined;
 }
 
+/** Every reader of a callee's body, off one lift of it (`calleeBodyReads`): what a lift is handed as
+ *  `LiftOptions.calleeBody`, and the lowering as `callDeclarations`' `calleeBody`. One object, so a
+ *  reader added here reaches every frontend that passes the object on. */
+export type CalleeBodyReaders = {
+  bound: CalleeBodyBound;
+  stackWords: CalleeStackWords;
+  returnsNoHiddenPointer: CalleeReturnsNoHiddenPointer;
+  readsFirstArgument: CalleeReadsFirstArgument;
+};
+
 /** What each callee's body says, read as a call to it first asks and kept for the rest: the
- *  register bound, and the incoming stack words it loads (`CalleeStackWords` below), off ONE lift.
+ *  register bound, the incoming stack words it loads (`CalleeStackWords` below), whether it is no
+ *  struct return through a hidden pointer (`CalleeReturnsNoHiddenPointer` below) and whether it
+ *  reads its first argument register (`CalleeReadsFirstArgument` below), off ONE lift.
  *  `lift` lifts one function of a text (the input, or a body in `external`) under a table, with no
  *  bound of its own: one level of bodies is read, never the callee's callees'. `frontend` is what
- *  the target frontend says of its own lifts: its entry scan (`Frontend.entryStackWords`), asked
- *  only of a body that does not lift. */
+ *  the target frontend says of its own lifts: its entry scan (`Frontend.entryStackWords`) and its
+ *  return scan (`Frontend.returnsThroughReturnReg`), asked only of a body that does not lift. */
 export function calleeBodyReads(
   self: string,
   asm: string,
@@ -139,8 +164,8 @@ export function calleeBodyReads(
   prototypes: Prototypes,
   lift: CalleeLift,
   external?: CalleeBodies,
-  frontend?: Pick<Frontend, 'entryStackWords'>,
-): { bound: CalleeBodyBound; stackWords: CalleeStackWords } {
+  frontend?: Pick<Frontend, 'entryStackWords' | 'returnsThroughReturnReg'>,
+): CalleeBodyReaders {
   const memo = new Map<string, BodyReads>();
   const read = (callee: string): BodyReads => {
     if (!memo.has(callee)) {
@@ -148,7 +173,12 @@ export function calleeBodyReads(
     }
     return memo.get(callee)!;
   };
-  return { bound: (callee) => read(callee).bound, stackWords: (callee) => read(callee).stack };
+  return {
+    bound: (callee) => read(callee).bound,
+    stackWords: (callee) => read(callee).stack,
+    returnsNoHiddenPointer: (callee) => read(callee).noHiddenPointer === true,
+    readsFirstArgument: (callee) => read(callee).readsFirst === true,
+  };
 }
 
 /** {@link calleeBodyReads}'s register bound alone. */
@@ -159,7 +189,7 @@ export function calleeBodyBounds(
   prototypes: Prototypes,
   lift: CalleeLift,
   external?: CalleeBodies,
-  frontend?: Pick<Frontend, 'entryStackWords'>,
+  frontend?: Pick<Frontend, 'entryStackWords' | 'returnsThroughReturnReg'>,
 ): CalleeBodyBound {
   return calleeBodyReads(self, asm, target, prototypes, lift, external, frontend).bound;
 }
@@ -204,10 +234,15 @@ const returnOnly = (p: FnProto | undefined): FnProto => {
 };
 
 /** What one callee's body answers: `bound`, the argument words it reads at most, and `stack`, the
- *  incoming stack words it loads (`CalleeStackWords`); each undefined where the body proves none. */
+ *  incoming stack words it loads (`CalleeStackWords`), each undefined where the body proves none;
+ *  `noHiddenPointer` and `readsFirst`, each present only where the body proves it. */
 interface BodyReads {
   readonly bound?: number;
   readonly stack?: number;
+  /** it returns no struct through a hidden pointer (`CalleeReturnsNoHiddenPointer`) */
+  readonly noHiddenPointer?: true;
+  /** it reads its first argument register's incoming value (`CalleeReadsFirstArgument`) */
+  readonly readsFirst?: true;
 }
 
 function bodyReads(
@@ -218,19 +253,25 @@ function bodyReads(
   prototypes: Prototypes,
   lift: CalleeLift,
   external: CalleeBodies | undefined,
-  frontend: Pick<Frontend, 'entryStackWords'> | undefined,
+  frontend: Pick<Frontend, 'entryStackWords' | 'returnsThroughReturnReg'> | undefined,
 ): BodyReads {
   if (callee === self || declaresAggregateReturn(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined)) {
     return {};
   }
-  // a body that lifts answers both; one that does not answers its entry's loads, and no bound
+  // a body that lifts answers every reader; one that does not answers its entry's loads and whether
+  // the frontend's scan finds a return through the return register, and no bound
   const lifted = (text: string, relocs?: readonly Reloc[]): BodyReads => {
     const got = liftedReads(callee, text, target, prototypes, lift, relocs);
+    if (got !== undefined) {
+      return got;
+    }
     // a scan of the entry's stack loads sees no register read, so where the ABI can skip an
     // argument register (`evenWordAlignedArgs`) it cannot say the registers are all arguments
-    return (
-      got ?? { stack: target.evenWordAlignedArgs === true ? undefined : frontend?.entryStackWords?.(callee, text) }
-    );
+    const stack = target.evenWordAlignedArgs === true ? undefined : frontend?.entryStackWords?.(callee, text);
+    const scanned =
+      target.compilerBehaviors.structReturnHandsBackPointer === true &&
+      frontend?.returnsThroughReturnReg?.(callee, text, target) === true;
+    return { stack, ...(scanned ? { noHiddenPointer: true } : {}) };
   };
   if (definesLabel(asm, callee)) {
     return weakNames(asm).has(callee) ? {} : lifted(asm);
@@ -290,6 +331,9 @@ function liftedReads(
         }
         const at = op.attrs.target;
         if (typeof at !== 'string') {
+          if (op.attrs[ARGS_BOUND_BY_ADDRESS] === true) {
+            continue;
+          }
           return undefined;
         }
         if (!forced.has(at) && declaredCallArgs(calleeDeclaration(at, table, helpers), target) === undefined) {
@@ -298,18 +342,21 @@ function liftedReads(
       }
     }
     if (guessed.size === 0) {
+      const noHiddenPointer = handsBackNoPointer(fn, target) ? ({ noHiddenPointer: true } as const) : {};
       const { params } = fn.blocks[0];
       if (params.some((p) => p.type.kind === 'float')) {
-        return undefined;
+        return noHiddenPointer;
       }
       const passesFirst =
         target.returnReg === target.argRegs[0] && !declaresVoidReturn(table[callee]) && returnsUntouched(fn);
       const top = Math.max(0, ...params.map((p) => (entryArgRank(p) ?? -1) + 1));
       const stack = Math.max(0, top - target.argRegs.length);
       return {
+        ...(readsFirstArgument(fn, forced) ? { readsFirst: true as const } : {}),
         bound: Math.max(params.length, passesFirst ? 1 : 0),
         stack:
           stack > 0 && target.evenWordAlignedArgs === true && !readsEveryArgReg(fn, target, forced) ? undefined : stack,
+        ...noHiddenPointer,
       };
     }
     // an entry whose parameter list nothing can lay out (an unsizable or variadic one) is dropped
@@ -363,6 +410,179 @@ function returnsUntouched(fn: Fn): boolean {
   }
   return [...callFree].some((b) =>
     b.ops.some((o) => o.opcode === 'ret' && o.operands.length === 0 && o.attrs.viaReturnReg !== true),
+  );
+}
+
+/** WHETHER A CALLEE'S BODY READS ITS FIRST ARGUMENT REGISTER'S INCOMING VALUE: a LOWER bound on what
+ *  it reads, where the register bound (`CalleeBodyBound`) is an upper one. An op reads it, directly
+ *  or through a join no value the body wrote also flows into (one that does is an uninitialised
+ *  local's bytes as much as a reassigned parameter's, and reads as neither; a value computed from
+ *  the incoming one and literals alone, a literal being a constant or a value computed from
+ *  constants alone, is no such write, so a loop-carried `p++` or `a += 300` still reads through
+ *  its header), other than a return,
+ *  and other than as an argument of a call the lift forced to every register, or of one through a
+ *  register that bounds it (`ARGS_BOUND_BY_ADDRESS`) whose address arrives in a block parameter:
+ *  either is handed the register whatever the source passed, and a return hands r0 back whether or
+ *  not it was a parameter (`int g(void)` returns through `pop {r1}; bx r1` too). The address is what decides a bound call: agbcc calls an address
+ *  it computes or loads through the first register past the arguments (compiled at -O1 and -O2,
+ *  `s->fn()`, `tab[i]()` and `gS.fn()` with the pointer in r1 all load into r0 and call
+ *  `_call_via_r0`; -O0 uses r4), so `bl _call_via_r1` on a loaded address passes r0. One left where
+ *  it arrived is called in place: `void h(int u, void (*fn)(void)) { fn(); }` is `bl _call_via_r1`
+ *  with r0 never passed, and a join may carry such an address round a loop. Read off the same
+ *  lift as the register bound, and false wherever that answers nothing. Asked where the trim would
+ *  drop an earlier call's result left in that register (frontend/call-plan.ts), which the call is
+ *  then passed: it takes at least that word, and nothing else wrote it.
+ *  KNOWN GAP: a body that only forwards the register to an undeclared callee reads nothing here, so
+ *  the result is dropped as with no body at all.
+ *  KNOWN COST: an uninitialised local in that register stepped by a literal alone has the bytes of a
+ *  stepped parameter (agbcc -O2's `void u(void) { unsigned char x; while (gk) { gk--; x++; } gy =
+ *  x; }` is `void u(int x)` stepping `x = (u8)(x + 1)`), so it reads as one and `h(); u();` lifts as
+ *  `u(h())`: the mirror of the reassigned parameter read as none. */
+export type CalleeReadsFirstArgument = (callee: string) => boolean;
+
+function readsFirstArgument(fn: Fn, forced: ReadonlySet<string>): boolean {
+  const first = fn.blocks[0]?.params.find((p) => entryArgRank(p) === 0);
+  if (first === undefined) {
+    return false;
+  }
+  // every join the incoming value reaches, then only those it alone reaches: a join that merges it
+  // with a value the body wrote is what an uninitialised local in that register is, as much as a
+  // reassigned parameter (`void g(void) { int x; if (gk) x = gk * 3; gy = x; }` stores the entry r3
+  // on mwcc, as agbcc's `while (gk) x = --gk; gy = x + 1;` adds to the entry r0, the same bytes as
+  // `void g(int a) { if (gk) a = 5; gy = a; }`), so a read of it proves no parameter. A value the
+  // body computes from that value alone (with literals) carries it as much as an edge does: a
+  // loop-carried parameter reaches its header joined with its own step (agbcc's `*p++ = 7` and
+  // `a++`, mwcc's `p += 3`), which an uninitialised local, merged with what the body loaded or set,
+  // is not
+  const edges: [into: Value, from: Value][] = [];
+  const literals = new Set<Value>();
+  const steps: Op[] = [];
+  for (const b of fn.blocks) {
+    for (const o of b.ops) {
+      const sig = (OPCODES as Record<string, { effects?: boolean; reads?: boolean } | undefined>)[o.opcode];
+      if (o.opcode === 'const' || o.opcode === 'fconst') {
+        o.results.forEach((r) => literals.add(r));
+      } else if (o.results.length === 1 && o.operands.length > 0 && sig?.effects !== true && sig?.reads !== true) {
+        steps.push(o);
+      }
+    }
+  }
+  // a step computed from literals alone is one too: agbcc builds a constant past imm8 as
+  // `mov r2, #0x96; lsl r2, r2, #0x1` (`a += 300`), hoisted above the loop
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const o of steps) {
+      if (!literals.has(o.results[0]) && o.operands.every((v) => literals.has(v))) {
+        literals.add(o.results[0]);
+        grew = true;
+      }
+    }
+  }
+  for (const b of fn.blocks) {
+    for (const o of b.ops) {
+      for (const e of o.successors) {
+        e.args.forEach((a, i) => {
+          const into = e.block.params[i];
+          if (into !== undefined) {
+            edges.push([into, a]);
+          }
+        });
+      }
+    }
+  }
+  const names = new Set<Value>([first]);
+  const carried = (o: Op): boolean =>
+    o.operands.some((v) => names.has(v)) && o.operands.every((v) => names.has(v) || literals.has(v));
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const [into, from] of edges) {
+      if (names.has(from) && !names.has(into)) {
+        names.add(into);
+        grew = true;
+      }
+    }
+    for (const o of steps) {
+      if (!names.has(o.results[0]) && carried(o)) {
+        names.add(o.results[0]);
+        grew = true;
+      }
+    }
+  }
+  for (let shrank = true; shrank;) {
+    shrank = false;
+    for (const [into, from] of edges) {
+      if (into !== first && names.has(into) && !names.has(from)) {
+        names.delete(into);
+        shrank = true;
+      }
+    }
+    for (const o of steps) {
+      if (names.has(o.results[0]) && !carried(o)) {
+        names.delete(o.results[0]);
+        shrank = true;
+      }
+    }
+  }
+  const blockParams = new Set<Value>(fn.blocks.flatMap((b) => b.params));
+  const inPlace = (o: Op): boolean => {
+    const at = calleeValue(o);
+    return at === undefined || blockParams.has(at);
+  };
+  const handedOn = (o: Op): ReadonlySet<Value> =>
+    o.opcode === 'call' &&
+    ((o.attrs[ARGS_BOUND_BY_ADDRESS] === true && inPlace(o)) ||
+      (typeof o.attrs.target === 'string' && forced.has(o.attrs.target)))
+      ? new Set(callArgs(o))
+      : new Set();
+  return fn.blocks.some((b) =>
+    b.ops.some((o) => {
+      if (o.opcode === 'ret') {
+        return false;
+      }
+      const passed = handedOn(o);
+      return o.operands.some((v) => names.has(v) && !passed.has(v));
+    }),
+  );
+}
+
+/** WHETHER A CALLEE'S BODY PROVES IT RETURNS NO STRUCT THROUGH A HIDDEN POINTER, which no caller can
+ *  tell: a caller's out-parameter at argument 0 and a struct return through memory are the same
+ *  instructions (frontend/frame-objects.ts `hiddenReturnPointerStands`). The callee can, where its
+ *  compiler hands the pointer back in the return register at every return
+ *  (`compilerBehaviors.structReturnHandsBackPointer`, measured true on agbcc and the three O32
+ *  compilers): a return that hands back nothing, or a constant, is then no return of such a function.
+ *  On agbcc the first is the `pop {r0}; bx r0` of a function that pushed lr, where r0 holds the return
+ *  address (`ret` `viaReturnReg`): compiled at -O0, -O1, -O2 and -Os, `struct R mk(int *)` returns
+ *  through `pop {r1}; bx r1` with r0 still the pointer, and agbcc pops into r0 only where no value is
+ *  returned. On O32 it is a return no path wrote v0 for, or one of a constant left in v0, where the
+ *  struct return is `move v0, a0`.
+ *  Read off the same lift as the register bound, under its rules, and answering false wherever they
+ *  answer nothing, save one: a body that does not lift is still asked whether some return it reaches
+ *  branches through the return register (`Frontend.returnsThroughReturnReg`), which needs no lift of
+ *  what it computes. PowerPC's mwcc clobbers r3 before the `blr` (the field is false), so it never
+ *  answers there. */
+export type CalleeReturnsNoHiddenPointer = (callee: string) => boolean;
+
+/** Whether some return of `fn` hands back no value, or a constant, on a target whose compiler hands a
+ *  hidden struct pointer back at every return of a function that takes one
+ *  (`CalleeReturnsNoHiddenPointer`): neither is the pointer that function was handed. A value loaded
+ *  or computed is not asked (a reload of the pointer's spill is the pointer). A bare `ret` hands
+ *  back nothing only where it branched through the return register (`viaReturnReg`) or that
+ *  register is no argument register: one that returns in its first argument register and names
+ *  nothing returns that register untouched (`returnsUntouched`), which in a function handed a
+ *  hidden pointer is the pointer. */
+function handsBackNoPointer(fn: Fn, target: TargetDescription): boolean {
+  if (target.compilerBehaviors.structReturnHandsBackPointer !== true) {
+    return false;
+  }
+  const constants = new Set(
+    fn.blocks.flatMap((b) => b.ops.filter((o) => o.opcode === 'const').flatMap((o) => o.results)),
+  );
+  const bareIsNothing = (o: Op): boolean => o.attrs.viaReturnReg === true || target.returnReg !== target.argRegs[0];
+  return fn.blocks.some((b) =>
+    b.ops.some(
+      (o) => o.opcode === 'ret' && (o.operands.length === 0 ? bareIsNothing(o) : constants.has(o.operands[0])),
+    ),
   );
 }
 

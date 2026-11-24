@@ -1754,7 +1754,7 @@ function liftOnce(
     { pairs: false, memoryReturn: true, stackArgs: true, voidReturn: true, argRegisterBoundsArity: false },
     fail,
     () => ownDeclarationOf(name, prototypes, options.contextOwnProto),
-    options.calleeBodyBound,
+    options.calleeBody,
     options.entryReadCalls,
     options.stackSized,
   );
@@ -3074,7 +3074,7 @@ function liftOnce(
         if (ARG_REGS.some((r) => !ssa.writtenOnEveryPath(r, bi, () => false))) {
           return undefined;
         }
-        const n = options.calleeStackWords?.(callee) ?? 0;
+        const n = options.calleeBody?.stackWords?.(callee) ?? 0;
         return bodyBlockAgrees(
           n,
           reaching.map((off) => off - STACK_ARGS_AT),
