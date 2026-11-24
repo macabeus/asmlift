@@ -130,6 +130,7 @@ export interface SwitchRecovery {
     siblings: Set<Block>,
     stopAtLoop?: boolean,
     jumps?: ReadonlySet<Block>,
+    ends?: ReadonlySet<Block>,
   ) => ArmExit;
   /** may the copies write out a sibling that leaves sideways into `s`? (`copySharedFallTargets`) */
   forwardToMerge: (s: Block, b: Block, merge: Block | null, siblings: ReadonlySet<Block>) => boolean;
@@ -940,6 +941,10 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   // `jumps` are blocks an edge into which is a jump that ends its path where it sits, whatever the
   // switch: the latch of a loop spelled `for`, which the structurer writes as `continue;`. Such an
   // edge is neither a fall into a sibling nor an escape, and an arm that IS one is a bare jump.
+  // `ends` are blocks an edge into which ends its path the same way (a case body's exit flag,
+  // structure.ts `caseExitBreak`) but which count as escapes, whatever dominates them: the arm does
+  // not walk past one, and a sideways path into one does not stop the fall-through, as one that
+  // only returns does not.
   const analyzeArmExit = (
     entry: Block,
     b: Block,
@@ -947,6 +952,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     siblings: Set<Block>,
     stopAtLoop = false,
     jumps: ReadonlySet<Block> = new Set(),
+    ends: ReadonlySet<Block> = new Set(),
   ): ArmExit => {
     if (entry === merge) {
       return { kind: 'break' }; // an empty arm (a table slot pointing straight at the switch's end)
@@ -971,7 +977,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         } else if (s !== entry && siblings.has(s)) {
           into.add(s);
         } else if (s !== entry && !seen.has(s)) {
-          if (!dom.get(s)!.has(b)) {
+          if (ends.has(s) || !dom.get(s)!.has(b)) {
             escapedTo.add(s);
             continue;
           }
@@ -1001,7 +1007,8 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // them.
     if (
       into.size === 1 &&
-      (escapedTo.size === 0 || (!stopAtLoop && [...escapedTo].every((s) => onlyReturns(s, b, merge, siblings))))
+      (escapedTo.size === 0 ||
+        (!stopAtLoop && [...escapedTo].every((s) => ends.has(s) || onlyReturns(s, b, merge, siblings))))
     ) {
       return { kind: 'fallthrough', to: [...into][0], breaks: toMerge, region: seen };
     }

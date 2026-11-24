@@ -950,6 +950,48 @@ test('a top-tested loop whose `break` arm runs code is a `while`, the arm ahead 
   expect(shipped).toEqual({ judged: 300, disagree: 0 });
 });
 
+// A BRANCH ABOVE THE ARM JOINS INSIDE THE BODY: `for (i = 0; i < n; i++) { if (p(i)) { if (d(i)) {
+// x2(x(i)); break; } } y(i); } r(n);` (`synthetic:brkarm_ifjoin`). The CFG joins `if (p(i))` at the
+// loop's exit, where the arm runs on to, and the arm's edge into the exit is the loop's own: the arm
+// renders inside the `if`, ahead of its `break` (structure.ts `leavesByOwnedEdges`), so the `if`
+// joins at `y(i)` in the body. It is the default reading, with no case body's exit flag asked.
+const CODE_ARM_UNDER_IF = `fn codearmif {
+^bb0(%n: s32):
+  %z: s32 = const {value=0}
+  %one: s32 = const {value=1}
+  br ^bb1(%z)
+^bb1(%i: s32):
+  %c: u32 = icmp_slt %i, %n
+  cond_br %c, ^bb2(), ^bb9()
+^bb2():
+  %p: s32 = call %i {target="p"}
+  cond_br %p, ^bb3(), ^bb5()
+^bb3():
+  %d: s32 = call %i {target="d"}
+  cond_br %d, ^bb4(), ^bb5()
+^bb4():
+  %x: s32 = call %i {target="x"}
+  %x2: s32 = call %x {target="x2"}
+  br ^bb9()
+^bb5():
+  %y: s32 = call %i {target="y"}
+  %i2: s32 = add %i, %one
+  br ^bb1(%i2)
+^bb9():
+  %r: s32 = call %n {target="r"}
+  ret
+}`;
+
+test('a branch above a code-running `break` arm in a tested loop joins inside the body', () => {
+  const { src, agreement, shipped } = judged(CODE_ARM_UNDER_IF, { caseExitFlags: false });
+  expect(src).toContain('for (v0 = 0; v0 < a0; v0 = v0 + 1) {');
+  expect(src).toMatch(/if \(d\(v0\)\) \{\n {16}x2\(x\(v0\)\);\n {16}break;\n {12}\}\n {8}\}\n {8}y\(v0\);/);
+  expect(src.match(/y\(/g)).toHaveLength(1);
+  expect(src.match(/r\(/g)).toHaveLength(1);
+  expect(agreement).toEqual({ judged: 300, disagree: 0 });
+  expect(shipped).toEqual({ judged: 300, disagree: 0 });
+});
+
 test('an arm into an exit that takes copies keeps the loop `while (1)`', () => {
   // the exit takes the counter: the header hands it `i`, the arm `-1`
   const copies = CODE_ARM_TOP_TESTED.replace('cond_br %3, ^bb2(), ^bb4()', 'cond_br %3, ^bb2(), ^bb4(%2)')

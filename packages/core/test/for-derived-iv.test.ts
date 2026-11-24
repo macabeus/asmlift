@@ -176,14 +176,24 @@ test('two constants of one value on the two edges are one derived param', () => 
 test('a preheader that reads memory refuses the `for`', () => {
   // the `for` would run the read ahead of its first test, on the path the guard skipped it
   const ir = srFor({ pre: '%81: s32 = gaddr {sym="gK"}\n  %80: s32 = load %81 {off=0, signed=false, width=4}' });
-  expect(() => judged(ir)).toThrow(/leaves its switch for a loop exit/);
+  // without a `for`, the case body's exit flag spells the loop's exit (case-exit-flag.test.ts)
+  const r = judged(ir);
+  expect(r.src).not.toContain('for (');
+  expect(r.src).toMatch(/if \(v\d+ != 0\) break;/);
+  expect(r.agreement.disagree).toBe(0);
+  expect(r.shipped.disagree).toBe(0);
 });
 
 test('a latch test that reads the derived param refuses the `for`', () => {
   // `hi < p` behind the guard `hi < lo + 3`: `p` is `i + 3` of the IV BEFORE its update, and the
   // `for`'s test runs after the update (`test-reads-update`)
   const ir = srFor({ guard: '%4: u32 = icmp_slt %1, %2', test: '%37: u32 = icmp_slt %1, %6' });
-  expect(() => judged(ir)).toThrow(/leaves its switch for a loop exit/);
+  // without a `for`, the case body's exit flag spells the loop's exit (case-exit-flag.test.ts)
+  const r = judged(ir);
+  expect(r.src).not.toContain('for (');
+  expect(r.src).toMatch(/if \(v\d+ != 0\) break;/);
+  expect(r.agreement.disagree).toBe(0);
+  expect(r.shipped.disagree).toBe(0);
 });
 
 test("a latch test that reads the derived param's back-edge value lifts, reading the updated IV", () => {

@@ -283,11 +283,23 @@ shapes real compilers emit (if/else **diamonds** — a branch splits, the arms r
 `clamp0` — natural loops, two regimes of `switch` —
 comparison trees and jump tables), and for anything else it _declines_ rather than emitting
 `goto` — because for byte-matching, emitting the compiler's canonical shape is the whole game,
-and a `goto` is almost never that shape. The one it spells without a `goto` is a search loop's
-exit past the code after it (`for (j…) { if (hit) goto next; } k(i); next:;`): a flag set before a
-`break` and tested after the loop (`TwoLevelExit` in `structure/loop-shapes.ts`). That lift is exact but not
-byte-matching — the `synthetic:brk2lvl` rows' own `goto` source is what reproduces their bytes, on
-all five toolchains. The structurer lives in
+and a `goto` is almost never that shape. It spells two such exits without a `goto`, each with a flag.
+The first is a search loop's exit past the code after it (`for (j…) { if (hit) goto next; } k(i);
+next:;`): a flag set before a `break` and tested after the loop (`TwoLevelExit` in
+`structure/loop-shapes.ts`). That lift is exact but not byte-matching — the `synthetic:brk2lvl`
+rows' own `goto` source is what reproduces their bytes, on all five toolchains. The second is a case
+body's exit out of the loop its switch sits in, past the code after the switch (`do { switch (t) {
+case 1: b(); goto out; … } k(); } while (…); out:`), where a `break;` in the arm would leave only
+the switch: `f = 1; break;` in the arm, `f = 0;` ahead of the switch and `if (f != 0) break;` right
+after it (`caseExitBreak` in `structure.ts`). A two-level exit taken from a case body sets its own
+two-level flag there instead, tested after the switch as well as after the loop, so it needs no
+second flag. This flag is asked only in a rerun of the whole function once every run without it has
+declined and one met such an exit (`CaseExitRanking` in `structure.ts`): it reruns the whole goto
+ladder below (`JumpRanking`) only after that ladder, its gotos included, declined, so it turns a
+decline into a lift and never changes a published lift. It is not byte-matching either: on
+agbcc the flag's test survives (`cmp rF, #0`), so the `synthetic:sw_caseexit_goto` rows lift on all
+five toolchains and match on none; a ranked `goto` respell of that exit, as `/case-end-goto` is for
+`synthetic:sw_hitexit` below, is the matching follow-up. The structurer lives in
 [`packages/core/src/structure/`](../packages/core/src/structure) — the most intricate code in the
 project, because destroying SSA (assigning merge values back to named C variables without
 changing meaning) is where several audit rounds found the subtlest bugs.

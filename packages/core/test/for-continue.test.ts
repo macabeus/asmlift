@@ -180,7 +180,12 @@ test('a relay block an arm enters too refuses the `for`', () => {
   expect(ir).toContain('br ^bb15()\n^bb7');
   // the `for` is not read through a relay something else enters, and the function declines as it
   // does with no `for` reading at all
-  expect(() => judged(ir)).toThrow(/leaves its switch for a loop exit/);
+  // without a `for`, the case body's exit flag spells the loop's exit (case-exit-flag.test.ts)
+  const r = judged(ir);
+  expect(r.src).not.toContain('for (');
+  expect(r.src).toMatch(/if \(v\d+ != 0\) break;/);
+  expect(r.agreement.disagree).toBe(0);
+  expect(r.shipped.disagree).toBe(0);
 });
 
 /** `forJt` with a second loop variable `s`, entered as `lo` and stepped after the counter by `step`,
