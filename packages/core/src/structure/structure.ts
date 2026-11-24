@@ -5592,7 +5592,6 @@ function structureRanked(
                   ? [lc.twoLevel.to]
                   : []),
               ];
-        caseExit.wanted ||= !caseExit.asked && flagTargets.length > 0;
         const flagged = caseExit.asked ? flagTargets : [];
         const jumps = new Set<Block>([
           ...(continueTo !== undefined && continueTo !== at ? [continueTo] : []),
@@ -5647,7 +5646,10 @@ function structureRanked(
         const falls = [...jumped.values()].some((e) => e.kind === 'fallthrough');
         const chain = !spellSwitchFallthrough && falls ? null : chainArms(preChain, dflt, jumped);
         const refusal = chain === null ? null : armRefusal(jumped, chain);
-        return { exits: jumped, falls, chain, refusal, declines: chain === null || refusal !== null };
+        const declines = chain === null || refusal !== null;
+        // unasked, a reading the flag could change only notes it where it declines
+        caseExit.wanted ||= !caseExit.asked && declines && flagTargets.length > 0;
+        return { exits: jumped, falls, chain, refusal, declines };
       };
       // THE EMISSION'S PER-ARM REFUSALS, the one definition of them. Every refusal the emission
       // below throws is a null chain (which a fall-through in a language without one forces too —
