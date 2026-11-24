@@ -180,8 +180,6 @@ export const TWO_LEVEL_REGION_GATES: readonly Gate<TwoLevelRegion>[] = [
 export interface TwoLevelBreak {
   /** the block sits in a case body opened inside the loop, where `break` leaves only the switch */
   readonly inCaseBody: boolean;
-  /** the exit leaves the enclosing loop too (`TwoLevelExit.outward`) */
-  readonly outward: boolean;
   /** the case body's exit flag can carry the `break` out of the loop: its switch is the one switch
    *  opened in the loop (structure.ts `caseExitFrame`) */
   readonly flagged: boolean;
@@ -189,7 +187,9 @@ export interface TwoLevelBreak {
 
 /** When a block's edge to a two-level exit's second target is written `flag = 1; break;`. The
  *  argument is at the refusal in `structureBlock`. In a case body the `break` leaves the switch, and
- *  the case body's exit flag, set beside the two-level one, leaves the loop after it. */
+ *  the case body's exit flag, set beside the two-level one, leaves the loop after it. An outward exit
+ *  (`TwoLevelExit.outward`) needs no rule of its own: its flag's test after this loop
+ *  (`emitForeverExit`) follows the case body's, and leaves the enclosing loop in turn. */
 export const TWO_LEVEL_BREAK_GATES: readonly Gate<TwoLevelBreak>[] = [
   {
     id: 'from-a-case-body',
@@ -198,14 +198,6 @@ export const TWO_LEVEL_BREAK_GATES: readonly Gate<TwoLevelBreak>[] = [
     guardedBy:
       'two-level-exit.test.ts: without from-a-case-body the case-body exit is refused by the switch-exit rule behind it',
     rejects: (c) => c.inCaseBody && !c.flagged,
-  },
-  {
-    // not built: the case body's flag would leave this loop, and the outward one's test
-    // (`emitForever`) would then have to follow it
-    id: 'outward-from-a-case-body',
-    why: "the case body's exit flag leaves only this loop, and an outward exit must leave the enclosing one too",
-    sound: false,
-    rejects: (c) => c.inCaseBody && c.outward,
   },
 ];
 

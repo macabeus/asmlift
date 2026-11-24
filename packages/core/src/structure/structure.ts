@@ -5061,7 +5061,12 @@ function structureRanked(
   // then skips the code between). Taken where the test is in this loop's own body
   // (`caseExitFrame`). Elsewhere the code from the exit on is copied into the arm, which is the same
   // program wherever that copy ends in a `return`, so the flag is taken only where it could not
-  // (`exitTakesCaseFlag`).
+  // (`exitTakesCaseFlag`). Not an outward two-level exit's second target (`TwoLevelExit.outward`):
+  // an edge into it is not the branch `structureBlock` spells with the code from the target and the
+  // enclosing loop's break rule, and setting the flags here would skip that code. Without this
+  // exclusion and `flagTargets`' beside it, agbcc -O2's `case 0: a(j); goto out;` out of two loops
+  // in a third drops `a(j)`, and `case 0: if (a(j) < z) { w(j); goto out; }`, which
+  // `structureBlock` lifts, declines.
   const caseExitBreak = (b: Block): Stmt[] | undefined => {
     const lc = loopCtx;
     if (lc === null) {
@@ -5580,7 +5585,8 @@ function structureRanked(
               (foreverLoops.has(loopCtx.header) && forRank.asked.has(loopCtx.header) ? loopCtx.header : undefined));
         // Asked (`CaseExitRanking`), nor are the blocks a case body's exit flag leaves the loop
         // for (`caseExitBreak`), where this switch is the first opened in that loop: the loop's
-        // exit, and a two-level exit's second target. One that is a case arm's own entry is a jump,
+        // exit, and a two-level exit's second target, not an outward one's (`caseExitBreak` says
+        // why). One that is a case arm's own entry is a jump,
         // and the others ends (`analyzeArmExit`).
         const lc = loopCtx;
         const flagTargets =
@@ -6612,7 +6618,6 @@ function structureRanked(
       twoLevel !== undefined &&
       firstRejection(hooks.twoLevelBreakGates ?? TWO_LEVEL_BREAK_GATES, {
         inCaseBody: armCapturesBreak,
-        outward: twoLevel.outward === true,
         flagged: armCapturesBreak && (caseFrame = caseExitFrame(loopCtx!)) !== null,
       }) !== null
     ) {

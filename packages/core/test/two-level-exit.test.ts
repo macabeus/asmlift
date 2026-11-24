@@ -12,8 +12,9 @@
 // both loops on its way to the enclosing loop's exit, then `f = 1; break;`, and `if (f != 0) break;`
 // follows the inner loop at once, and its switch too where the loop sits in a case body. The decline
 // fixtures are the shapes the reading does not take: a third exit target, the enclosing loop's
-// header, a second exit out of a case body, one into the switch arm its own arm falls into, a `goto`
-// out of three loops, and one through a switch in a switch.
+// header, one into the switch arm its own arm falls into, a `goto` out of three loops, and one
+// through a switch in a switch. A second exit out of a case body, and a `goto` out of both loops
+// from one, set the case body's exit flag beside their own (structure.ts `caseExitBreak`).
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -1053,6 +1054,46 @@ const SECOND_EXIT_FROM_A_CASE_BODY = `fn casebody {
   ret
 }`;
 
+/** The same hit OUT OF BOTH LOOPS (`TwoLevelExit.outward`), agbcc -O2's layout of `for (i…) { for
+ *  (j…) { switch (probe(j)) { case 0: if (a(j) < z) goto out; case 1: b(j); break; … } } k(i); }
+ *  out: after(i);`. The hit sets the outward flag and the case body's exit flag, and `break;` leaves
+ *  the switch; the case body's flag test after the switch leaves the inner loop, and the outward
+ *  flag's test after the inner loop (`emitForeverExit`) leaves the outer one in turn, so no rule of
+ *  the break table refuses it. The switch reads `j`, so the seeds reach the hit, on `j == 0`. */
+const OUTWARD_FROM_A_CASE_BODY = `fn outcase {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_slt %3, %0
+  cond_br %4, ^bb1(%3), ^bb7(%3)
+^bb1(%5: s32):
+  %6: s32 = call %5 {target="mark"}
+  %7: s32 = const {value=1}
+  %9: u32 = icmp_slt %1, %3
+  cond_br %9, ^bb5(), ^bb3(%3)
+^bb3(%10: s32):
+  %11: s32 = call %10, %5 {target="probe"}
+  switch_br %10, ^bb20(), ^bb21(), ^bb4() {cases=[0;1]}
+^bb20():
+  %30: s32 = call %10 {target="a"}
+  %32: u32 = icmp_slt %30, %2
+  cond_br %32, ^bb7(%5), ^bb21()
+^bb21():
+  %31: s32 = call %10 {target="b"}
+  br ^bb4()
+^bb4():
+  %13: s32 = add %10, %7
+  %14: u32 = icmp_slt %1, %13
+  cond_br %14, ^bb5(), ^bb3(%13)
+^bb5():
+  %15: s32 = call %5 {target="k"}
+  %8: s32 = add %5, %7
+  %16: u32 = icmp_slt %8, %0
+  cond_br %16, ^bb1(%8), ^bb7(%8)
+^bb7(%21: s32):
+  %20: s32 = call %21 {target="after"}
+  ret
+}`;
+
 /** The same arm FALLING into the next one: `k(i)` runs on into `case 2: h(i); break;`, and the
  *  hit's `goto` lands past both, on the switch's merge (agbcc cross-jumps a post-loop `k(i)` into a
  *  sibling `case 2: k(i); break;` this way). The arm ends where it falls, inside the code the exit
@@ -1564,6 +1605,23 @@ test("a second exit out of a case body sets the case body's exit flag beside its
   // judged by case-exit-flag.test.ts's fixture of the same exit, whose dispatch is the counter
   const seen = covers(SECOND_EXIT_FROM_A_CASE_BODY);
   expect(seen.zeroTrips).toBeGreaterThan(0);
+  expect(seen.noHit).toBeGreaterThan(0);
+});
+
+test("a goto out of both loops from a case body sets the case body's flag beside the outward one, and the program is the IR", () => {
+  const { src, agreement, shipped } = judged(OUTWARD_FROM_A_CASE_BODY);
+  const hit =
+    /if \(\(s32\)a\(v\d+\) < a2\) \{\n(?:\s*v\d+ = v\d+;\n)?\s*(v\d+) = 1;\n\s*(v\d+) = 1;\n\s*break;\n\s*\}/.exec(src);
+  expect(hit).not.toBeNull();
+  // the case body's flag right after the switch, the outward one right after the inner loop
+  const [, outward, caseFlag] = hit!;
+  expect(src).toMatch(new RegExp(`}\\n\\s*if \\(${caseFlag} != 0\\) break;`));
+  expect(src).toMatch(new RegExp(`}\\n\\s*if \\(${outward} != 0\\) break;\\n\\s*}\\n\\s*k\\(`));
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
+  const seen = covers(OUTWARD_FROM_A_CASE_BODY);
+  expect(seen.firstHit + seen.laterHit).toBeGreaterThan(0);
   expect(seen.noHit).toBeGreaterThan(0);
 });
 
