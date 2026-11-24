@@ -218,11 +218,16 @@ test('an arm of a switch nested in a case body reaches the exit as the end of it
   expect(ran(ir, 'e')).toBeGreaterThan(0);
 });
 
-test("a two-level exit out of a case body sets the case body's exit flag beside its own", () => {
+test('a two-level exit out of a case body sets its one flag, read after the switch and after the loop', () => {
+  // the two-level flag is 0 before the loop and set only on the exit path, so it is the flag the
+  // switch is followed by too: no second, case-body flag beside it
   const { src, agreement, shipped } = judged(TWO_LEVEL);
-  expect(src).toMatch(/\{\n\s*(v\d+) = 1;\n\s*(v\d+) = 1;\n\s*break;\n\s*\}/);
-  expect(src).toMatch(/}\n\s*if \((v\d+) != 0\) break;/);
-  expect(src).toMatch(/if \((v\d+) == 0\) k\(v\d+\);/);
+  const hit = /\{\n\s*(v\d+) = 1;\n\s*break;\n\s*\}/.exec(src);
+  expect(hit).not.toBeNull();
+  const flag = hit![1];
+  expect(src.match(/ = 1;\n\s*break;/g)).toHaveLength(1);
+  expect(src).toMatch(new RegExp(`}\\n\\s*if \\(${flag} != 0\\) break;`));
+  expect(src).toMatch(new RegExp(`if \\(${flag} == 0\\) k\\(v\\d+\\);`));
   alike(agreement);
   alike(shipped);
   // outer iterations (from one `mark` to the next) that take the hit, `a(1)` and no `k`, and that do not

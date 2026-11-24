@@ -5057,9 +5057,10 @@ function structureRanked(
   // A CASE BODY'S JUMP OUT OF THE LOOP ITS SWITCH SITS IN, past the switch's end (the merge is
   // `switchBreakAt`'s): `f = 1; break;`, and the flag goes to the switch's scope, whose
   // `if (f != 0) break;` right after the switch leaves the loop (`aroundSwitch`). To the loop's
-  // exit, and to a two-level exit's second target, which sets that flag first (`emitForeverExit`
-  // then skips the code between). Taken where the test is in this loop's own body
-  // (`caseExitFrame`). Elsewhere the code from the exit on is copied into the arm, which is the same
+  // exit, and to a two-level exit's second target, which takes the two-level flag for it: that one
+  // is 0 before the loop and set only on this path, so the test after the switch reads it as well,
+  // and `emitForeverExit`'s after the loop skips the code between. Taken where the test is in this
+  // loop's own body (`caseExitFrame`). Elsewhere the code from the exit on is copied into the arm, which is the same
   // program wherever that copy ends in a `return`, so the flag is taken only where it could not
   // (`exitTakesCaseFlag`). Not an outward two-level exit's second target (`TwoLevelExit.outward`):
   // an edge into it is not the branch `structureBlock` spells with the code from the target and the
@@ -5080,10 +5081,9 @@ function structureRanked(
     if (frame === null) {
       return undefined;
     }
-    const flag = caseExitFlag(lc.header);
+    const flag = second ? twoLevelFlag(lc.header) : caseExitFlag(lc.header);
     frame.flags!.add(flag);
     return [
-      ...(second ? [{ k: 'assign', name: twoLevelFlag(lc.header), value: { k: 'const', value: 1 } } as Stmt] : []),
       { k: 'assign', name: flag, value: { k: 'const', value: 1 } },
       { k: 'break', ofSwitch: true },
     ];
@@ -6610,7 +6610,8 @@ function structureRanked(
     // and the `if (f != 0) break;` right after it (`aroundSwitch`, behind `f = 0;` ahead of the
     // switch) leaves the loop, so nothing after the switch runs on that path. It holds only where
     // that test sits in this loop's own body, the arm's switch being the one switch opened in this
-    // loop (`caseExitFrame`); elsewhere the exit is refused. The frame is asked only where this
+    // loop (`caseExitFrame`); elsewhere the exit is refused. A two-level exit's flag, outward or
+    // not, is that flag itself (`caseExitFlags` says why). The frame is asked only where this
     // block's break or two-level exit reads it, since asking notes the flag's rerun
     // (`CaseExitRanking`), which every other branch in a case body would request for nothing.
     let caseFrame: SwitchFrame | null = null;
@@ -6638,7 +6639,7 @@ function structureRanked(
               `switch's end (block #${fn.blocks.indexOf(b)}), where \`break\` would leave only the switch`,
           );
         }
-        caseFlag = caseExitFlag(loopCtx.header);
+        caseFlag = twoLevel !== undefined ? twoLevelFlag(loopCtx.header) : caseExitFlag(loopCtx.header);
       }
     }
     if (loopCtx && loopCtx.breaks.has(b) && (!armCapturesBreak || caseFlag !== undefined)) {
@@ -6669,7 +6670,7 @@ function structureRanked(
               ...(rule.bare ? [] : argAssignsFor(b, breakEdge)),
               ...(arm !== undefined ? structureRegion(arm.to, arm.exit ?? frame.exit) : []),
               ...(outer !== undefined ? structureRegion(twoLevel!.to, outer.exit) : []),
-              ...(twoLevel !== undefined
+              ...(twoLevel !== undefined && caseFlag === undefined
                 ? [{ k: 'assign', name: twoLevelFlag(frame.header), value: { k: 'const', value: 1 } } as Stmt]
                 : []),
               ...(caseFlag !== undefined
@@ -8334,9 +8335,11 @@ function structureRanked(
   // first use, after the naming walk. Declared only where the body still mentions it
   // (`localNames`), so a reading structured and then dropped declares nothing.
   const twoLevelFlags = new Map<Block, string>();
-  // The flag of a case body's exit out of the loop at `header` past its switch's end
-  // (`structureBlock`): one per loop, apart from its two-level flag, which reads 1 after the loop
-  // where this one is reset before each switch.
+  // The flag of a case body's exit out of the loop at `header` for the loop's exit past its switch's
+  // end (`caseExitBreak`, `structureBlock`): one per loop. A two-level exit from a case body sets
+  // the loop's two-level flag instead, which is 0 before the loop and set only on that exit's path,
+  // so the switch is followed by its test too and no second flag is needed (as the outward exit
+  // handed through a switch, `emitForeverExit`).
   const caseExitFlags = new Map<Block, string>();
   const caseExitFlag = (header: Block): string => {
     let name = caseExitFlags.get(header);
