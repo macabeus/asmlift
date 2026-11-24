@@ -156,7 +156,7 @@ const BEHAVIORS: Record<string, CompilerBehaviors> = {
     spillSlotOrder: 'unknown',
     localsAboveOutgoingArea: true,
     outgoingAreaNeverLoadedFrom: 8,
-    captureBelowLocalsRebases: 'indexed',
+    captureBelowLocalsRebases: 'stepped',
     linkageLocalArea: 'above-outgoing-area',
     // CallBehaviors
     aggregateReturn: 'svr4',
@@ -195,7 +195,7 @@ const BEHAVIORS: Record<string, CompilerBehaviors> = {
     spillSlotOrder: 'unknown',
     localsAboveOutgoingArea: true,
     outgoingAreaNeverLoadedFrom: 8,
-    captureBelowLocalsRebases: 'indexed',
+    captureBelowLocalsRebases: 'stepped',
     linkageLocalArea: 'above-outgoing-area',
     // CallBehaviors
     aggregateReturn: 'svr4',
@@ -233,7 +233,7 @@ const BEHAVIORS: Record<string, CompilerBehaviors> = {
     spillSlotOrder: 'unknown',
     localsAboveOutgoingArea: true,
     outgoingAreaNeverLoadedFrom: 8,
-    captureBelowLocalsRebases: 'indexed',
+    captureBelowLocalsRebases: 'stepped',
     linkageLocalArea: 'above-outgoing-area',
     // CallBehaviors
     aggregateReturn: 'svr4',

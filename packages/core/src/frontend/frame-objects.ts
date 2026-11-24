@@ -1149,8 +1149,8 @@ function belowLocalArea(off: number, owned: FrameRange): string {
  *  C name's, so the capture is that object's address moved down only where nothing it reaches
  *  could be one of those words in the C: it escapes nowhere (a callee, memory, a by-value read or a
  *  return temp would be handed the outgoing words), no access at a constant displacement lands
- *  beneath the locals (a copy into the outgoing area is exactly that), and no pointer is stepped
- *  from it (an O32 copy of a by-value struct into the outgoing area may be).
+ *  beneath the locals (a copy into the outgoing area is exactly that), and under 'indexed' no
+ *  pointer is stepped from it (an O32 copy of a by-value struct into the outgoing area may be).
  *  What is left is an access at a runtime index, whose reach and width the one object's rules
  *  judge like any other. */
 function belowRebaseRefusal(
@@ -1158,7 +1158,7 @@ function belowRebaseRefusal(
   owned: FrameRange,
   uses: FrameUses,
   flow: AddressFlow,
-  rebases: 'indexed' | undefined,
+  rebases: 'indexed' | 'stepped' | undefined,
 ): string | null {
   const handedOver =
     uses.escaped.has(off) ||
@@ -1170,7 +1170,7 @@ function belowRebaseRefusal(
     uses.byValueReads.has(off) ||
     uses.returnTemps.has(off);
   const fixedBeneath = uses.fixed.some((f) => f.at < owned.from);
-  const stepped = [...flow.stepped.values()].includes(off);
+  const stepped = rebases !== 'stepped' && [...flow.stepped.values()].includes(off);
   return rebases === undefined || handedOver || fixedBeneath || stepped ? belowLocalArea(off, owned) : null;
 }
 

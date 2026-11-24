@@ -704,3 +704,53 @@ describe("an unsized call's outgoing area ends at the loaded-word bound", () => 
     ).toMatchObject({ outgoingEnd: 8 });
   });
 });
+
+// `struct UpdBig { s32 w[18]; }; void f(struct UpdBig *s){ struct UpdBig b; b = *s; upd_useb(&b); }`
+// at mwcc_242_81 -O4,p (bench row upd_lcopy): the copy is an update-form loop whose destination
+// pointer starts one word beneath `b` at 8, `addi r5,r1,4 / … / stwu r0,8(r5)`, at the LR-save
+// word's offset. PPC passes no aggregate in its outgoing words, so a pointer stepped from there is
+// `b`'s moved down (`captureBelowLocalsRebases: 'stepped'`); on a target that says 'indexed' it is
+// not, since an O32 copy into the outgoing area steps such a pointer.
+describe('a pointer stepped from below the local area', () => {
+  const LCOPY = [
+    'stwu    r1,-80(r1)',
+    'mflr    r0',
+    'addi    r4,r3,-4',
+    'stw     r0,84(r1)',
+    'li      r0,9',
+    'addi    r5,r1,4',
+    'mtctr   r0',
+    'lwz     r3,4(r4)',
+    'lwzu    r0,8(r4)',
+    'stw     r3,4(r5)',
+    'stwu    r0,8(r5)',
+    'bdnz+   @7',
+    'addi    r3,r1,8',
+    'bl upd_useb',
+    'lwz     r0,84(r1)',
+    'mtlr    r0',
+    'addi    r1,r1,80',
+    'blr',
+  ];
+  const UPD: Prototypes = {
+    f: { params: ['s32 *'], returnsVoid: true },
+    upd_useb: { params: ['void *'], returnsVoid: true },
+  };
+
+  test('mwcc: the update-form copy is the local struct, moved down by a word', () => {
+    const out = lift('f', LCOPY, UPD);
+    expect(out).toContain('u8 sp8[72];');
+    expect(out).toContain('(s32 *)((u32)sp8 + -4)');
+    expect(out).toContain('upd_useb((void *)sp8);');
+  });
+
+  test('…and only where the target says a stepped pointer there is no outgoing copy', () => {
+    const INDEXED = {
+      ...PPC_MWCC,
+      compilerBehaviors: { ...PPC_MWCC.compilerBehaviors, captureBelowLocalsRebases: 'indexed' as const },
+    };
+    expect(() => decompile('f', fn('f', LCOPY), INDEXED, { prototypes: UPD })).toThrow(
+      /the captured address at \[sp,#4\) is below the reserved local area, which starts at \[sp,#8\)/,
+    );
+  });
+});
