@@ -26,3 +26,9 @@ int blk2(int i) { u32 w[6]; struct S12 *p = (struct S12 *)(w - 2); w[0] = gA; w[
 int blk3(int i) { u32 w[6]; struct S12 *p = (struct S12 *)(w - 1); w[0] = gA; w[1] = gB; w[2] = gC; w[3] = gD; w[4] = gA; w[5] = gB; return kr(1, 2, p[i], gI); }
 extern u32 gE, gF, gT[64]; extern int gK; extern int (*gFp)();
 int fpspill(int i, int j, int k, int l) { int x0 = gB * l, x1 = gA - l, x2 = gT[i & 63], x3 = gT[i & 63], x4 = gT[l & 63] * k, x5 = gT[l & 63] * k, x6 = gT[l & 63] * k, x7 = gA - l, x8 = gK ^ i; u32 w[8]; struct S12 *p = (struct S12 *)(w - 4); w[0] = gA; w[1] = gE; w[2] = gE; w[3] = gC; w[4] = gF; w[5] = gF; w[6] = gD; w[7] = gC; return gFp(gT[k & 63], gT[k & 63], p[i], j ? gI : gK, gT[j & 63]) + x0 + x1 + x2 + x3 + x4 + x5 + x6 + x7 + x8; }
+void walk4(void) { u32 a[4]; int i; a[0] = gA; a[1] = gB; a[2] = gC; a[3] = gD; for (i = 0; i < gI; i++) use(a[i], 0); }
+void walkcall(void) { u32 a[2]; int i; a[0] = gA; a[1] = gB; for (i = 0; i < gI; i++) use(a[i], i); rng(); }
+void walkkr(void) { u32 a[2]; int i; a[0] = gA; a[1] = gB; for (i = 0; i < gI; i++) use(a[i], i); kr(1, 2, 3, 4, 5); }
+void walkdn(void) { u32 a[2]; int i; a[0] = gA; a[1] = gB; for (i = gI; i >= 0; i--) use(a[i], i); }
+void walkbelow(void) { u32 a[3]; u32 *p = a - 1; int i; a[0] = gA; a[1] = gB; a[2] = gC; for (i = 0; i < gI; i++) use(*++p, i); five(1, 2, 3, 4, gC); }
+void walkbefore(void) { u32 a[2]; int i; a[0] = gA; a[1] = gB; kr(1, 2, 3, 4, gC); for (i = 0; i < gI; i++) use(a[i], i); }

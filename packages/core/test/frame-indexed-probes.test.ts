@@ -333,3 +333,63 @@ describe('the staging order is a declared premise', () => {
     expect(() => decompile('below3', swapped, ARMV4T_AGBCC)).toThrow(/the store to \[sp,#0\]/);
   });
 });
+
+// agbcc strength-reduces a loop over a local array to a pointer captured BEFORE the loop and
+// stepped by the load itself (`mov r5, sp` … `.L: ldmia r5!, {r0}` … `blt .L`), so the read is in
+// another block than the capture. A must-hold across blocks (`thumb.ts` `steppedFrameReads`) reads
+// it as an `indexed-read` from the capture's offset up, only where every call after it is stated
+// exactly by a typed parameter list.
+describe('a pointer stepped up from a capture before the loop', () => {
+  const WALK = {
+    use: { params: ['u32', 's32'], returnsVoid: true },
+    rng: { params: [], returnsVoid: true },
+    five: { params: words(5), returnsVoid: true },
+  };
+
+  test('agbcc captures before the loop and steps with the load', () => {
+    for (const fn of ['walk4', 'walkcall', 'walkkr']) {
+      const l = lines(fn);
+      const head = l.findIndex((x) => /^\.L\d+:$/.test(x));
+      expect(l.slice(0, head)).toEqual(
+        expect.arrayContaining([expect.stringMatching(/^(mov\tr5, sp|add\tr5, sp, #0x4)$/)]),
+      );
+      expect(l[head + 1]).toBe('ldmia\tr5!, {r0}');
+    }
+    // `*++p` from `a - 1` steps with an add, from a capture at the frame base beneath the array
+    const below = lines('walkbelow');
+    expect(below).toEqual(expect.arrayContaining(['mov\tr5, sp', 'str\tr0, [sp, #0x4]', 'add\tr5, r5, #0x4']));
+  });
+
+  test('walk4, walkcall: the walk is a read of the array, and a typed call after it lifts', () => {
+    expect(lift('walk4', WALK)).toMatch(/v0 = \(s32 \*\)sp0;\s+do \{\s+use\(\*v0, 0\);\s+v0 = v0 \+ 1;/);
+    const walkcall = lift('walkcall', WALK);
+    expect(walkcall).toContain('use(*v0, v1);');
+    expect(walkcall).toContain('rng();');
+  });
+
+  test('a call nothing sizes, after the walk or before it, keeps its stack arguments', () => {
+    for (const fn of ['walkkr', 'walkbefore']) {
+      expect(() => lift(fn, WALK)).toThrow(/the store to \[sp,#0\] is never reloaded/);
+    }
+  });
+
+  test('a pointer stepped down, or a stepped read below a typed call’s staged word, declines', () => {
+    expect(() => lift('walkdn', WALK)).toThrow(/the store to \[sp,#0\] is never reloaded/);
+    // the read is based at [sp,#0], where `five` stages its fifth word, so it bounds nothing, and the
+    // array's stores reach `five` unread on the path that skips the loop
+    expect(() => lift('walkbelow', WALK)).toThrow(/also reaches the call unread/);
+  });
+
+  test('the hold is a must: one path that writes the pointer otherwise, and the walk is no read', () => {
+    const src = source('walkcall');
+    const latch = '\tblt\t.L79\t@cond_branch\n';
+    expect(src).toContain(latch);
+    const clobbered = src.replace(latch, '\tmov\tr5, r6\n' + latch);
+    expect(() => decompile('walkcall', clobbered, ARMV4T_AGBCC, { prototypes: WALK })).toThrow(
+      /the store to \[sp,#0\]/,
+    );
+    // …and a call nothing sizes after it clears nothing
+    const untyped = { ...WALK, rng: { returnsVoid: true } };
+    expect(() => decompile('walkcall', src, ARMV4T_AGBCC, { prototypes: untyped })).toThrow(/the store to \[sp,#0\]/);
+  });
+});

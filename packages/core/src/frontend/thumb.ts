@@ -5014,6 +5014,18 @@ function measureThumbFrame({
       }
     });
   }
+  // …AND A LOAD THROUGH A POINTER STEPPED UP FROM A CAPTURE, ACROSS BLOCKS: agbcc's loop over a
+  // local array is `mov r5, sp` before the loop and `ldmia r5!, {r0}` inside it (`steppedFrameReads`
+  // says why the base it reports is the lowest word the load can read). Such a read is an event
+  // only where its ceiling is `Infinity` — every call reachable after it is stated exactly by a
+  // typed parameter list, so a word it clears that one of them takes is missing at that call and
+  // refuses there — and it never bounds the area (`stepped`, frontend/stackargs.ts).
+  const steppedReadOf = new Map<Instr, number>();
+  for (const [ins, { at, b, i }] of steppedFrameReads(asmBlocks, preds, entryReachable, narrowCallClobbers)) {
+    if (clearsBelowFrom(b, i + 1, clearsBelowAtStart) === Infinity) {
+      steppedReadOf.set(ins, at);
+    }
+  }
   // THE FRAME BASE PUBLISHED TO MEMORY: a word store hands `sp + 0` to memory outside the frame
   // (`escapedOffsetOf`, a `str`), under the premise that an escaped frame address names a local's
   // words from it up. The fourth [sp,#0] licence's second half reads it (`frameBaseIsTheObject`).
@@ -5044,6 +5056,10 @@ function measureThumbFrame({
       const off = slotAcc(ins) ?? narrowReloadOf.get(ins) ?? capturedReloadOf.get(ins) ?? null;
       if (off !== null && !constantCaptureOffsets.has(off) && !inByValueBlock(off, 4)) {
         return [{ kind: /^str/.test(ins.mnemonic) ? 'store' : 'load', off }];
+      }
+      const steppedAt = escapesHere && indexedReadsHere ? steppedReadOf.get(ins) : undefined;
+      if (steppedAt !== undefined) {
+        return [{ kind: 'indexed-read', off: steppedAt }];
       }
       if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
         const callee = ins.ops[0] ?? '?';
@@ -5348,6 +5364,151 @@ function heldFrameWalk(
   }
   return false;
 }
+
+// THE LOADS THROUGH A POINTER STEPPED UP FROM A FRAME CAPTURE, each with the lowest frame offset it
+// can read and where it sits. agbcc strength-reduces `for (i = 0; i < n; i++) use(a[i])` over a
+// local array to a pointer captured before the loop and stepped by the load itself: `mov r5, sp`
+// … `.L6: ldmia r5!, {r0}` … `blt .L6`. The load is in another block than the capture, so
+// `heldFrameWalk`, block-local because it feeds acceptances, never sees it.
+//
+// A MUST-HOLD ACROSS BLOCKS, the greatest fixpoint: a register is held at a block's start only
+// where EVERY live predecessor leaves it held with the SAME base, and the entry starts empty (an
+// incoming argument register holds the caller's value). The base is where the pointer was formed —
+// a capture of known offset, `mov rD, sp` (0) or `add rD, sp, #k` (k) — and it is kept only by
+// what moves the pointer UP: `ldmia rN!` with rN not in its list (Thumb-1 writes the base back
+// whatever the `!` says), `add rN, #c` / `add rD, rN, #c` with c > 0, and a copy `mov rD, rN` /
+// `add rD, rN, #0`. Every other write of the register ends it (`mayWriteReg`, which over-answers),
+// a call ends what it clobbers (`clobbers`; r4-r7 are callee-saved), and any write of sp ends
+// everything. So every address the register can hold is at or above its base, and a load through
+// it at displacement d >= 0 reads from base + d up — the round-1 hazard, a pointer formed BELOW its
+// array (`a - 1`), is a capture whose own offset is that lower word, which this reports as the base.
+//
+// Only a load through a register that has been STEPPED is reported: one through an unmoved capture
+// is the slot model's and `heldFrameWalk`'s, which read its exact offset.
+function steppedFrameReads(
+  asmBlocks: readonly AsmBlock[],
+  preds: readonly (readonly number[])[],
+  entryReachable: ReadonlySet<number>,
+  clobbers: readonly string[],
+): Map<Instr, { at: number; b: number; i: number }> {
+  type Held = ReadonlyMap<string, { base: number; stepped: boolean }>;
+  const step = (ins: Instr, held: Map<string, { base: number; stepped: boolean }>): void => {
+    if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
+      clobbers.forEach((r) => held.delete(r));
+      return;
+    }
+    if (modifiesSp(ins)) {
+      held.clear();
+      return;
+    }
+    const [d, s1, s2] = ins.ops.map((o) => (o === undefined ? o : reg(o).replace(/!$/, '')));
+    let def: [string, { base: number; stepped: boolean }] | null = null;
+    if (ins.mnemonic === 'ldmia' && d !== undefined && held.has(d)) {
+      const list = regListOf(ins.ops.slice(1));
+      if (list !== null && !list.includes(d)) {
+        def = [d, { base: held.get(d)!.base, stepped: true }];
+      }
+    } else if (d !== undefined && !isSpReg(d)) {
+      if (capturesSp(ins)) {
+        def = [d, { base: 0, stepped: false }];
+      } else if (/^movs?$/.test(ins.mnemonic) && s2 === undefined && s1 !== undefined && held.has(s1)) {
+        def = [d, held.get(s1)!];
+      } else if (/^adds?$/.test(ins.mnemonic)) {
+        const [src, by] = s2 === undefined ? [d, s1] : [s1, s2];
+        if (src !== undefined && by !== undefined && IMM_LITERAL.test(by)) {
+          const c = imm(by);
+          if (isSpReg(src) && c >= 0) {
+            def = [d, { base: c, stepped: false }];
+          } else if (held.has(src) && c >= 0) {
+            const from = held.get(src)!;
+            def = [d, c === 0 ? from : { base: from.base, stepped: true }];
+          }
+        }
+      }
+    }
+    for (const r of [...held.keys()]) {
+      if (mayWriteReg(ins, r)) {
+        held.delete(r);
+      }
+    }
+    if (def !== null) {
+      held.set(def[0], def[1]);
+    }
+  };
+  const meet = (a: Held | undefined, b: Held): Map<string, { base: number; stepped: boolean }> => {
+    const out = new Map<string, { base: number; stepped: boolean }>();
+    for (const [r, v] of b) {
+      const u = a === undefined ? v : a.get(r);
+      if (u !== undefined && u.base === v.base) {
+        out.set(r, { base: v.base, stepped: u.stepped || v.stepped });
+      }
+    }
+    return out;
+  };
+  const same = (a: Held | undefined, b: Held): boolean =>
+    a !== undefined &&
+    a.size === b.size &&
+    [...b].every(([r, v]) => a.get(r)?.base === v.base && a.get(r)?.stepped === v.stepped);
+  // undefined = not yet reached by the fixpoint: the top, which every meet ignores
+  const atStart: (Held | undefined)[] = asmBlocks.map(() => undefined);
+  const atEnd: (Held | undefined)[] = asmBlocks.map(() => undefined);
+  for (let changed = true; changed;) {
+    changed = false;
+    for (let b = 0; b < asmBlocks.length; b++) {
+      if (!entryReachable.has(b)) {
+        continue;
+      }
+      let start: Held | undefined = b === 0 ? new Map() : undefined;
+      if (b !== 0) {
+        for (const q of preds[b]) {
+          const out = entryReachable.has(q) ? atEnd[q] : undefined;
+          if (out !== undefined) {
+            start = meet(start, out);
+          }
+        }
+      }
+      if (start === undefined) {
+        continue;
+      }
+      const held = new Map(start);
+      for (const ins of asmBlocks[b].instrs) {
+        step(ins, held);
+      }
+      atStart[b] = start;
+      if (!same(atEnd[b], held)) {
+        atEnd[b] = held;
+        changed = true;
+      }
+    }
+  }
+  const reads = new Map<Instr, { at: number; b: number; i: number }>();
+  for (const b of entryReachable) {
+    const start = atStart[b];
+    if (start === undefined) {
+      continue;
+    }
+    const held = new Map(start);
+    asmBlocks[b].instrs.forEach((ins, i) => {
+      const through = (r: string | undefined, d: number): void => {
+        const h = r === undefined ? undefined : held.get(reg(r).replace(/!$/, ''));
+        if (h !== undefined && h.stepped && d >= 0) {
+          reads.set(ins, { at: h.base + d, b, i });
+        }
+      };
+      if (ins.mnemonic === 'ldmia') {
+        through(ins.ops[0], 0);
+      } else if (SINGLE_LOAD.test(ins.mnemonic) && ins.ops[1] !== undefined) {
+        const addr = parseAddr(ins.ops[1]);
+        if (addr.regOff === undefined) {
+          through(addr.base, addr.off);
+        }
+      }
+      step(ins, held);
+    });
+  }
+  return reads;
+}
+
 // The register an instruction leaves holding a frame address, and that address's offset, or
 // null. The shapes that carry one: the capture itself (`mov rD, sp`, `add rD, sp, #k`), a copy
 // of a held register (`mov rD, rS`, and agbcc's `add rD, rS, #0`), and a held register moved by

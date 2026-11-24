@@ -945,7 +945,11 @@ export interface FrameLayoutBehaviors {
   // r4`), and a pointer formed below its array bases its read on words a declaration may leave
   // unstated (`blk1`/`blk2` under a 4-word `kr`, `blk3` under a 5-word one), so it clears nothing
   // and those keep the refusal a plain call gets. A struct member's array (`p[i].y`, `add r1, sp,
-  // #8 / add r1, r1, r0`) has the pointer's spelling and clears nothing either.
+  // #8 / add r1, r1, r0`) has the pointer's spelling and clears nothing either. A pointer captured
+  // before a loop and stepped up by its load (`mov r5, sp` … `ldmia r5!`, thumb.ts
+  // `steppedFrameReads`) is read only with no ceiling at all, every call after it stated exactly by
+  // a typed parameter list, based at its capture, the lowest word it can read (`walk4`, `walkcall`;
+  // `walkbelow` captures beneath its array, at a typed call's staged word, and declines).
   // The Thumb frontend gives each read a ceiling (`below`): with no call that may take a stack word
   // after it, none; otherwise the lowest, over the paths to such calls, of the words each one's
   // declaration states, and no event at all where a call nothing sizes lies ahead. Under this
