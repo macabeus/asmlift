@@ -458,6 +458,15 @@ describe('the argument words a callee body handed in from outside the input read
     // { fn(); }` is `bl _call_via_r1` on the entry r1
     const inPlace = '\t.thumb_func\nfill:\n\tpush\t{lr}\n\tbl\t_call_via_r1\n\tpop\t{r0}\n\tbx\tr0\n';
     expect(decompile('f', head + inPlace + f, t).source).toContain('    fill();\n');
+    // A READ THROUGH A JOIN THAT ALSO MERGES A VALUE THE BODY WROTE is none: agbcc -O2's
+    // `void fill(void) { int x; while (gk) { gk--; x = gk; } gy = x + 1; }` keeps x in r0 and adds
+    // to the entry r0 where the loop never ran, the same bytes as a reassigned parameter
+    const uninit =
+      '\t.thumb_func\nfill:\n\tldr\tr2, .L8\n\tldr\tr1, [r2]\n\tldr\tr3, .L8+0x4\n\tcmp\tr1, #0\n' +
+      '\tbeq\t.L4\n.L5:\n\tsub\tr1, r1, #0x1\n\tadd\tr0, r1, #0\n\tcmp\tr0, #0\n\tbne\t.L5\n' +
+      '\tstr\tr0, [r2]\n.L4:\n\tadd\tr0, r0, #0x1\n\tstr\tr0, [r3]\n\tbx\tlr\n' +
+      '.L8:\n\t.word\tgk\n\t.word\tgy\n';
+    expect(decompile('f', head + uninit + f, t).source).toContain('    fill();\n');
   });
 });
 

@@ -412,8 +412,10 @@ function returnsUntouched(fn: Fn): boolean {
 }
 
 /** WHETHER A CALLEE'S BODY READS ITS FIRST ARGUMENT REGISTER'S INCOMING VALUE: a LOWER bound on what
- *  it reads, where the register bound (`CalleeBodyBound`) is an upper one. An op reads it, through
- *  any join it flows into, other than a return, and other than as an argument of a call the lift
+ *  it reads, where the register bound (`CalleeBodyBound`) is an upper one. An op reads it, directly
+ *  or through a join no value the body wrote also flows into (one that does is an uninitialised
+ *  local's bytes as much as a reassigned parameter's, and reads as neither), other than a return,
+ *  and other than as an argument of a call the lift
  *  forced to every register, or of one through a register that bounds it (`ARGS_BOUND_BY_ADDRESS`)
  *  whose address arrives in a block parameter: either is handed the register whatever the source
  *  passed, and a return hands r0 back whether or not it was a parameter (`int g(void)` returns
@@ -435,20 +437,40 @@ function readsFirstArgument(fn: Fn, forced: ReadonlySet<string>): boolean {
   if (first === undefined) {
     return false;
   }
+  // every join the incoming value reaches, then only those it alone reaches: a join that merges it
+  // with a value the body wrote is what an uninitialised local in that register is, as much as a
+  // reassigned parameter (`void g(void) { int x; if (gk) x = gk * 3; gy = x; }` stores the entry r3
+  // on mwcc, as agbcc's `while (gk) x = --gk; gy = x + 1;` adds to the entry r0, the same bytes as
+  // `void g(int a) { if (gk) a = 5; gy = a; }`), so a read of it proves no parameter
+  const edges: [into: Value, from: Value][] = [];
+  for (const b of fn.blocks) {
+    for (const o of b.ops) {
+      for (const e of o.successors) {
+        e.args.forEach((a, i) => {
+          const into = e.block.params[i];
+          if (into !== undefined) {
+            edges.push([into, a]);
+          }
+        });
+      }
+    }
+  }
   const names = new Set<Value>([first]);
   for (let grew = true; grew;) {
     grew = false;
-    for (const b of fn.blocks) {
-      for (const o of b.ops) {
-        for (const e of o.successors) {
-          e.args.forEach((a, i) => {
-            const into = e.block.params[i];
-            if (names.has(a) && into !== undefined && !names.has(into)) {
-              names.add(into);
-              grew = true;
-            }
-          });
-        }
+    for (const [into, from] of edges) {
+      if (names.has(from) && !names.has(into)) {
+        names.add(into);
+        grew = true;
+      }
+    }
+  }
+  for (let shrank = true; shrank;) {
+    shrank = false;
+    for (const [into, from] of edges) {
+      if (into !== first && names.has(into) && !names.has(from)) {
+        names.delete(into);
+        shrank = true;
       }
     }
   }

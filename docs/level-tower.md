@@ -1006,7 +1006,11 @@ return, a call its lift forced, or a bound call on an address that arrived where
 least that word, and nothing but the earlier call wrote it, so `fill(AllocZeroed(16))` lifts as
 written where the trim read `fill()`. A bound call on an address the body loads or computes is a
 read: agbcc calls such an address through the first register past the arguments (`s->fn()` loads
-it into r0 and calls `_call_via_r0`), so `bl _call_via_r1` there passes r0.
+it into r0 and calls `_call_via_r0`), so `bl _call_via_r1` there passes r0. A read through a join
+that also merges a value the body wrote is none: that is an uninitialised local left in the
+register on the path that never set it (agbcc's `void g(void) { int x; while (gk) x = --gk; gy =
+x + 1; }` adds to the entry r0) in the same bytes as a reassigned parameter, so the result stays
+the trim's to drop, as with no body.
 The bound counts the body's entry parameters, so it is none where that count is not one per argument
 word: a floating-point parameter (o32's `$f12` double covers a0 and a1), or a struct return handed
 back through a hidden pointer. Nor is a lift holding an `opaque` op any bound: which registers an
