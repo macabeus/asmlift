@@ -18053,6 +18053,90 @@ export const SYNTHETIC: SynthSpec[] = [
       'void sw_gotocase_inner(s32 lo, s32 hi);',
     proto: { sw_gotocase_inner: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
   },
+  // sw_caseexit_goto / sw_caseexit_dwflag (kl2dct sub_0801A798, sub_080349AC): a case body that
+  // leaves an inner loop past the code after the switch, for the code after that loop, which runs
+  // on to the outer latch, so no copy of it ends in a `return`. The goto source (A798) and a flag
+  // do-while that jump threading sends straight to the exit (349AC, agbcc keeps the `cont` test).
+  // Both lift with the case body's exit flag (`f = 1; break;`, `if (f != 0) break;` after the
+  // switch), asked only once every run without it declines (structure.ts `CaseExitRanking`).
+  {
+    sym: 'sw_caseexit_goto',
+    src:
+      'struct G { u8 a; u8 b; };\n' +
+      'extern struct G gG[];\n' +
+      'extern u8 gT[];\n' +
+      'extern s32 gOut[];\n' +
+      'void h(s32 x);\n' +
+      'void sw_caseexit_goto(s32 n)\n' +
+      '{\n' +
+      '    s32 i, j;\n' +
+      '    for (j = 0; j < n; j++) {\n' +
+      '        for (i = gG[j].a; i <= gG[j].b; i++) {\n' +
+      '            switch (gT[i]) {\n' +
+      '            case 1: h(1); break;\n' +
+      '            case 2: h(2); goto out;\n' +
+      '            case 3: h(3); break;\n' +
+      '            case 4: h(4); goto out;\n' +
+      '            case 5: h(5); break;\n' +
+      '            case 6: h(6); break;\n' +
+      '            case 7: h(7); break;\n' +
+      '            }\n' +
+      '        }\n' +
+      '    out:\n' +
+      '        gOut[j] = i;\n' +
+      '    }\n' +
+      '}',
+    features: ['branch', 'switch-arms'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx:
+      'struct G { u8 a; u8 b; };\n' +
+      'extern struct G gG[];\n' +
+      'extern u8 gT[];\n' +
+      'extern s32 gOut[];\n' +
+      'void h(s32 x);\n' +
+      'void sw_caseexit_goto(s32 n);',
+    proto: { sw_caseexit_goto: { returnsVoid: true }, h: { params: 1, returnsVoid: true } },
+  },
+  {
+    sym: 'sw_caseexit_dwflag',
+    src:
+      'struct E { u8 *p; s32 st; };\n' +
+      'void g(s32 x);\n' +
+      'void h(s32 x);\n' +
+      'void sw_caseexit_dwflag(struct E *e, s32 n)\n' +
+      '{\n' +
+      '    s32 i, cont;\n' +
+      '    for (i = 0; i < n; i++) {\n' +
+      '        u8 *p = e[i].p;\n' +
+      '        do {\n' +
+      '            cont = 1;\n' +
+      '            switch (*p++) {\n' +
+      '            case 1: g(1); break;\n' +
+      '            case 2: g(2); break;\n' +
+      '            case 3: g(3); cont = 0; break;\n' +
+      '            case 4: g(4); break;\n' +
+      '            case 5: cont = 0; break;\n' +
+      '            case 6: g(6); break;\n' +
+      '            case 7: g(7); break;\n' +
+      '            }\n' +
+      '        } while (cont);\n' +
+      '        e[i].p = p;\n' +
+      '        h(i);\n' +
+      '    }\n' +
+      '}',
+    features: ['branch', 'switch-arms'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx:
+      'struct E { u8 *p; s32 st; };\n' +
+      'void g(s32 x);\n' +
+      'void h(s32 x);\n' +
+      'void sw_caseexit_dwflag(struct E *e, s32 n);',
+    proto: {
+      sw_caseexit_dwflag: { returnsVoid: true },
+      g: { params: 1, returnsVoid: true },
+      h: { params: 1, returnsVoid: true },
+    },
+  },
   //  35. bidx_* / bidxx_* and bcpy_* / bcpyx_* (sub_0804D0B0: "reads the compiler's anonymous
   //      constant ('.LC184') whose copy fills 'sp0', a u8[36]"). Item 31's rows have unbounded u32
   //      indexes, so no sound proof can split them. The real index is bounded: `(u8)(r4 % 8) * 2`
