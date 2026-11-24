@@ -18137,6 +18137,54 @@ export const SYNTHETIC: SynthSpec[] = [
       h: { params: 1, returnsVoid: true },
     },
   },
+  // brkarm_ifjoin: a tested loop's `break` that runs code under two nested `if`s, with no switch.
+  // The CFG joins the outer `if` at the loop's exit, through the arm; the arm renders inside the
+  // `if`, ahead of its `break`, so the `if` joins at `y(i)` in the body (structure.ts
+  // `leavesByOwnedEdges`). It declined on agbcc and mwcc_242_81 before that (an unrecovered back-edge),
+  // which keep the loop's test at its top; the other three rotate the loop and lifted already.
+  {
+    sym: 'brkarm_ifjoin',
+    src:
+      's32 p(s32 x);\n' +
+      's32 d(s32 x);\n' +
+      's32 x(s32 v);\n' +
+      'void x2(s32 v);\n' +
+      'void y(s32 v);\n' +
+      'void r(s32 v);\n' +
+      'void brkarm_ifjoin(s32 n)\n' +
+      '{\n' +
+      '    s32 i;\n' +
+      '    for (i = 0; i < n; i++) {\n' +
+      '        if (p(i)) {\n' +
+      '            if (d(i)) {\n' +
+      '                x2(x(i));\n' +
+      '                break;\n' +
+      '            }\n' +
+      '        }\n' +
+      '        y(i);\n' +
+      '    }\n' +
+      '    r(n);\n' +
+      '}',
+    features: ['branch', 'break'],
+    toolchains: FIVE,
+    ctx:
+      's32 p(s32 x);\n' +
+      's32 d(s32 x);\n' +
+      's32 x(s32 v);\n' +
+      'void x2(s32 v);\n' +
+      'void y(s32 v);\n' +
+      'void r(s32 v);\n' +
+      'void brkarm_ifjoin(s32 n);',
+    proto: {
+      brkarm_ifjoin: { returnsVoid: true },
+      p: { params: 1 },
+      d: { params: 1 },
+      x: { params: 1 },
+      x2: { params: 1, returnsVoid: true },
+      y: { params: 1, returnsVoid: true },
+      r: { params: 1, returnsVoid: true },
+    },
+  },
   //  35. bidx_* / bidxx_* and bcpy_* / bcpyx_* (sub_0804D0B0: "reads the compiler's anonymous
   //      constant ('.LC184') whose copy fills 'sp0', a u8[36]"). Item 31's rows have unbounded u32
   //      indexes, so no sound proof can split them. The real index is bounded: `(u8)(r4 % 8) * 2`

@@ -7098,9 +7098,13 @@ function structureRanked(
 
   // MAY A BRANCH IN A TESTED LOOP JOIN INSIDE THE BODY? Only where every way out of the body from `b`
   // is one the loop's own spelling renders in place: a `break` (an edge of `breaks`, or the edge the
-  // loop tests at its header or latch) or an early-`return` arm the loop owns. Any other edge out
-  // leaves for code that is copied wherever it is reached, and a join inside the body would write
-  // that tail into the arm as well.
+  // loop tests at its header or latch), an early-`return` arm the loop owns, or the edge into a
+  // `break` arm that runs code (`BreakArm`), which renders inside its `if`, ahead of the `break`.
+  // Any other edge out leaves for code that is copied wherever it is reached, and a join inside the
+  // body would write that tail into the arm as well. The break arm's edge is the default
+  // reading's, not only the case body's exit flag's: `if (p(i)) { if (d(i)) { x2(x(i)); break; } }
+  // y(i);` joins its `if` at `y(i)` (loop-break-exit.test.ts, `synthetic:brkarm_ifjoin`), and
+  // without it `synthetic:sw_caseexit_goto` declines on agbcc and mwcc_242_81 with the flag asked.
   const leavesByOwnedEdges = (frame: LoopFrame, b: Block): boolean => {
     const exitFrom = whileLoops.get(frame.header)?.header ?? doWhileLoops.get(frame.header)?.latch;
     const seen = new Set<Block>();
