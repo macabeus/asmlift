@@ -93,6 +93,7 @@ import {
   declaresParams,
   declaresVoidReturn,
 } from '../proto';
+import { OPCODES } from '../ir/opcodes';
 import { helperPrototypes } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 import { armArgumentWords, scansArgumentsOf } from './arm-body';
@@ -415,7 +416,9 @@ function returnsUntouched(fn: Fn): boolean {
 /** WHETHER A CALLEE'S BODY READS ITS FIRST ARGUMENT REGISTER'S INCOMING VALUE: a LOWER bound on what
  *  it reads, where the register bound (`CalleeBodyBound`) is an upper one. An op reads it, directly
  *  or through a join no value the body wrote also flows into (one that does is an uninitialised
- *  local's bytes as much as a reassigned parameter's, and reads as neither), other than a return,
+ *  local's bytes as much as a reassigned parameter's, and reads as neither; a value computed from
+ *  the incoming one and literals alone is no such write, so a loop-carried `p++` still reads
+ *  through its header), other than a return,
  *  and other than as an argument of a call the lift forced to every register, or of one through a
  *  register that bounds it (`ARGS_BOUND_BY_ADDRESS`) whose address arrives in a block parameter:
  *  either is handed the register whatever the source passed, and a return hands r0 back whether or
@@ -441,8 +444,24 @@ function readsFirstArgument(fn: Fn, forced: ReadonlySet<string>): boolean {
   // with a value the body wrote is what an uninitialised local in that register is, as much as a
   // reassigned parameter (`void g(void) { int x; if (gk) x = gk * 3; gy = x; }` stores the entry r3
   // on mwcc, as agbcc's `while (gk) x = --gk; gy = x + 1;` adds to the entry r0, the same bytes as
-  // `void g(int a) { if (gk) a = 5; gy = a; }`), so a read of it proves no parameter
+  // `void g(int a) { if (gk) a = 5; gy = a; }`), so a read of it proves no parameter. A value the
+  // body computes from that value alone (with literals) carries it as much as an edge does: a
+  // loop-carried parameter reaches its header joined with its own step (agbcc's `*p++ = 7` and
+  // `a++`, mwcc's `p += 3`), which an uninitialised local, merged with what the body loaded or set,
+  // is not
   const edges: [into: Value, from: Value][] = [];
+  const literals = new Set<Value>();
+  const steps: Op[] = [];
+  for (const b of fn.blocks) {
+    for (const o of b.ops) {
+      const sig = (OPCODES as Record<string, { effects?: boolean; reads?: boolean } | undefined>)[o.opcode];
+      if (o.opcode === 'const' || o.opcode === 'fconst') {
+        o.results.forEach((r) => literals.add(r));
+      } else if (o.results.length === 1 && o.operands.length > 0 && sig?.effects !== true && sig?.reads !== true) {
+        steps.push(o);
+      }
+    }
+  }
   for (const b of fn.blocks) {
     for (const o of b.ops) {
       for (const e of o.successors) {
@@ -456,11 +475,19 @@ function readsFirstArgument(fn: Fn, forced: ReadonlySet<string>): boolean {
     }
   }
   const names = new Set<Value>([first]);
+  const carried = (o: Op): boolean =>
+    o.operands.some((v) => names.has(v)) && o.operands.every((v) => names.has(v) || literals.has(v));
   for (let grew = true; grew;) {
     grew = false;
     for (const [into, from] of edges) {
       if (names.has(from) && !names.has(into)) {
         names.add(into);
+        grew = true;
+      }
+    }
+    for (const o of steps) {
+      if (!names.has(o.results[0]) && carried(o)) {
+        names.add(o.results[0]);
         grew = true;
       }
     }
@@ -470,6 +497,12 @@ function readsFirstArgument(fn: Fn, forced: ReadonlySet<string>): boolean {
     for (const [into, from] of edges) {
       if (into !== first && names.has(into) && !names.has(from)) {
         names.delete(into);
+        shrank = true;
+      }
+    }
+    for (const o of steps) {
+      if (names.has(o.results[0]) && !carried(o)) {
+        names.delete(o.results[0]);
         shrank = true;
       }
     }

@@ -471,6 +471,13 @@ describe('the argument words a callee body handed in from outside the input read
       '\tstr\tr0, [r2]\n.L4:\n\tadd\tr0, r0, #0x1\n\tstr\tr0, [r3]\n\tbx\tlr\n' +
       '.L8:\n\t.word\tgk\n\t.word\tgy\n';
     expect(decompile('f', head + uninit + f, t).source).toContain('    fill();\n');
+    // …BUT A JOIN WITH THE BODY'S OWN STEP OF THE INCOMING VALUE IS A READ: agbcc -O2's
+    // `void fill(u8 *p) { int i; for (i = 0; i < 16; i++) *p++ = 7; }` reaches the store through a
+    // loop header that merges the entry r0 with `r0 + 1`, computed from that header alone
+    const walk =
+      '\t.thumb_func\nfill:\n\tmov\tr2, #0x7\n\tmov\tr1, #0xf\n.L6:\n\tstrb\tr2, [r0]\n' +
+      '\tadd\tr0, r0, #0x1\n\tsub\tr1, r1, #0x1\n\tcmp\tr1, #0\n\tbge\t.L6\n\tbx\tlr\n';
+    expect(decompile('f', head + walk + f, t).source).toContain('    fill(v0);\n');
   });
 });
 

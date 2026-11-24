@@ -4880,6 +4880,54 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'extern int gk, gy;\nvoid resultuninit(void);',
     proto: { resultuninit: { returnsVoid: true } },
   },
+  // …WHILE A JOIN OF THE REGISTER WITH THE BODY'S OWN STEP OF IT IS A READ: a loop-carried
+  // parameter reaches its loop header merged with `p + 3` or `a + 1`, which the body computed from
+  // that header and a literal alone, no uninitialised local's bytes. Reading such a join as none
+  // lifted `fill()` (a buffer nothing fills) and `cnt()`.
+  {
+    sym: 'resultwalk',
+    src:
+      'extern int gk;\nextern unsigned char *mkbuf(int);\n' +
+      'void fill(unsigned char *p)\n{\n    while (gk) { gk--; *p = 7; p += 3; }\n}\n' +
+      'int resultwalk(int a)\n{\n    unsigned char *o = mkbuf(16);\n    fill(o);\n    return o[a];\n}',
+    features: [],
+    toolchains: ['agbcc'],
+    ctx: 'extern int gk;\nint resultwalk(int a);',
+  },
+  {
+    sym: 'resultwalk',
+    src:
+      'extern int gk;\nextern unsigned char *mkbuf(int);\n' +
+      'void fill(unsigned char *p)\n{\n    while (gk) { gk--; *p = 7; p += 3; }\n}\n' +
+      'int resultwalk(int a)\n{\n    unsigned char *o = mkbuf(16);\n    fill(o);\n    return o[a];\n}',
+    features: [],
+    toolchains: ['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'],
+    cflags: MWCC_O4P_INLINE_OFF,
+    ctx: 'extern int gk;\nint resultwalk(int a);',
+  },
+  {
+    sym: 'resultcount',
+    src:
+      'extern int gk, gy;\nextern int mkval(void);\n' +
+      'void cnt(int a)\n{\n    while (gk) { gk--; gy += a; a++; }\n}\n' +
+      'void resultcount(void)\n{\n    cnt(mkval());\n}',
+    features: [],
+    toolchains: ['agbcc'],
+    ctx: 'extern int gk, gy;\nvoid resultcount(void);',
+    proto: { resultcount: { returnsVoid: true } },
+  },
+  {
+    sym: 'resultcount',
+    src:
+      'extern int gk, gy;\nextern int mkval(void);\n' +
+      'void cnt(int a)\n{\n    while (gk) { gk--; gy += a; a++; }\n}\n' +
+      'void resultcount(void)\n{\n    cnt(mkval());\n}',
+    features: [],
+    toolchains: ['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'],
+    cflags: MWCC_O4P_INLINE_OFF,
+    ctx: 'extern int gk, gy;\nvoid resultcount(void);',
+    proto: { resultcount: { returnsVoid: true } },
+  },
   // `spillarg` is `spill10` with a genuine outgoing argument under the spills: `five(i, 1, 2, 3,
   // v0)` stages argument 5 at [sp,#0] before every call and agbcc moves the spills above it, to
   // [sp,#4]..[sp,#0x20]. Several reach `bl five` unread, so the declaration (`five` takes one stack
