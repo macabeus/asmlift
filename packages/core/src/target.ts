@@ -1092,7 +1092,11 @@ export interface CallBehaviors {
   // struct return goes through that pointer asks of each `ret` (frontend/own-struct-return.ts):
   // where it is `true` every `ret` must hand back the pointer, and where it is `false` what the
   // return register holds is no part of the function, save a value computed for the return alone
-  // (`returnedAlone`). ABSENT ⇒ unmeasured, and read as `true`, which only refuses more.
+  // (`returnedAlone`). A SECOND READER, for which `true` LIFTS MORE: an undeclared callee's own body
+  // (frontend/callee-body.ts `handsBackNoPointer`) is ruled no struct return where some return of
+  // it hands back nothing or a constant, which lets the caller read a frame address in argument 0
+  // as an out-parameter. So it must be measured before it is set: ABSENT ⇒ unmeasured, which the
+  // first reader takes as `true` (it only refuses more) and the second as `false` (it lifts nothing).
   structReturnHandsBackPointer?: boolean;
   // WHETHER A CALLER HANDS ITS OWN DESTINATION POINTER STRAIGHT ON as a callee's hidden
   // struct-return pointer, leaving the first argument register at its incoming value below the

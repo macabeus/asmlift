@@ -502,6 +502,30 @@ describe('a callee body that proves it is no struct return through a hidden poin
       Object.fromEntries(['vd', 'cst', 'leaf', 'kp', 'unmodelled', 'jump', 'absent'].map((n) => [n, answer(n)])),
     ).toEqual({ vd: true, cst: true, leaf: false, kp: false, unmodelled: true, jump: false, absent: false });
   });
+  // where the return register is the first argument register, a bare `ret` that did not branch
+  // through it hands that register back untouched, which in a struct return is the hidden pointer
+  test('a bare return proves it only where it branched through the return register', () => {
+    const t = TOOLCHAIN_TARGETS.agbcc.description;
+    const answer = calleeBodyReads(
+      'f',
+      thumbBodies,
+      t,
+      {},
+      (callee, table, entryReadCalls, text) => {
+        const fn = liftStamped(callee, text, t, table, undefined, undefined, undefined, {
+          calleeBodyBound: () => undefined,
+          calleeStackWords: () => undefined,
+          calleeReturnsNoHiddenPointer: () => false,
+          entryReadCalls,
+        });
+        fn.blocks.forEach((b) => b.ops.forEach((o) => delete o.attrs.viaReturnReg));
+        return fn;
+      },
+      undefined,
+      frontendFor(t),
+    ).returnsNoHiddenPointer;
+    expect([answer('vd'), answer('cst')]).toEqual([false, true]);
+  });
   test('a callee declared to return a struct is not asked', () => {
     const members = ['a', 'b', 'c'].map((name) => ({ name, type: 's32' }));
     const big: Prototypes = { vd: { returns: 'struct Big', returnLayout: { kind: 'struct', members } } };

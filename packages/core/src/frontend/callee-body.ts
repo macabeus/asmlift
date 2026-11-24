@@ -490,7 +490,11 @@ export type CalleeReturnsNoHiddenPointer = (callee: string) => boolean;
 /** Whether some return of `fn` hands back no value, or a constant, on a target whose compiler hands a
  *  hidden struct pointer back at every return of a function that takes one
  *  (`CalleeReturnsNoHiddenPointer`): neither is the pointer that function was handed. A value loaded
- *  or computed is not asked (a reload of the pointer's spill is the pointer). */
+ *  or computed is not asked (a reload of the pointer's spill is the pointer). A bare `ret` hands
+ *  back nothing only where it branched through the return register (`viaReturnReg`) or that
+ *  register is no argument register: one that returns in its first argument register and names
+ *  nothing returns that register untouched (`returnsUntouched`), which in a function handed a
+ *  hidden pointer is the pointer. */
 function handsBackNoPointer(fn: Fn, target: TargetDescription): boolean {
   if (target.compilerBehaviors.structReturnHandsBackPointer !== true) {
     return false;
@@ -498,8 +502,11 @@ function handsBackNoPointer(fn: Fn, target: TargetDescription): boolean {
   const constants = new Set(
     fn.blocks.flatMap((b) => b.ops.filter((o) => o.opcode === 'const').flatMap((o) => o.results)),
   );
+  const bareIsNothing = (o: Op): boolean => o.attrs.viaReturnReg === true || target.returnReg !== target.argRegs[0];
   return fn.blocks.some((b) =>
-    b.ops.some((o) => o.opcode === 'ret' && (o.operands.length === 0 || constants.has(o.operands[0]))),
+    b.ops.some(
+      (o) => o.opcode === 'ret' && (o.operands.length === 0 ? bareIsNothing(o) : constants.has(o.operands[0])),
+    ),
   );
 }
 
