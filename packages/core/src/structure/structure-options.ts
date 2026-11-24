@@ -500,6 +500,9 @@ export interface StructureHooks {
   breakTailGates?: readonly Gate<BreakTailCycle>[];
   /** `emitForever`'s two-level exit rule (`TWO_LEVEL_REGION_GATES`), ablatable the same way. */
   twoLevelRegionGates?: readonly Gate<TwoLevelRegion>[];
+  /** false never asks a case body's exit flag (structure.ts `CaseExitRanking`), so that exit stays
+   *  refused: for a test whose fixture is held at that refusal to reach another rule. */
+  caseExitFlags?: boolean;
   /** the two-level exit's `break` rule (`TWO_LEVEL_BREAK_GATES`), ablatable the same way. */
   twoLevelBreakGates?: readonly Gate<TwoLevelBreak>[];
   /** `forPlanAt`'s rules (`FOR_PLAN_GATES`, `FOR_PLAN_IV_GATES`), ablatable the

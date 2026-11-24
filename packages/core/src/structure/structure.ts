@@ -798,7 +798,7 @@ function structureLadder(
   // the case bodies' exit flags, asked once every run without them declined and one met an exit
   // they spell; those runs read every switch at least as far, so where they decline too, theirs is
   // the refusal that stands
-  if (sfn === null && caseExit.wanted) {
+  if (sfn === null && caseExit.wanted && hooks.caseExitFlags !== false) {
     refused = undefined;
     caseExit = { asked: true, wanted: false };
     sfn = jumpRanked();
