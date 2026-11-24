@@ -265,3 +265,64 @@ test('CONTROL: a tested exit out of an arm of a switch nested in another switch 
   recoverTypes(fn);
   expect(() => structure(fn, {})).toThrow(/a case body leaves its switch for a loop exit past the switch's end/);
 });
+
+test('CONTROL: a decline whose case bodies reach no loop exit is not structured again with the flag', () => {
+  // `do { switch (j) { case 0: if (a(j)) e(j); break; case 1: b(j); break; case 2: d(j); } k(j); }
+  // while (++j < n);`, then a loop-free switch whose case 0 reaches two sibling cases, which no
+  // structuring spells. No branch in the loop's case bodies leaves the loop, so nothing asks for the
+  // rerun with the flag: the `caseExitFlags` hook is read only where one was asked
+  // (`CaseExitRanking`).
+  const fn = parse(`fn cd {
+^bb0(%n: s32):
+  %z: s32 = const {value=0}
+  %one: s32 = const {value=1}
+  br ^bb2(%z)
+^bb2(%j: s32):
+  switch_br %j, ^bb3(), ^bb4(), ^bb5(), ^bb7() {cases=[0;1;2]}
+^bb3():
+  %a: s32 = call %j {target="a"}
+  cond_br %a, ^bb6(), ^bb7()
+^bb6():
+  %e: s32 = call %j {target="e"}
+  br ^bb7()
+^bb4():
+  %b: s32 = call %j {target="b"}
+  br ^bb7()
+^bb5():
+  %d: s32 = call %j {target="d"}
+  br ^bb7()
+^bb7():
+  %k: s32 = call %j {target="k"}
+  %j2: s32 = add %j, %one
+  %c: u32 = icmp_slt %j2, %n
+  cond_br %c, ^bb2(%j2), ^bb9()
+^bb9():
+  switch_br %n, ^bb20(), ^bb21(), ^bb22(), ^bb23(), ^bb30() {cases=[0;1;2;3]}
+^bb20():
+  %p: s32 = call %n {target="p"}
+  cond_br %p, ^bb21(), ^bb22()
+^bb21():
+  %q: s32 = call %n {target="q"}
+  cond_br %q, ^bb23(), ^bb30()
+^bb22():
+  %r: s32 = call %n {target="r"}
+  cond_br %r, ^bb21(), ^bb23()
+^bb23():
+  %s: s32 = call %n {target="s"}
+  br ^bb30()
+^bb30():
+  ret
+}`);
+  verify(fn);
+  recoverTypes(fn);
+  // not enumerable, so the runs' copies of the hooks leave it out and only the rerun's question reads it
+  let asked = 0;
+  const hooks = Object.defineProperty({}, 'caseExitFlags', {
+    get: (): undefined => {
+      asked++;
+      return undefined;
+    },
+  });
+  expect(() => structure(fn, {}, hooks)).toThrow(/a case body reaches several sibling cases/);
+  expect(asked).toBe(0);
+});

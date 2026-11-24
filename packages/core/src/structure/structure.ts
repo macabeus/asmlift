@@ -6604,15 +6604,16 @@ function structureRanked(
     // and the `if (f != 0) break;` right after it (`aroundSwitch`, behind `f = 0;` ahead of the
     // switch) leaves the loop, so nothing after the switch runs on that path. It holds only where
     // that test sits in this loop's own body, the arm's switch being the one switch opened in this
-    // loop (`caseExitFrame`); elsewhere the exit is refused.
-    const lc0 = loopCtx;
-    const caseFrame = armCapturesBreak && lc0 !== null ? caseExitFrame(lc0) : null;
+    // loop (`caseExitFrame`); elsewhere the exit is refused. The frame is asked only where this
+    // block's break or two-level exit reads it, since asking notes the flag's rerun
+    // (`CaseExitRanking`), which every other branch in a case body would request for nothing.
+    let caseFrame: SwitchFrame | null = null;
     if (
       twoLevel !== undefined &&
       firstRejection(hooks.twoLevelBreakGates ?? TWO_LEVEL_BREAK_GATES, {
         inCaseBody: armCapturesBreak,
         outward: twoLevel.outward === true,
-        flagged: caseFrame !== null,
+        flagged: armCapturesBreak && (caseFrame = caseExitFrame(loopCtx!)) !== null,
       }) !== null
     ) {
       throw new StructureError(
@@ -6625,7 +6626,7 @@ function structureRanked(
       const exit = loopCtx.exit;
       const tailReturns = exit !== null && (isArm(exit) || isRet(exit));
       if (twoLevel !== undefined || ((exit === null || armFrame!.merge !== exit) && !tailReturns)) {
-        if (exit === null || caseFrame === null) {
+        if (exit === null || (caseFrame ??= caseExitFrame(loopCtx)) === null) {
           wantFor();
           throw new StructureError(
             `cannot structure '${fn.name}': a case body leaves its switch for a loop exit past the ` +
