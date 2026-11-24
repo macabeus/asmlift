@@ -440,6 +440,16 @@ interface JumpRanking {
   readonly free: Set<Block>;
 }
 
+/** Whether a case body's exit out of its loop past the switch's end is spelled with the exit flag
+ *  (`caseExitBreak`), and whether a structuring without it met one. Asked only in the runs
+ *  `structure` makes after every run without it declined and one met such an exit, so it turns a
+ *  decline into a lift and never one lift into another: where the code from the exit on can be
+ *  copied into the arm, or a last-resort rung reads the loop, that spelling is published already. */
+interface CaseExitRanking {
+  readonly asked: boolean;
+  wanted: boolean;
+}
+
 /** The `while (1)` loops spelled `for (init; cond; inc)` with `continue;` into their latch (THE LOOP
  *  AS A `for`, at `forPlanAt`), by header, and the ones a structuring declined inside of. */
 interface ForRanking {
@@ -652,6 +662,7 @@ function structureLadder(
   refusedHeld: (() => void)[],
 ): SFn {
   let refused: { error: StructureError; held: (() => void)[] } | undefined;
+  let caseExit: CaseExitRanking = { asked: false, wanted: false };
   const attempt = (
     loopTailCopy: LoopTailCopyRanking,
     pastExit: PastExitRanking,
@@ -686,6 +697,7 @@ function structureLadder(
         forRank,
         jumps,
         reading,
+        caseExit,
       );
       held.forEach((f) => f());
       return sfn;
@@ -758,26 +770,38 @@ function structureLadder(
     }
     return sfn;
   };
-  const free = new Set<Block>();
-  let jumps: JumpRanking = { asked: new Set(), wanted: new Set(), free };
-  let sfn = forRanked(jumps);
-  // each pass asks the switches the passes before it wanted and none spelled goto-free; a switch
-  // only an asked pass reaches needs one more
-  for (let n = 0; sfn === null && jumps.asked !== 'every' && n < 8; n++) {
-    const asked: ReadonlySet<Block> = jumps.asked;
-    const next = new Set([...asked, ...[...jumps.wanted].filter((b) => !free.has(b))]);
-    // where no switch the last pass left unasked would have read, it made exactly the runs asking
-    // every switch makes, so its decline is that one's
-    if (next.size === asked.size && [...jumps.wanted].every((b) => asked.has(b))) {
-      break;
+  const jumpRanked = (): SFn | null => {
+    const free = new Set<Block>();
+    let jumps: JumpRanking = { asked: new Set(), wanted: new Set(), free };
+    let sfn = forRanked(jumps);
+    // each pass asks the switches the passes before it wanted and none spelled goto-free; a switch
+    // only an asked pass reaches needs one more
+    for (let n = 0; sfn === null && jumps.asked !== 'every' && n < 8; n++) {
+      const asked: ReadonlySet<Block> = jumps.asked;
+      const next = new Set([...asked, ...[...jumps.wanted].filter((b) => !free.has(b))]);
+      // where no switch the last pass left unasked would have read, it made exactly the runs asking
+      // every switch makes, so its decline is that one's
+      if (next.size === asked.size && [...jumps.wanted].every((b) => asked.has(b))) {
+        break;
+      }
+      // The runs that ask the jumps read every switch at least as far as the unasked ones, so where
+      // they decline too, theirs is the refusal that stands: the unasked one may be a switch the
+      // jumps spell, and a function declined for arms that do not linearize would then be declined
+      // for the wrong reason.
+      refused = undefined;
+      jumps = { asked: next.size === asked.size || n === 7 ? 'every' : next, wanted: new Set(), free };
+      sfn = forRanked(jumps);
     }
-    // The runs that ask the jumps read every switch at least as far as the unasked ones, so where
-    // they decline too, theirs is the refusal that stands: the unasked one may be a switch the
-    // jumps spell, and a function declined for arms that do not linearize would then be declined
-    // for the wrong reason.
+    return sfn;
+  };
+  let sfn = jumpRanked();
+  // the case bodies' exit flags, asked once every run without them declined and one met an exit
+  // they spell; those runs read every switch at least as far, so where they decline too, theirs is
+  // the refusal that stands
+  if (sfn === null && caseExit.wanted) {
     refused = undefined;
-    jumps = { asked: next.size === asked.size || n === 7 ? 'every' : next, wanted: new Set(), free };
-    sfn = forRanked(jumps);
+    caseExit = { asked: true, wanted: false };
+    sfn = jumpRanked();
   }
   if (sfn !== null) {
     return sfn;
@@ -821,6 +845,7 @@ function structureRanked(
   forRank: ForRanking,
   jumpRank: JumpRanking,
   reading: JoinReading,
+  caseExit: CaseExitRanking,
 ): SFn {
   const {
     returnsVoid = false,
@@ -5029,6 +5054,54 @@ function structureRanked(
     }
     return [{ k: 'break', ofSwitch: true }];
   };
+  // A CASE BODY'S JUMP OUT OF THE LOOP ITS SWITCH SITS IN, past the switch's end (the merge is
+  // `switchBreakAt`'s): `f = 1; break;`, and the flag goes to the switch's scope, whose
+  // `if (f != 0) break;` right after the switch leaves the loop (`aroundSwitch`). To the loop's
+  // exit, and to a two-level exit's second target, which sets that flag first (`emitForeverExit`
+  // then skips the code between). Taken where the test is in this loop's own body
+  // (`caseExitFrame`). Elsewhere the code from the exit on is copied into the arm, which is the same
+  // program wherever that copy ends in a `return`, so the flag is taken only where it could not
+  // (`exitTakesCaseFlag`).
+  const caseExitBreak = (b: Block): Stmt[] | undefined => {
+    const lc = loopCtx;
+    if (lc === null) {
+      return undefined;
+    }
+    const second = lc.twoLevel !== undefined && lc.twoLevel.outward !== true && b === lc.twoLevel.to;
+    if ((b !== lc.exit || !exitTakesCaseFlag(lc)) && !second) {
+      return undefined;
+    }
+    const frame = caseExitFrame(lc);
+    if (frame === null) {
+      return undefined;
+    }
+    const flag = caseExitFlag(lc.header);
+    frame.flags!.add(flag);
+    return [
+      ...(second ? [{ k: 'assign', name: twoLevelFlag(lc.header), value: { k: 'const', value: 1 } } as Stmt] : []),
+      { k: 'assign', name: flag, value: { k: 'const', value: 1 } },
+      { k: 'break', ofSwitch: true },
+    ];
+  };
+  // The arm frame whose switch a case body's exit flag is tested after: the one switch opened in
+  // `lc` since it was entered, with its flag scope (DEFENSIVE: every arm's frame is pushed inside
+  // `withSwitchFlags`). Null in a switch nested in another switch of `lc`, where the test after the
+  // inner switch would leave only the outer one, and outside any switch of `lc`.
+  const caseExitFrame = (lc: LoopFrame): SwitchFrame | null => {
+    const frames = switchFrames.filter((f) => f.loop === lc);
+    if (frames.length !== 1 || frames[0].flags === null) {
+      return null;
+    }
+    caseExit.wanted ||= !caseExit.asked;
+    return caseExit.asked ? frames[0] : null;
+  };
+  // Is the code from `lc`'s exit on one a case body cannot copy? A `for`'s exit (its `break;` is
+  // the latch's), or an exit that reaches a block being structured around this one (an enclosing
+  // loop's header, `onStack`) or an enclosing `for`'s latch or exit (`forJumps`): the copy would
+  // re-enter it.
+  const exitTakesCaseFlag = (lc: LoopFrame): boolean =>
+    lc.exit !== null &&
+    (lc.forLatch !== undefined || [lc.exit, ...reachFrom(lc.exit)].some((x) => onStack.has(x) || forJumps.has(x)));
   // THE JOIN OF A BRANCH INSIDE AN ARM. The CFG's join for `if (c) break;` lies past the switch —
   // in a falling arm the fall-through path reaches the merge too, through the next arm, and in a
   // closed arm the merge IS the join — so structuring to it would copy the next arm, or the rest of
@@ -5230,6 +5303,10 @@ function structureRanked(
     const brk = switchBreakAt(b);
     if (brk !== undefined) {
       return brk;
+    }
+    const flagged = caseExitBreak(b);
+    if (flagged !== undefined) {
+      return flagged;
     }
     // Back to a `while (1)` header from a region that ends short of the loop bottom: the edge's
     // copies are already out, and `continue` is the jump.
@@ -5501,7 +5578,27 @@ function structureRanked(
             ? undefined
             : (loopCtx.forLatch ??
               (foreverLoops.has(loopCtx.header) && forRank.asked.has(loopCtx.header) ? loopCtx.header : undefined));
-        const jumps = new Set<Block>(continueTo !== undefined && continueTo !== at ? [continueTo] : []);
+        // Asked (`CaseExitRanking`), nor are the blocks a case body's exit flag leaves the loop
+        // for (`caseExitBreak`), where this switch is the first opened in that loop: the loop's
+        // exit, and a two-level exit's second target. One that is a case arm's own entry is a jump,
+        // and the others ends (`analyzeArmExit`).
+        const lc = loopCtx;
+        const flagTargets =
+          lc === null || !switchFrames.every((f) => f.loop !== lc)
+            ? []
+            : [
+                ...(lc.exit !== null && lc.exit !== at && exitTakesCaseFlag(lc) ? [lc.exit] : []),
+                ...(lc.twoLevel !== undefined && lc.twoLevel.outward !== true && lc.twoLevel.to !== at
+                  ? [lc.twoLevel.to]
+                  : []),
+              ];
+        caseExit.wanted ||= !caseExit.asked && flagTargets.length > 0;
+        const flagged = caseExit.asked ? flagTargets : [];
+        const jumps = new Set<Block>([
+          ...(continueTo !== undefined && continueTo !== at ? [continueTo] : []),
+          ...flagged.filter((x) => siblings.has(x)),
+        ]);
+        const ends = new Set(flagged.filter((x) => !siblings.has(x)));
         jumps.forEach((x) => siblings.delete(x));
         // `analyzeArmExit` does not depend on emission order, so the exits can be settled before
         // the chain and reused below. Grouping by target already gives every arm a DISTINCT entry
@@ -5510,7 +5607,7 @@ function structureRanked(
         const walked = new Map<Block, ArmExit>();
         for (const entry of [...arms.map((a) => a.entry), defEdge.block]) {
           if (!walked.has(entry)) {
-            walked.set(entry, analyzeArmExit(entry, b, at, siblings, false, jumps));
+            walked.set(entry, analyzeArmExit(entry, b, at, siblings, false, jumps, ends));
           }
         }
         // A table whose default block is ALSO a case target is that case's arm, not a separate
@@ -6487,10 +6584,10 @@ function structureRanked(
     // loud, rather than handed to the printer as a `break` it would rebind.
     // A TWO-LEVEL EXIT out of this block (`TwoLevelExit`): its edge to the second target is the
     // `break`, and sets the flag first. Any refusal of it is loud: if-recovery would structure the
-    // code from the second target inside the loop. In a case body opened in this loop it is refused
-    // outright, since `break` there leaves only the switch (`TWO_LEVEL_BREAK_GATES`): agbcc -O2
-    // lays out a case that falls through after `if (h(j)) goto T;` that way. The case-body refusal
-    // below declines the same input too, the second target being a loop exit past the switch's end.
+    // code from the second target inside the loop. In a case body opened in this loop, where
+    // `break` leaves only the switch, it also sets the case body's exit flag below, whose test after
+    // the switch leaves the loop; refused where that cannot hold (`TWO_LEVEL_BREAK_GATES`). agbcc -O2
+    // lays out a case that falls through after `if (h(j)) goto T;` that way.
     // An arm that runs code before it breaks (`codeBreakArm`) is rendered inside the `if`, ahead of
     // the `break`, and its last block's copies into its exit are the break's: the loop's, or a
     // two-level exit's second target where the hit runs code on the way there (`BreakArm.exit`).
@@ -6500,26 +6597,43 @@ function structureRanked(
       (takenB === loopCtx.twoLevel.to || fallB === loopCtx.twoLevel.to || arm?.exit === loopCtx.twoLevel.to)
         ? loopCtx.twoLevel
         : undefined;
+    // A CASE BODY THAT LEAVES ITS LOOP PAST THE SWITCH'S END is spelled with a flag, as an outward
+    // two-level exit handed through a switch is (`emitForever`): `f = 1; break;` leaves the switch,
+    // and the `if (f != 0) break;` right after it (`aroundSwitch`, behind `f = 0;` ahead of the
+    // switch) leaves the loop, so nothing after the switch runs on that path. It holds only where
+    // that test sits in this loop's own body, the arm's switch being the one switch opened in this
+    // loop (`caseExitFrame`); elsewhere the exit is refused.
+    const lc0 = loopCtx;
+    const caseFrame = armCapturesBreak && lc0 !== null ? caseExitFrame(lc0) : null;
     if (
       twoLevel !== undefined &&
-      firstRejection(hooks.twoLevelBreakGates ?? TWO_LEVEL_BREAK_GATES, { inCaseBody: armCapturesBreak }) !== null
+      firstRejection(hooks.twoLevelBreakGates ?? TWO_LEVEL_BREAK_GATES, {
+        inCaseBody: armCapturesBreak,
+        outward: twoLevel.outward === true,
+        flagged: caseFrame !== null,
+      }) !== null
     ) {
       throw new StructureError(
         `cannot structure '${fn.name}': a two-level exit out of block #${fn.blocks.indexOf(b)} sits in a case ` +
           `body, where \`break\` would leave only the switch`,
       );
     }
+    let caseFlag: string | undefined;
     if (loopCtx && loopCtx.breaks.has(b) && armCapturesBreak) {
       const exit = loopCtx.exit;
       const tailReturns = exit !== null && (isArm(exit) || isRet(exit));
-      if ((exit === null || armFrame!.merge !== exit) && !tailReturns) {
-        wantFor();
-        throw new StructureError(
-          `cannot structure '${fn.name}': a case body leaves its switch for a loop exit past the ` +
-            `switch's end (block #${fn.blocks.indexOf(b)}), where \`break\` would leave only the switch`,
-        );
+      if (twoLevel !== undefined || ((exit === null || armFrame!.merge !== exit) && !tailReturns)) {
+        if (exit === null || caseFrame === null) {
+          wantFor();
+          throw new StructureError(
+            `cannot structure '${fn.name}': a case body leaves its switch for a loop exit past the ` +
+              `switch's end (block #${fn.blocks.indexOf(b)}), where \`break\` would leave only the switch`,
+          );
+        }
+        caseFlag = caseExitFlag(loopCtx.header);
       }
-    } else if (loopCtx && loopCtx.breaks.has(b)) {
+    }
+    if (loopCtx && loopCtx.breaks.has(b) && (!armCapturesBreak || caseFlag !== undefined)) {
       const frame = loopCtx;
       const breakIsTaken = takenB === (arm?.to ?? twoLevel?.to ?? frame.exit);
       const stayB = breakIsTaken ? fallB : takenB;
@@ -6550,11 +6664,19 @@ function structureRanked(
               ...(twoLevel !== undefined
                 ? [{ k: 'assign', name: twoLevelFlag(frame.header), value: { k: 'const', value: 1 } } as Stmt]
                 : []),
-              { k: 'break' },
+              ...(caseFlag !== undefined
+                ? [
+                    { k: 'assign', name: caseFlag, value: { k: 'const', value: 1 } } as Stmt,
+                    { k: 'break', ofSwitch: true } as Stmt,
+                  ]
+                : [{ k: 'break' } as Stmt]),
             ],
             [],
           ),
         );
+        if (caseFlag !== undefined) {
+          caseFrame!.flags!.add(caseFlag);
+        }
         out.push(...argAssignsFor(b, stayEdge), ...structureRegion(stayB, stop));
         return out;
       }
@@ -6990,6 +7112,7 @@ function structureRanked(
           stack.push(sx);
         } else if (
           !frame.arms.some((a) => a.from === x && a.to === sx) &&
+          !(frame.breakArms?.some((a) => a.from === x && a.to === sx) ?? false) &&
           !(sx === frame.exit && (frame.breaks.has(x) || x === exitFrom))
         ) {
           return false;
@@ -8199,6 +8322,19 @@ function structureRanked(
   // first use, after the naming walk. Declared only where the body still mentions it
   // (`localNames`), so a reading structured and then dropped declares nothing.
   const twoLevelFlags = new Map<Block, string>();
+  // The flag of a case body's exit out of the loop at `header` past its switch's end
+  // (`structureBlock`): one per loop, apart from its two-level flag, which reads 1 after the loop
+  // where this one is reset before each switch.
+  const caseExitFlags = new Map<Block, string>();
+  const caseExitFlag = (header: Block): string => {
+    let name = caseExitFlags.get(header);
+    if (name === undefined) {
+      name = `v${fresh++}`;
+      varType.set(name, T.s(32));
+      caseExitFlags.set(header, name);
+    }
+    return name;
+  };
   const twoLevelFlag = (header: Block): string => {
     let name = twoLevelFlags.get(header);
     if (name === undefined) {
@@ -8682,13 +8818,14 @@ function structureRanked(
   }
   // v* = coalesced/materialized locals; t* = sequentialize's swap-cycle temps (varType-only —
   // they have no Value, so they are collected from varType, not varName); and the two-level exit
-  // flags (`twoLevelFlag`), varType-only too. A name the body no longer mentions is pruned by
-  // l3/dce.ts.
+  // flags (`twoLevelFlag`) and the case bodies' exit flags (`caseExitFlag`), varType-only too. A
+  // name the body no longer mentions is pruned by l3/dce.ts.
   const localNames = [
     ...new Set([
       ...varName.values(),
       ...[...varType.keys()].filter((n) => /^t\d+$/.test(n)),
       ...twoLevelFlags.values(),
+      ...caseExitFlags.values(),
     ]),
   ].filter((n) => /^[vt]\d+$/.test(n) && !globalNames.has(n));
   // THE FRAME COORDINATES OF EACH DECLARED LOCAL (ir/core.ts `SlotHomes`, stamped by the SSA

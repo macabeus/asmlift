@@ -1013,9 +1013,11 @@ const TARGET_IS_THE_ENCLOSING_HEADER = `fn outerheader {
 
 /** The hit sits in a case body of a switch inside the inner loop, a case that falls into the next
  *  one when it misses (agbcc -O2's layout of `switch (probe(j)) { case 0: if (a(j) == x) goto
- *  next; case 1: b(j); }`). `break` there would leave only the switch, so the second exit cannot
- *  set the flag and break. Two refusals in structure.ts each decline it: the two-level one and the
- *  one for a case body that leaves its switch for a loop exit past the switch's end. */
+ *  next; case 1: b(j); }`). `break` there leaves only the switch, so the hit sets the case body's
+ *  exit flag beside the two-level one, and the flag's test after the switch leaves the loop. Asked
+ *  only once every run without that flag declined (structure.ts `CaseExitRanking`), where the
+ *  two-level refusal and the one for a case body that leaves its switch for a loop exit past the
+ *  switch's end each decline it. */
 const SECOND_EXIT_FROM_A_CASE_BODY = `fn casebody {
 ^bb0(%0: s32, %1: s32, %2: s32):
   %3: s32 = const {value=0}
@@ -1490,7 +1492,6 @@ test.each([
   ['a `goto` out of three loops', OUT_OF_THREE_LOOPS],
   ['a `goto` out of both loops through a switch in a switch', THROUGH_A_SWITCH_IN_A_SWITCH],
   ["the enclosing loop's header", TARGET_IS_THE_ENCLOSING_HEADER],
-  ['a second exit out of a case body', SECOND_EXIT_FROM_A_CASE_BODY],
   ['a second exit into the switch arm its own arm falls into', GOTO_INTO_NEXT_ARM],
 ])('%s stays declined', (_, ir) => {
   expect(() => judged(ir)).toThrow(/cannot structure/);
@@ -1528,7 +1529,6 @@ test('each decline is refused by the two-level rule its shape names', () => {
     'skip-reenters-loop',
     'target-is-enclosing-header',
   ]);
-  expect(refusalsOf(SECOND_EXIT_FROM_A_CASE_BODY)).toEqual(['from-a-case-body']);
   expect(refusalsOf(GOTO_INTO_NEXT_ARM)).toEqual(['skips-region-end']);
   expect(refusalsOf(OUT_OF_THREE_LOOPS)).toContain('not-a-break-arm');
 });
@@ -1552,10 +1552,27 @@ test('without second-target-elsewhere a third exit target is still refused where
   ).toThrow(/a break out of block #\d+ has no edge beside it that stays in the loop/);
 });
 
+test('a second exit out of a case body sets the case body\'s exit flag beside its own, and the program is the IR', () => {
+  const { src, agreement, shipped } = judged(SECOND_EXIT_FROM_A_CASE_BODY);
+  expect(src).toMatch(/if \(a\(v\d+\) == a2\) \{\n\s*(v\d+) = 1;\n\s*(v\d+) = 1;\n\s*break;\n\s*\}/);
+  expect(src).toMatch(/}\n\s*if \((v\d+) != 0\) break;/);
+  expect(src).toMatch(/if \((v\d+) == 0\) k\(v\d+\);/);
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
+  // the seeds never take the hit here (`a`'s result never equals the third parameter); the hit is
+  // judged by case-exit-flag.test.ts's fixture of the same exit, whose dispatch is the counter
+  const seen = covers(SECOND_EXIT_FROM_A_CASE_BODY);
+  expect(seen.zeroTrips).toBeGreaterThan(0);
+  expect(seen.noHit).toBeGreaterThan(0);
+});
+
 test('without from-a-case-body the case-body exit is refused by the switch-exit rule behind it', () => {
-  expect(() => judged(SECOND_EXIT_FROM_A_CASE_BODY, { twoLevelBreakGates: [] })).toThrow(
-    /a case body leaves its switch for a loop exit past the switch's end/,
-  );
+  // the runs that ask no exit flag refuse it twice over; the one that asks it is the lift above
+  const census = tallying(TWO_LEVEL_BREAK_GATES);
+  const withRule = judged(SECOND_EXIT_FROM_A_CASE_BODY, { twoLevelBreakGates: census.gates }).src;
+  expect(census.refusals().map(([id]) => id)).toContain('from-a-case-body');
+  expect(judged(SECOND_EXIT_FROM_A_CASE_BODY, { twoLevelBreakGates: [] }).src).toBe(withRule);
 });
 
 test('without skip-reenters-loop the two-level continue lifts, and agrees: the rule refuses a correct reading', () => {
@@ -1696,9 +1713,17 @@ const HIT_CODE_PAST_THE_LOOP = `fn hitcodepast {
 
 test.each([
   ['to the end of its switch arm', HIT_CODE_TO_ARM_END, /unrecovered back-edge/],
-  ['to the end of its switch arm, the outer loop’s exit', HIT_CODE_PAST_THE_LOOP, /leaves its switch/],
+  ['to the end of its switch arm, the outer loop’s exit', HIT_CODE_PAST_THE_LOOP, null],
 ])('a `goto` whose hit runs code first, %s, lifts as a flag set after that code', (_, ir, without) => {
-  expect(() => judged(ir, NO_HIT_CODE)).toThrow(without);
+  // without the hit rung, the arm past the loop's exit takes the case body's exit flag instead
+  // (`case-exit-flag.test.ts`), the reading every run that asks neither declines
+  if (without === null) {
+    const caseFlag = judged(ir, NO_HIT_CODE);
+    expect(caseFlag.src).toMatch(/(v\d+) = 1;\n\s*break;[^]*if \(\1 != 0\) break;/);
+    expect(caseFlag.agreement.disagree).toBe(0);
+  } else {
+    expect(() => judged(ir, NO_HIT_CODE)).toThrow(without);
+  }
   const { src, agreement, shipped } = judged(ir);
   // the hit writes its code, then the flag, then leaves the search loop; the flag leaves the switch
   expect(src).toMatch(/hit\(v\d+\);\n\s*(?:v\d+ = v\d+;\n\s*)?(v\d+) = 1;\n\s*break;[^]*if \(\1 == 0\)/);
