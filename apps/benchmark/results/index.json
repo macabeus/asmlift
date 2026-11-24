@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-11-24T11:00:26.407Z",
+    "generatedAt": "2026-11-24T16:44:14.619Z",
     "toolchains": [
       "mwcc_242_81",
       "ido7.1",
@@ -11,12 +11,12 @@
       "gcc2.7.2kmc"
     ],
     "counts": {
-      "total": 3172,
-      "synthetic": 2751,
+      "total": 3184,
+      "synthetic": 2763,
       "real": 421
     },
     "asmlift": {
-      "commit": "cc8b423ba04f59b010a0a9adf9542b18100d4793",
+      "commit": "b8ac3dcd329121d9ffc0630b89d34d7bb98c9b47",
       "dirty": false
     },
     "m2c": {
@@ -74,7 +74,7 @@
     ],
     [
       "synthetic",
-      2751
+      2763
     ]
   ]
 }
