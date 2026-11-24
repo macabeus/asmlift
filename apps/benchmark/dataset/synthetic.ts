@@ -18137,6 +18137,71 @@ export const SYNTHETIC: SynthSpec[] = [
       h: { params: 1, returnsVoid: true },
     },
   },
+  // sw_caseexit_outward: a case body's `goto` out of BOTH loops its switch sits in, past the code
+  // after the inner loop (`TwoLevelExit.outward`). The hit sets the outward flag beside the case
+  // body's exit flag; the case flag's test after the switch leaves the inner loop and the outward
+  // flag's test after it leaves the outer one. agbcc -O2 lays the case out falling into `case 1`
+  // when it misses, and declined there before (structure.ts `TWO_LEVEL_BREAK_GATES`).
+  {
+    sym: 'sw_caseexit_outward',
+    src:
+      's32 a(s32 x);\n' +
+      'void b(s32 x);\n' +
+      'void c(s32 x);\n' +
+      'void d(s32 x);\n' +
+      'void e(s32 x);\n' +
+      'void g(s32 x);\n' +
+      'void k(s32 x);\n' +
+      'void after(s32 x);\n' +
+      's32 probe(s32 x);\n' +
+      'void sw_caseexit_outward(s32 n, s32 m, s32 z)\n' +
+      '{\n' +
+      '    s32 i, j;\n' +
+      '    for (i = 0; i < n; i++) {\n' +
+      '        for (j = 0; j < m; j++) {\n' +
+      '            switch (probe(j)) {\n' +
+      '            case 0:\n' +
+      '                if (a(j) < z) goto out;\n' +
+      '            case 1:\n' +
+      '                b(j);\n' +
+      '                break;\n' +
+      '            case 2: c(j); break;\n' +
+      '            case 3: d(j); break;\n' +
+      '            case 4: e(j); break;\n' +
+      '            case 5: g(j); break;\n' +
+      '            }\n' +
+      '        }\n' +
+      '        k(i);\n' +
+      '    }\n' +
+      'out:\n' +
+      '    after(i);\n' +
+      '}',
+    features: ['branch', 'switch-arms'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx:
+      's32 a(s32 x);\n' +
+      'void b(s32 x);\n' +
+      'void c(s32 x);\n' +
+      'void d(s32 x);\n' +
+      'void e(s32 x);\n' +
+      'void g(s32 x);\n' +
+      'void k(s32 x);\n' +
+      'void after(s32 x);\n' +
+      's32 probe(s32 x);\n' +
+      'void sw_caseexit_outward(s32 n, s32 m, s32 z);',
+    proto: {
+      sw_caseexit_outward: { returnsVoid: true },
+      a: { params: 1 },
+      b: { params: 1, returnsVoid: true },
+      c: { params: 1, returnsVoid: true },
+      d: { params: 1, returnsVoid: true },
+      e: { params: 1, returnsVoid: true },
+      g: { params: 1, returnsVoid: true },
+      k: { params: 1, returnsVoid: true },
+      after: { params: 1, returnsVoid: true },
+      probe: { params: 1 },
+    },
+  },
   // brkarm_ifjoin: a tested loop's `break` that runs code under two nested `if`s, with no switch.
   // The CFG joins the outer `if` at the loop's exit, through the arm; the arm renders inside the
   // `if`, ahead of its `break`, so the `if` joins at `y(i)` in the body (structure.ts
