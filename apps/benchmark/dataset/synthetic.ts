@@ -4823,8 +4823,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // `fill`, and `f(); g();` and `g(f())` are the same bytes where that register is the first argument
   // register (agbcc r0, mwcc r3), so the trim drops it as no argument: `fill()`, a buffer nothing fills.
   // `fill`'s body reads it, so the lift declines (pokeemerald GenerateBattlePyramidFloorLayout passes
-  // AllocZeroed's buffer to GetPyramidFloorLayoutOffsets so). The two compilers whose return register
-  // is the first argument one.
+  // AllocZeroed's buffer to GetPyramidFloorLayoutOffsets so). agbcc only: mwcc, the other compiler
+  // whose return register is the first argument one, inlines `fill` at its flags.
   {
     sym: 'resultbody',
     src:
@@ -4832,7 +4832,7 @@ export const SYNTHETIC: SynthSpec[] = [
       'void fill(unsigned char *p)\n{\n    int i;\n    for (i = 0; i < 4; i++) p[i] = gk + i;\n}\n' +
       'int resultbody(int a)\n{\n    unsigned char *o = mkbuf(16);\n    fill(o);\n    return o[a];\n}',
     features: [],
-    toolchains: ['agbcc', 'mwcc_242_81'],
+    toolchains: ['agbcc'],
     ctx: 'extern int gk;\nint resultbody(int a);',
   },
   // `spillarg` is `spill10` with a genuine outgoing argument under the spills: `five(i, 1, 2, 3,
