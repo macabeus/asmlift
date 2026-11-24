@@ -19,7 +19,7 @@ import { type AsmData, parseAsmData } from '@asmlift/core/frontend/asmdata';
 import type { CalleeBodies } from '@asmlift/core/frontend/callee-body';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { polishFactsOf, polished } from '@asmlift/core/l3/polish/index';
-import { type OnGap, calleeBodyNotesOf, decompile, ownArityNotesOf } from '@asmlift/core/pipeline';
+import { type CalleeBodyFact, type OnGap, calleeBodyNotesOf, decompile, ownArityNotesOf } from '@asmlift/core/pipeline';
 import { type FnProto, type Prototypes, validatePrototypes } from '@asmlift/core/proto';
 import {
   type ContextGlobals,
@@ -841,12 +841,16 @@ export async function runCli(
   // a call asks only where a gate questions a register the caller did not set up for it, so a body
   // read off the ELF that no call asked decided nothing, and the note must not say it did.
   // …and a callee the lift sized off its own body's stack loads (`DecompileResult.calleeStackSized`)
-  // is no guess, and is named as what sized it
+  // is no guess, and is named as what sized it; one whose body ruled out a hidden struct-return
+  // pointer, or was passed an earlier result its body reads (`DecompileResult.calleeBodyFacts`), is
+  // named with what its body decided
   const protoNote = ({
     calleeBodiesAsked: asked,
+    calleeBodyFacts: facts,
     calleeStackSized: sized,
   }: {
     calleeBodiesAsked: Readonly<Record<string, number>>;
+    calleeBodyFacts: Readonly<Record<string, readonly CalleeBodyFact[]>>;
     calleeStackSized: Readonly<Record<string, number>>;
   }) =>
     guessedArityNote(
@@ -859,6 +863,7 @@ export async function runCli(
       new Map(Object.entries(asked)),
       new Map(Object.entries(sized)),
       calleeBodyFiles,
+      new Map(Object.entries(facts)),
     );
   // a note that names its own tag (`[own-return]`) carries it; every other one is the arity bound's
   const ownArityNote = (notes: readonly string[]) =>

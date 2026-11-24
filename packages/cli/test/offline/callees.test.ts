@@ -249,6 +249,34 @@ describe('guessedArityNote', () => {
       '',
     ]);
   });
+
+  // a body that decided more of a call than its registers (core `DecompileResult.calleeBodyFacts`)
+  // is named with what it decided and where it was read
+  it('names a callee whose own body ruled out a struct return or was passed an earlier result', () => {
+    const note = guessedArityNote(
+      LBG,
+      'LoadBGTilemapData',
+      ARMV4T_AGBCC,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      new Map([['thunk_HeapFree', 'asm/nonmatchings/m/thunk_HeapFree.s']]),
+      new Map([
+        ['thunk_HeapFree', ['noHiddenPointer', 'readsFirst'] as const],
+        ['DecompressAlloc', ['readsFirst'] as const],
+      ]),
+    );
+    expect(note.split('\n').slice(1)).toEqual([
+      'asmlift: [proto] 2 callee(s) with no declaration had a call decided by their own body: thunk_HeapFree ' +
+        '(asm/nonmatchings/m/thunk_HeapFree.s: returns no struct through a hidden pointer; reads its first argument ' +
+        "register, so the call is passed the earlier call's result left there), DecompressAlloc (tools.asmlift.elf: " +
+        "reads its first argument register, so the call is passed the earlier call's result left there) — pass " +
+        '--proto \'{"thunk_HeapFree":{"params":N,"returns":"T"}}\' to state it',
+      '',
+    ]);
+  });
 });
 
 // A `.s` declares its functions, and a `bl` to one is a callee whose arity is guessed, not a long

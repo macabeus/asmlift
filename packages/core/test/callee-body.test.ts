@@ -433,6 +433,10 @@ describe('the argument words a callee body handed in from outside the input read
       '\tpop\t{r1}\n\tbx\tr1\n';
     const head = '\t.code\t16\n\t.text\n';
     expect(decompile('f', head + fill + f, t).source).toContain('    fill(v0);\n');
+    // a body handed in decides it the same way, and the result names it (`calleeBodyFacts`)
+    const handed = decompile('f', head + f, t, { calleeBodies: { fill: { kind: 'listing', text: head + fill } } });
+    expect(handed.source).toContain('    fill(v0);\n');
+    expect(handed.calleeBodyFacts).toEqual({ fill: ['readsFirst'] });
     // …unless that result is declared void, which names nothing a call is passed
     expect(
       decompile('f', head + fill + f, t, { prototypes: { AllocZeroed: { params: 1, returnsVoid: true } } }).source,
@@ -576,5 +580,10 @@ describe('a callee body that proves it is no struct return through a hidden poin
     expect(decompile('f', head + f, t, { calleeBodies: { g: { kind: 'listing', text: head + g } } }).source).toBe(
       decompile('f', head + g + f, t).source,
     );
+    // …and the result names the body handed in that decided it (`calleeBodyFacts`), not one in the input
+    expect(
+      decompile('f', head + f, t, { calleeBodies: { g: { kind: 'listing', text: head + g } } }).calleeBodyFacts,
+    ).toEqual({ g: ['noHiddenPointer'] });
+    expect(decompile('f', head + g + f, t).calleeBodyFacts).toEqual({});
   });
 });

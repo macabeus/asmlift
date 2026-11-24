@@ -11,6 +11,7 @@
 // and nothing here can change what is emitted.
 import { byValueCallArgs, byValueRefusal } from '@asmlift/core/aggregate';
 import type { Reloc } from '@asmlift/core/frontend/asmdata';
+import type { CalleeBodyFact } from '@asmlift/core/pipeline';
 import { type Prototypes, calleeDeclaration, declaredCallArgs, variadicRefusal } from '@asmlift/core/proto';
 import { helperPrototypes } from '@asmlift/core/runtime-helpers';
 import { type SymbolMap, symbolsByName } from '@asmlift/core/symbols';
@@ -181,7 +182,11 @@ export function guessedArityCallees(
  *  callee in `sized` (core `DecompileResult.calleeStackSized`, with the stack words its call was laid
  *  out at) was no guess: it is named on a line of its own, as sized by the stack words its body
  *  loads. A callee in `files` had its body read off that file of the project's assembly, proven to
- *  assemble to the linked code (splat-bodies.ts), and the note names the file instead of the ELF. */
+ *  assemble to the linked code (splat-bodies.ts), and the note names the file instead of the ELF.
+ *  A callee in `facts` (core `DecompileResult.calleeBodyFacts`) had its body, wherever it was read,
+ *  decide more of the call than its registers: that it returns no struct through a hidden pointer,
+ *  or that it reads its first argument register, so the call is passed the result an earlier call
+ *  left there. It is named again, on a line of its own, with what its body decided. */
 export function guessedArityNote(
   asm: string,
   self: string,
@@ -192,6 +197,7 @@ export function guessedArityNote(
   asked?: ReadonlyMap<string, number>,
   sized?: ReadonlyMap<string, number>,
   files?: ReadonlyMap<string, string>,
+  facts?: ReadonlyMap<string, readonly CalleeBodyFact[]>,
 ): string {
   const all = guessedArityCallees(asm, self, target, prototypes, symbols, relocs);
   const bodySized = all.filter((n) => sized?.has(n));
@@ -200,6 +206,11 @@ export function guessedArityNote(
   const withinAsm = all.filter((n) => asked?.has(n) && !sized?.has(n) && files?.has(n));
   const remedy = (n: string) => `pass --proto '{"${n}":{"params":N}}' if a guess is wrong\n`;
   const words = (n: number) => `${n} argument word${n === 1 ? '' : 's'}`;
+  const decided = [...(facts ?? [])].filter(([, said]) => said.length > 0);
+  const said: Readonly<Record<CalleeBodyFact, string>> = {
+    noHiddenPointer: 'returns no struct through a hidden pointer',
+    readsFirst: "reads its first argument register, so the call is passed the earlier call's result left there",
+  };
   return (
     (guessed.length === 0
       ? ''
@@ -223,6 +234,12 @@ export function guessedArityNote(
       : `asmlift: [proto] ${bodySized.length} callee(s) have no declared arity, each call sized by the incoming ` +
         'stack words its own body loads, past every argument register: ' +
         `${bodySized.map((n) => `${n} (${words(target.argRegs.length + sized!.get(n)!)})`).join(', ')} — ` +
-        `pass --proto '{"${bodySized[0]}":{"params":N}}' to state it\n`)
+        `pass --proto '{"${bodySized[0]}":{"params":N}}' to state it\n`) +
+    (decided.length === 0
+      ? ''
+      : `asmlift: [proto] ${decided.length} callee(s) with no declaration had a call decided by their own body: ` +
+        `${decided
+          .map(([n, f]) => `${n} (${files?.get(n) ?? 'tools.asmlift.elf'}: ${f.map((k) => said[k]).join('; ')})`)
+          .join(', ')} — pass --proto '{"${decided[0][0]}":{"params":N,"returns":"T"}}' to state it\n`)
   );
 }
