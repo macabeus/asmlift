@@ -4774,8 +4774,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // (frontend/call-plan.ts, the `leftOut` question; frontend/thumb.ts `frameAddressReceivers`).
   // agbcc stores `c` through `mov r3, sp` (strh has no sp form) and calls `gfp2` through r2 with
   // r3 still holding the frame address. `bl _call_via_r2` takes r0 and r1 at most, so `take` alone
-  // is handed `&s`; asked whether the arity leaves out a frame address, the lift used to decline
-  // (kl2dct sub_0800E8A0, whose `add r3, sp, #8` reaches its `_call_via_r2` calls). agbcc only.
+  // is handed `&s`, and r3 is not asked about as an argument the arity left out (kl2dct
+  // sub_0800E8A0, whose `add r3, sp, #8` reaches its `_call_via_r2` calls). agbcc only.
   {
     sym: 'callvia_frame',
     src:

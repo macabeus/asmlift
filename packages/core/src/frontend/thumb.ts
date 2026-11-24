@@ -4337,8 +4337,8 @@ function measureThumbFrame({
    *  leaves the operand in place. */
   dropsVoidReturn: boolean;
   /** the incoming stack words a callee nothing declares loads, off its own body
-   *  (`LiftOptions.calleeBody`'s `stackWords`): the outgoing-argument analysis's `bodyReads`, which asks it
-   *  only where the code stages a block */
+   *  (`LiftOptions.calleeBody`'s `stackWords`): the outgoing-argument analysis's `bodyReads`, which
+   *  asks it only where the code stages a block */
   stackWordsOf?: CalleeStackWords;
 }): ThumbFrame {
   // THE FRAME BASE PASSED TO A CALLEE. What this computes is exactly what its name says and nothing
@@ -5584,9 +5584,9 @@ function frameAddressesAt(
 // pass it, and through argument register rK it hands over r0..r(K-1) alone, the bound the lowering
 // reads it at (agbcc's `*call_indirect` puts the address in a register no argument is live in, and
 // fills the arguments from r0 up). "Every register" is wider than what the lift passes an
-// undeclared callee — a guessed count — and the two agree on a frame address
-// only because the lowering refuses to leave one out (`lowerCall`'s `leftOut`, over
-// `frameAddressesAt`, which holds at each call a superset of what the walks here hold) — of
+// undeclared callee — a guessed count — and the two agree on a frame address only because the
+// lowering refuses to leave one out (`lowerCall`'s `leftOut`, over `frameAddressesAt`, which holds
+// at each call a superset of what the walks here hold) — of
 // the registers its guess leaves out, of those the trim cuts afterwards (`GuessedCallSite.
 // trimmed`), and of those the call's own block wrote that the ranked `/setup-args` reading would
 // cut, which is withheld for that site instead (it runs in the ranker, after the audit below). Where

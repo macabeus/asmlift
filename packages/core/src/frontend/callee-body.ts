@@ -149,12 +149,13 @@ export type CalleeBodyReaders = {
 };
 
 /** What each callee's body says, read as a call to it first asks and kept for the rest: the
- *  register bound, the incoming stack words it loads (`CalleeStackWords` below), and whether it is
- *  no struct return through a hidden pointer (`CalleeReturnsNoHiddenPointer` below), off ONE lift.
+ *  register bound, the incoming stack words it loads (`CalleeStackWords` below), whether it is no
+ *  struct return through a hidden pointer (`CalleeReturnsNoHiddenPointer` below) and whether it
+ *  reads its first argument register (`CalleeReadsFirstArgument` below), off ONE lift.
  *  `lift` lifts one function of a text (the input, or a body in `external`) under a table, with no
  *  bound of its own: one level of bodies is read, never the callee's callees'. `frontend` is what
- *  the target frontend says of its own lifts: its entry scan (`Frontend.entryStackWords`), asked
- *  only of a body that does not lift. */
+ *  the target frontend says of its own lifts: its entry scan (`Frontend.entryStackWords`) and its
+ *  return scan (`Frontend.returnsThroughReturnReg`), asked only of a body that does not lift. */
 export function calleeBodyReads(
   self: string,
   asm: string,
@@ -231,15 +232,15 @@ const returnOnly = (p: FnProto | undefined): FnProto => {
   return out;
 };
 
-/** What one callee's body answers: `bound`, the argument words it reads at most, `stack`, the
- *  incoming stack words it loads (`CalleeStackWords`), each undefined where the body proves none, and
- *  `noHiddenPointer`, true where it proves it returns no struct through a hidden pointer
- *  (`CalleeReturnsNoHiddenPointer`). */
+/** What one callee's body answers: `bound`, the argument words it reads at most, and `stack`, the
+ *  incoming stack words it loads (`CalleeStackWords`), each undefined where the body proves none;
+ *  `noHiddenPointer` and `readsFirst`, each present only where the body proves it. */
 interface BodyReads {
   readonly bound?: number;
   readonly stack?: number;
+  /** it returns no struct through a hidden pointer (`CalleeReturnsNoHiddenPointer`) */
   readonly noHiddenPointer?: true;
-  /** the body reads its first argument register's incoming value (`CalleeReadsFirstArgument`) */
+  /** it reads its first argument register's incoming value (`CalleeReadsFirstArgument`) */
   readonly readsFirst?: true;
 }
 
@@ -256,8 +257,8 @@ function bodyReads(
   if (callee === self || declaresAggregateReturn(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined)) {
     return {};
   }
-  // a body that lifts answers all three; one that does not answers its entry's loads, no bound, and
-  // whether the frontend's scan finds a return through the return register
+  // a body that lifts answers every reader; one that does not answers its entry's loads and whether
+  // the frontend's scan finds a return through the return register, and no bound
   const lifted = (text: string, relocs?: readonly Reloc[]): BodyReads => {
     const got = liftedReads(callee, text, target, prototypes, lift, relocs);
     if (got !== undefined) {
@@ -415,11 +416,10 @@ function returnsUntouched(fn: Fn): boolean {
  *  it reads, where the register bound (`CalleeBodyBound`) is an upper one. An op reads it, directly
  *  or through a join no value the body wrote also flows into (one that does is an uninitialised
  *  local's bytes as much as a reassigned parameter's, and reads as neither), other than a return,
- *  and other than as an argument of a call the lift
- *  forced to every register, or of one through a register that bounds it (`ARGS_BOUND_BY_ADDRESS`)
- *  whose address arrives in a block parameter: either is handed the register whatever the source
- *  passed, and a return hands r0 back whether or not it was a parameter (`int g(void)` returns
- *  through `pop {r1}; bx r1` too). The address is what decides a bound call: agbcc calls an address
+ *  and other than as an argument of a call the lift forced to every register, or of one through a
+ *  register that bounds it (`ARGS_BOUND_BY_ADDRESS`) whose address arrives in a block parameter:
+ *  either is handed the register whatever the source passed, and a return hands r0 back whether or
+ *  not it was a parameter (`int g(void)` returns through `pop {r1}; bx r1` too). The address is what decides a bound call: agbcc calls an address
  *  it computes or loads through the first register past the arguments (compiled at -O1 and -O2,
  *  `s->fn()`, `tab[i]()` and `gS.fn()` with the pointer in r1 all load into r0 and call
  *  `_call_via_r0`; -O0 uses r4), so `bl _call_via_r1` on a loaded address passes r0. One left where

@@ -1419,12 +1419,11 @@ export function callDeclarations(
     // value (`CalleeReadsFirstArgument`, a lower bound: a read other than a return or a call its
     // lift forced) the call takes at least that word, and nothing since the earlier call wrote it,
     // so the word is that call's result. `o = AllocZeroed(16); fill(o); return o[a];` lifts
-    // `fill(v0)`, where the trim read `fill()` and left the buffer unfilled. A result declared void
-    // names nothing a call can be passed. The register bound is an upper one, and is not asked: it
-    // counts r0 for a body whose undeclared call or untouched return reads it, which no parameter
-    // need be (`int g(void)` returns through `pop {r1}; bx r1` too). KNOWN GAP: a body that only
-    // forwards r0 to an undeclared callee reads nothing here, so the result is dropped as with no
-    // body at all.
+    // `fill(v0)`, where the trim alone reads `fill()` and leaves the buffer unfilled. A result
+    // declared void names nothing a call can be passed. The register bound is an upper one, and is
+    // not asked: it counts r0 for a body whose undeclared call or untouched return reads it, which no
+    // parameter need be (`int g(void)` returns through `pop {r1}; bx r1` too). KNOWN GAP: the one
+    // `CalleeReadsFirstArgument` states.
     if (widths === null) {
       const leftOut = site.leftOut;
       const libcallResult =

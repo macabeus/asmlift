@@ -387,8 +387,8 @@ function answeredBodies(
   return out;
 }
 
-/** The `calleeBodiesAsked`, `calleeBodyFacts` and `calleeStackSized` (`DecompileResult`) of one lift under `opts`, for a
- *  caller whose result carries none — the ranked path, whose every candidate lifts as this one does.
+/** The `calleeBodiesAsked`, `calleeBodyFacts` and `calleeStackSized` (`DecompileResult`) of one lift
+ *  under `opts`, for a caller whose result carries none — the ranked path, whose every candidate lifts as this one does.
  *  Empty where the lift fails: the run reports that failure itself. */
 export function calleeBodyNotesOf(
   name: string,
@@ -528,7 +528,8 @@ export function liftStamped(
   const bytes = ownReturn?.register === true ? undefined : ownReturn?.type.size;
   // what each callee whose body is in this input, or handed in, reads of its arguments, lifted from
   // that body as a call to it is first lowered (frontend/callee-body.ts); the callee's own lift reads
-  // no bodies, and, off the same lift, what each one loads of its incoming stack words
+  // no bodies, and, off the same lift, what each one loads of its incoming stack words, whether it
+  // returns no struct through a hidden pointer, and whether it reads its first argument register
   const given = liftOptions.calleeBody ?? {};
   const read =
     given.bound === undefined ||
