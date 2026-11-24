@@ -128,7 +128,7 @@ export type CalleeLift = (
 ) => Fn;
 
 /** The argument words callee `callee`'s own body can read at most, or `undefined` where its body
- *  proves nothing (frontend/frontend.ts `LiftOptions.calleeBodyBound`). */
+ *  proves nothing (frontend/frontend.ts `LiftOptions.calleeBody`). */
 export type CalleeBodyBound = (callee: string) => number | undefined;
 
 /** Whether a call to a callee with entry `entry` asks its body at all, where nothing lays the call
@@ -137,6 +137,16 @@ export type CalleeBodyBound = (callee: string) => number | undefined;
 export function asksCalleeBody(entry: FnProto | undefined): boolean {
   return !declaresParams(entry) && entry?.variadicParams === undefined;
 }
+
+/** Every reader of a callee's body, off one lift of it (`calleeBodyReads`): what a lift is handed as
+ *  `LiftOptions.calleeBody`, and the lowering as `callDeclarations`' `calleeBody`. One object, so a
+ *  reader added here reaches every frontend that passes the object on. */
+export type CalleeBodyReaders = {
+  bound: CalleeBodyBound;
+  stackWords: CalleeStackWords;
+  returnsNoHiddenPointer: CalleeReturnsNoHiddenPointer;
+  readsFirstArgument: CalleeReadsFirstArgument;
+};
 
 /** What each callee's body says, read as a call to it first asks and kept for the rest: the
  *  register bound, the incoming stack words it loads (`CalleeStackWords` below), and whether it is
@@ -153,12 +163,7 @@ export function calleeBodyReads(
   lift: CalleeLift,
   external?: CalleeBodies,
   frontend?: Pick<Frontend, 'entryStackWords' | 'returnsThroughReturnReg'>,
-): {
-  bound: CalleeBodyBound;
-  stackWords: CalleeStackWords;
-  returnsNoHiddenPointer: CalleeReturnsNoHiddenPointer;
-  readsFirstArgument: CalleeReadsFirstArgument;
-} {
+): CalleeBodyReaders {
   const memo = new Map<string, BodyReads>();
   const read = (callee: string): BodyReads => {
     if (!memo.has(callee)) {

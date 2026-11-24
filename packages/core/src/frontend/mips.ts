@@ -1754,11 +1754,9 @@ function liftOnce(
     { pairs: false, memoryReturn: true, stackArgs: true, voidReturn: true, argRegisterBoundsArity: false },
     fail,
     () => ownDeclarationOf(name, prototypes, options.contextOwnProto),
-    options.calleeBodyBound,
+    options.calleeBody,
     options.entryReadCalls,
     options.stackSized,
-    options.calleeReturnsNoHiddenPointer,
-    options.calleeReadsFirstArgument,
   );
   // The first instruction naming the FPU's file, a data register or the control register. A call
   // in a function that has one refuses: which floating-point registers a callee reads, returns in
@@ -3076,7 +3074,7 @@ function liftOnce(
         if (ARG_REGS.some((r) => !ssa.writtenOnEveryPath(r, bi, () => false))) {
           return undefined;
         }
-        const n = options.calleeStackWords?.(callee) ?? 0;
+        const n = options.calleeBody?.stackWords?.(callee) ?? 0;
         return bodyBlockAgrees(
           n,
           reaching.map((off) => off - STACK_ARGS_AT),

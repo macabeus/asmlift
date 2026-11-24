@@ -17,9 +17,7 @@ import { returnedStruct, structLocalType } from './frontend/call-plan';
 import {
   type CalleeBodies,
   type CalleeBodyBound,
-  type CalleeReadsFirstArgument,
-  type CalleeReturnsNoHiddenPointer,
-  type CalleeStackWords,
+  type CalleeBodyReaders,
   calleeBodyReads,
 } from './frontend/callee-body';
 import { FrontendUnsupportedError } from './frontend/errors';
@@ -501,11 +499,12 @@ export function liftStamped(
   // what each callee whose body is in this input, or handed in, reads of its arguments, lifted from
   // that body as a call to it is first lowered (frontend/callee-body.ts); the callee's own lift reads
   // no bodies, and, off the same lift, what each one loads of its incoming stack words
+  const given = liftOptions.calleeBody ?? {};
   const read =
-    liftOptions.calleeBodyBound === undefined ||
-    liftOptions.calleeStackWords === undefined ||
-    liftOptions.calleeReturnsNoHiddenPointer === undefined ||
-    liftOptions.calleeReadsFirstArgument === undefined
+    given.bound === undefined ||
+    given.stackWords === undefined ||
+    given.returnsNoHiddenPointer === undefined ||
+    given.readsFirstArgument === undefined
       ? bodyReadsIn(
           name,
           asm,
@@ -520,7 +519,7 @@ export function liftStamped(
           liftOptions.asmIncludes,
         )
       : undefined;
-  const bound = liftOptions.calleeBodyBound ?? read!.bound;
+  const bound = given.bound ?? read!.bound;
   const calleeBodyBound: CalleeBodyBound =
     bodiesAsked === undefined
       ? bound
@@ -531,10 +530,12 @@ export function liftStamped(
         };
   const options = {
     ...liftOptions,
-    calleeBodyBound,
-    calleeStackWords: liftOptions.calleeStackWords ?? read!.stackWords,
-    calleeReturnsNoHiddenPointer: liftOptions.calleeReturnsNoHiddenPointer ?? read!.returnsNoHiddenPointer,
-    calleeReadsFirstArgument: liftOptions.calleeReadsFirstArgument ?? read!.readsFirstArgument,
+    calleeBody: {
+      bound: calleeBodyBound,
+      stackWords: given.stackWords ?? read!.stackWords,
+      returnsNoHiddenPointer: given.returnsNoHiddenPointer ?? read!.returnsNoHiddenPointer,
+      readsFirstArgument: given.readsFirstArgument ?? read!.readsFirstArgument,
+    } satisfies CalleeBodyReaders,
     ...(stacksSized === undefined
       ? {}
       : { stackSized: (callee: string, words: number) => stacksSized.set(callee, words) }),
@@ -572,14 +573,6 @@ export function liftStamped(
   return fn;
 }
 
-/** Both readers of a callee's body (frontend/callee-body.ts `calleeBodyReads`). */
-type BodyReaders = {
-  bound: CalleeBodyBound;
-  stackWords: CalleeStackWords;
-  returnsNoHiddenPointer: CalleeReturnsNoHiddenPointer;
-  readsFirstArgument: CalleeReadsFirstArgument;
-};
-
 /** The readers already built, per caller table as handed to `liftStamped`, each with what else it was
  *  read under. A ranked run lifts one function a dozen times under one table, and each callee body
  *  is a lift of the whole input, so reading it once per lift would double the lift time of a large
@@ -588,7 +581,7 @@ const readsRead = new WeakMap<
   Prototypes,
   Array<{
     key: readonly unknown[];
-    reads: BodyReaders;
+    reads: CalleeBodyReaders;
   }>
 >();
 
@@ -610,7 +603,7 @@ function bodyReadsIn(
   contextGlobals: ContextGlobals | undefined,
   calleeBodies: CalleeBodies | undefined,
   asmIncludes: ReadonlyMap<string, string> | undefined,
-): BodyReaders {
+): CalleeBodyReaders {
   const key = [name, asm, target, ownContext, asmData, symbols, contextGlobals, calleeBodies, asmIncludes];
   const read = readsRead.get(prototypes) ?? [];
   readsRead.set(prototypes, read);
@@ -633,10 +626,12 @@ function bodyReadsIn(
         symbols,
         contextGlobals,
         {
-          calleeBodyBound: () => undefined,
-          calleeStackWords: () => undefined,
-          calleeReturnsNoHiddenPointer: () => false,
-          calleeReadsFirstArgument: () => false,
+          calleeBody: {
+            bound: () => undefined,
+            stackWords: () => undefined,
+            returnsNoHiddenPointer: () => false,
+            readsFirstArgument: () => false,
+          },
           entryReadCalls,
           ...(text === asm ? { asmIncludes } : {}),
         },

@@ -28,7 +28,7 @@ const boundsOf = (
     prototypes,
     (callee, table, entryReadCalls, text) =>
       liftStamped(callee, text, target, table, text === asm ? asmData : undefined, undefined, undefined, {
-        calleeBodyBound: () => undefined,
+        calleeBody: { bound: () => undefined },
         entryReadCalls,
       }),
     external,
@@ -474,9 +474,7 @@ describe('a callee body that proves it is no struct return through a hidden poin
       prototypes,
       (callee, table, entryReadCalls, text) =>
         liftStamped(callee, text, target, table, text === asm ? asmData : undefined, undefined, undefined, {
-          calleeBodyBound: () => undefined,
-          calleeStackWords: () => undefined,
-          calleeReturnsNoHiddenPointer: () => false,
+          calleeBody: { bound: () => undefined, stackWords: () => undefined, returnsNoHiddenPointer: () => false },
           entryReadCalls,
         }),
       undefined,
@@ -513,9 +511,7 @@ describe('a callee body that proves it is no struct return through a hidden poin
       {},
       (callee, table, entryReadCalls, text) => {
         const fn = liftStamped(callee, text, t, table, undefined, undefined, undefined, {
-          calleeBodyBound: () => undefined,
-          calleeStackWords: () => undefined,
-          calleeReturnsNoHiddenPointer: () => false,
+          calleeBody: { bound: () => undefined, stackWords: () => undefined, returnsNoHiddenPointer: () => false },
           entryReadCalls,
         });
         fn.blocks.forEach((b) => b.ops.forEach((o) => delete o.attrs.viaReturnReg));

@@ -3496,10 +3496,7 @@ function liftOnce(
     | 'contextOwnWords'
     | 'contextOwnProto'
     | 'ownMemoryReturn'
-    | 'calleeBodyBound'
-    | 'calleeStackWords'
-    | 'calleeReturnsNoHiddenPointer'
-    | 'calleeReadsFirstArgument'
+    | 'calleeBody'
     | 'stackSized'
     | 'entryReadCalls'
     | 'asmIncludes'
@@ -4340,7 +4337,7 @@ function measureThumbFrame({
    *  leaves the operand in place. */
   dropsVoidReturn: boolean;
   /** the incoming stack words a callee nothing declares loads, off its own body
-   *  (`LiftOptions.calleeStackWords`): the outgoing-argument analysis's `bodyReads`, which asks it
+   *  (`LiftOptions.calleeBody`'s `stackWords`): the outgoing-argument analysis's `bodyReads`, which asks it
    *  only where the code stages a block */
   stackWordsOf?: CalleeStackWords;
 }): ThumbFrame {
@@ -6777,10 +6774,7 @@ function thumbFillOf(
     contextOwnWords,
     contextOwnProto,
     ownMemoryReturn,
-    calleeBodyBound,
-    calleeStackWords,
-    calleeReturnsNoHiddenPointer,
-    calleeReadsFirstArgument,
+    calleeBody,
     stackSized,
     entryReadCalls,
     asmIncludes,
@@ -6789,10 +6783,7 @@ function thumbFillOf(
     | 'contextOwnWords'
     | 'contextOwnProto'
     | 'ownMemoryReturn'
-    | 'calleeBodyBound'
-    | 'calleeStackWords'
-    | 'calleeReturnsNoHiddenPointer'
-    | 'calleeReadsFirstArgument'
+    | 'calleeBody'
     | 'stackSized'
     | 'entryReadCalls'
     | 'asmIncludes'
@@ -6811,11 +6802,9 @@ function thumbFillOf(
       throw new FrontendUnsupportedError(message);
     },
     () => ownDeclarationOf(name, prototypes, contextOwnProto),
-    calleeBodyBound,
+    calleeBody,
     entryReadCalls,
     stackSized,
-    calleeReturnsNoHiddenPointer,
-    calleeReadsFirstArgument,
   );
   const frame = measureThumbFrame({
     name,
@@ -6828,7 +6817,7 @@ function thumbFillOf(
     dropsVoidReturn: declaresVoidReturn(prototypes[name]),
     stackWordsOf: (callee) =>
       asksCalleeBody(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined)
-        ? calleeStackWords?.(callee)
+        ? calleeBody?.stackWords?.(callee)
         : undefined,
   });
 

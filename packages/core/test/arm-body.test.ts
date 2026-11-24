@@ -107,7 +107,7 @@ describe('an ARM body handed in bounds a Thumb callee', () => {
       {},
       (callee, table, entryReadCalls, text) =>
         liftStamped(callee, text, t, table, undefined, undefined, undefined, {
-          calleeBodyBound: () => undefined,
+          calleeBody: { bound: () => undefined },
           entryReadCalls,
         }),
       { thk: { kind: 'arm', words } },

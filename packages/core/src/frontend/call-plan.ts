@@ -65,12 +65,7 @@ import { type ContextGlobals, structNamed } from '../proto-context';
 import { floatSidesOf, helperPrototypes, isFloatHelper, isWideHelper, lookupHelper } from '../runtime-helpers';
 import { type SymbolMap, symbolsByName } from '../symbols';
 import { type TargetDescription, argRegisterHoles } from '../target';
-import {
-  type CalleeBodyBound,
-  type CalleeReadsFirstArgument,
-  type CalleeReturnsNoHiddenPointer,
-  asksCalleeBody,
-} from './callee-body';
+import { type CalleeBodyReaders, asksCalleeBody } from './callee-body';
 import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 import { type OwnDeclaration, ownDeclarationOf } from './frontend';
 import type { HighHalves } from './high-half';
@@ -315,21 +310,22 @@ export function callDeclarations(
   fail: FrontendRefusal,
   /** the function's own declaration, where one binds its body — asked as a call is lowered */
   ownDeclaration: () => OwnDeclaration | undefined = () => ownDeclarationOf(name, prototypes, undefined),
-  /** the argument words a callee's own body reads at most, where it is in the input
-   *  (frontend/callee-body.ts) — asked of a named call no declaration lays out */
-  calleeBodyBound?: CalleeBodyBound,
+  /** what a callee's own body says (`LiftOptions.calleeBody`), asked of a named call no declaration
+   *  lays out: the argument words it reads at most, whether it proves it returns no struct through
+   *  a hidden pointer (where no declaration rules one out), and whether it reads its first argument
+   *  register (where the trim would drop an earlier call's result there) */
+  calleeBody: Partial<CalleeBodyReaders> = {},
   /** the callees taken at every argument register that may still hold its entry value
    *  (`LiftOptions.entryReadCalls`) */
   entryReadCalls?: ReadonlySet<string>,
   /** told of each call laid out at the stack words its callee's body loads (`LiftOptions.stackSized`) */
   stackSized?: (callee: string, words: number) => void,
-  /** whether a callee's own body proves it returns no struct through a hidden pointer
-   *  (frontend/callee-body.ts) — asked where no declaration rules one out */
-  calleeReturnsNoHiddenPointer?: CalleeReturnsNoHiddenPointer,
-  /** whether a callee's own body reads its first argument register's incoming value
-   *  (frontend/callee-body.ts) — asked where the trim would drop an earlier call's result there */
-  calleeReadsFirstArgument?: CalleeReadsFirstArgument,
 ): CallDeclarations {
+  const {
+    bound: calleeBodyBound,
+    returnsNoHiddenPointer: calleeReturnsNoHiddenPointer,
+    readsFirstArgument: calleeReadsFirstArgument,
+  } = calleeBody;
   // What a call leaves holding nothing this function can name — checked against `argRegs` there.
   const callClobbers = clobberedByCall(target);
   // `refuseDispatchUnlockedPassThrough`'s two facts, gathered as each call is lowered: whether a
