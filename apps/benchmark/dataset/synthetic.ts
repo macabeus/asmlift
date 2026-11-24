@@ -21416,7 +21416,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //      mwcc 2.4.2 strength-reduce its `a[i]` into a pointer stepped through the frame (`the
   //      captured address at [sp,#N) reaches a phi and is then moved by a constant`), a different
   //      family's decline. The MIPS compilers and mwcc fold stkidx_five's `- 1` into the base, below
-  //      the array (`the captured address at [sp,#N) is below the reserved local area`), and decline.
+  //      the array and the reserved local area, where nothing C names lives, so the base is the
+  //      array's address moved down (target.ts `captureBelowLocalsRebases`).
   {
     sym: 'stkidx_call',
     src:
@@ -21469,13 +21470,57 @@ export const SYNTHETIC: SynthSpec[] = [
       five: { params: ['s32', 's32', 's32', 's32', 's32'], returnsVoid: true },
     },
   },
+  //  39g. stkidx_m2 / stkidx_bm3 — more bases below the locals (target.ts
+  //      `captureBelowLocalsRebases`): `a[i - 2]`, and `(b - 3)[i]` beside a second array, which
+  //      mwcc bases at -4, below sp itself. agbcc adds the array's offset after the index and keeps
+  //      the read inside the frame; its `use` call takes no stack word.
+  {
+    sym: 'stkidx_m2',
+    src:
+      'extern u32 gA, gB, gC;\n' +
+      'void use1(u32 x);\n' +
+      'void stkidx_m2(s32 i)\n' +
+      '{\n' +
+      '    u32 a[3];\n' +
+      '    a[0] = gA;\n' +
+      '    a[1] = gB;\n' +
+      '    a[2] = gC;\n' +
+      '    use1(a[i - 2]);\n' +
+      '}',
+    features: ['variable-index'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'extern u32 gA, gB, gC;\nvoid use1(u32 x);\nvoid stkidx_m2(s32 i);',
+    proto: { stkidx_m2: { params: ['s32'], returnsVoid: true }, use1: { params: ['u32'], returnsVoid: true } },
+  },
+  {
+    sym: 'stkidx_bm3',
+    src:
+      'extern u32 gA, gB, gC, gD;\n' +
+      'void use(u32 x, s32 i);\n' +
+      'void stkidx_bm3(s32 i)\n' +
+      '{\n' +
+      '    u32 a[2];\n' +
+      '    u32 b[2];\n' +
+      '    a[0] = gA;\n' +
+      '    a[1] = gB;\n' +
+      '    b[0] = gC;\n' +
+      '    b[1] = gD;\n' +
+      '    use((b - 3)[i], a[i]);\n' +
+      '}',
+    features: ['variable-index', 'pointer'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'extern u32 gA, gB, gC, gD;\nvoid use(u32 x, s32 i);\nvoid stkidx_bm3(s32 i);',
+    proto: { stkidx_bm3: { params: ['s32'], returnsVoid: true }, use: { params: ['u32', 's32'], returnsVoid: true } },
+  },
   //  39b. stkidx_below — the CONTROL of item 39's bound, a soundness pin that declines. `u32 *p = a
   //      - 1` (the 1-based table idiom) with `u32 a[3]` at [sp,#4] bases `p[i]` at [sp,#0], beneath the
   //      array, and a K&R call takes a fifth argument staged there after the read. The read's base
   //      proves no local there, so `kr`, which nothing sizes, keeps [sp,#0] as a word it may take,
   //      and the lift declines rather than drop the fifth argument (frontend/stackargs.ts
   //      `loadedWordBound` steps down only where every store it clears reaches the read).
-  //      The MIPS compilers and mwcc decline it on their own stack-argument and frame-layout gates.
+  //      The MIPS compilers decline it on their own stack-argument gates. mwcc passes all of kr's
+  //      words in r3..r8, so nothing is staged and it lifts, its base below the locals the array's
+  //      moved down (item 39).
   {
     sym: 'stkidx_below',
     src:
@@ -21570,9 +21615,12 @@ export const SYNTHETIC: SynthSpec[] = [
   //      r3,0(r31) / addi r31,r31,4`, agbcc `mov r5, sp / ldmia r5!, {r0}`; gcc2.7.2 -O1 keeps `a[i]`.
   //      stkwalk_down starts the pointer at a runtime index, `u16 *p = buf + n; *p-- = v`, the
   //      eeprom bit-serializer's shape. An access through the stepped pointer is one through a
-  //      runtime index nothing bounds (frame-objects.ts `steppedPointers`). agbcc's stkwalk_up and
-  //      stkwalk_call decline before the audit: an `ldmia` through the pointer is no read of
-  //      [sp,#0] to the outgoing-argument analysis (frontend/stackargs.ts (a)).
+  //      runtime index nothing bounds (frame-objects.ts `steppedPointers`). agbcc captures the
+  //      pointer before the loop, so the outgoing-argument analysis reads the `ldmia` as a read of
+  //      the array from the capture up only across blocks (thumb.ts `steppedFrameReads`), and only
+  //      where every call after it is typed. stkwalk_kr is that bound's CONTROL, a soundness pin
+  //      that declines on agbcc: a K&R call after the loop stages its fifth word at [sp,#0],
+  //      beneath the array the walk reads at [sp,#4], and nothing sizes it.
   {
     sym: 'stkwalk_up',
     src:
@@ -21617,6 +21665,32 @@ export const SYNTHETIC: SynthSpec[] = [
       stkwalk_call: { returnsVoid: true },
       use: { params: ['u32', 's32'], returnsVoid: true },
       rng: { params: [], returnsVoid: true },
+    },
+  },
+  {
+    sym: 'stkwalk_kr',
+    src:
+      'extern u32 gA, gB;\n' +
+      'extern s32 gN;\n' +
+      'void use(u32 x, s32 i);\n' +
+      'int kr();\n' +
+      'void stkwalk_kr(void)\n' +
+      '{\n' +
+      '    u32 a[2];\n' +
+      '    s32 i;\n' +
+      '    a[0] = gA;\n' +
+      '    a[1] = gB;\n' +
+      '    for (i = 0; i < gN; i++)\n' +
+      '        use(a[i], i);\n' +
+      '    kr(1, 2, 3, 4, 5);\n' +
+      '}',
+    features: ['variable-index', 'multi-arg'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'extern u32 gA, gB;\nextern s32 gN;\nvoid use(u32 x, s32 i);\nint kr();\nvoid stkwalk_kr(void);',
+    proto: {
+      stkwalk_kr: { returnsVoid: true },
+      use: { params: ['u32', 's32'], returnsVoid: true },
+      kr: { returns: 'int' },
     },
   },
   {
