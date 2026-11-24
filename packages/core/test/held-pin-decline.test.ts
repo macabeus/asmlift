@@ -2,7 +2,9 @@
 // the one structure refusal that reads how the signedness pin declared a counter, so IDO's counted
 // loop takes its `for` under the `s32` pin and not the `u32` one; the case body's exit flag
 // spells the `u32` reading, so `sw_gotocase2` holds nothing. The fixtures are the benchmark's
-// own `synthetic:sw_gotocase2` and `synthetic:sw_gotocase_inner` objects on ido7.1. Toolchain-free.
+// own `synthetic:sw_gotocase2` object on ido7.1, and `synthetic:sw_gotocase_inner`'s source with its
+// inner `goto shared;` moved into a loop (`for (hi2 = 0; hi2 < 3; hi2++) if (gA[hi2] == i) goto
+// shared;`), compiled the row's way. Toolchain-free.
 import { readFileSync } from 'node:fs';
 import { expect, test } from 'vitest';
 
@@ -36,10 +38,10 @@ test('the unsigned pin builds candidates: the case exit flag spells its loop', (
 }, 60_000);
 
 test('a decline the counter rule did not cause aborts the row, though the rule fired', () => {
-  // the rule fires on this function's counted loop, but the decline is the inner switch's case that
-  // leaves both switches for the loop's exit, which no pin changes: the row aborts at the unsigned
+  // the rule fires on this function's counted loop, but the decline is the inner loop's `goto` out
+  // of both switches for the outer loop's exit, which no pin changes: the row aborts at the unsigned
   // default, as any other default decline does
-  const e = enumerate('sw_gotocase_inner', 'ido71-swgotocaseinner');
+  const e = enumerate('sw_gotocase_inner', 'ido71-swgotocaseinner-loopgoto');
   expect(e.run).toThrow(/a case body leaves its switch for a loop exit past the switch's end/);
   expect(e.threw).toEqual([]);
 }, 60_000);
