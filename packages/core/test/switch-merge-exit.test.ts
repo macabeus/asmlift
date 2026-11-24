@@ -4,9 +4,12 @@
 // reaches the outer switch's merge from inside the inner one, where C binds a `break;` to the inner
 // switch. structure.ts `switchMergeExit` writes `f = 1; break;` there, `f = 0;` ahead of the inner
 // switch and a SWITCH-scoped `if (f != 0) break;` right after it, so the rest of the outer arm is
-// skipped. The fixture is judged against its own IR by the trace oracle (`irAgreement`), as
-// `structure()` returns it and as it ships after `readabilityRewrites`. The flag is asked only once every run without it declined
-// (structure.ts `CaseExitRanking`), and the fixture declines without it.
+// skipped. A merge that is a bare `ret` is `return;` instead, with no flag, from inside a loop nested
+// in the arm as well; an exit from inside such a loop to a merge that runs code still declines,
+// since a test after that loop would leave the loop and not the switch. Each fixture is judged
+// against its own IR by the trace oracle (`irAgreement`), as `structure()` returns it and as it
+// ships after `readabilityRewrites`. Both spellings are asked only once every run without them
+// declined (structure.ts `CaseExitRanking`), and each fixture declines without them.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -135,6 +138,38 @@ const GOTOCASE_INNER = `fn gi {
   ret
 }`;
 
+/** `switch (p) { case 0: for (j = 0; j < 3; j++) { a(j); if (q < j) { fin(j); goto out; } } g(m); break;
+ *  case 1: d(m); } out: ${tail}` — mwcc's sw_xjret_end shape: the merge is the epilogue, reached
+ *  from inside the loop in the arm through a block of its own. */
+const loopInArm = (tail: 'return' | 'k(m); return') =>
+  `fn sr {
+^bb0(%p: s32, %q: s32):
+  %z: s32 = const {value=0}
+  %one: s32 = const {value=1}
+  %lim: s32 = const {value=3}
+  %m: s32 = sub %p, %z
+  switch_br %m, ^bb2(%z), ^bb5(), ^bb7() {cases=[0;1]}
+^bb2(%j: s32):
+  %a: s32 = call %j {target="a"}
+  %hit: u32 = icmp_slt %q, %j
+  cond_br %hit, ^bb6(), ^bb3()
+^bb6():
+  %fin: s32 = call %j {target="fin"}
+  br ^bb7()
+^bb3():
+  %j2: s32 = add %j, %one
+  %c: u32 = icmp_slt %j2, %lim
+  cond_br %c, ^bb2(%j2), ^bb4()
+^bb4():
+  %g: s32 = call %m {target="g"}
+  br ^bb7()
+^bb5():
+  %d: s32 = call %m {target="d"}
+  br ^bb7()
+^bb7():
+${tail === 'return' ? '  ret' : '  %k: s32 = call %m {target="k"}\n  ret'}
+}`;
+
 test("an arm of a nested switch reaches the outer switch's merge through a switch-scoped flag", () => {
   const { src, agreement, shipped } = judged(GOTOCASE_INNER);
   const set = /mark\(1\);\n\s*k\(v\d+\);\n\s*(v\d+) = 1;\n\s*break;/.exec(src);
@@ -149,4 +184,22 @@ test("an arm of a nested switch reaches the outer switch's merge through a switc
   alike(agreement);
   alike(shipped);
   expect(ran(GOTOCASE_INNER, 'out')).toBeGreaterThan(SEEDS.length / 4);
+});
+
+test('a merge that is a bare return is `return;` from a loop nested in the arm, with no flag', () => {
+  const ir = loopInArm('return');
+  const { src, agreement, shipped } = judged(ir);
+  expect(src).toMatch(/fin\(v\d+\);\n\s*return;/);
+  expect(src).not.toMatch(/= 1;\n\s*break;/);
+  alike(agreement);
+  alike(shipped);
+  expect(ran(ir, 'g')).toBeGreaterThan(SEEDS.length / 40);
+  expect(ran(ir, 'fin')).toBeGreaterThan(SEEDS.length / 40);
+});
+
+test('CONTROL: an exit from a loop nested in the arm to a merge that runs code declines', () => {
+  const fn = parse(loopInArm('k(m); return'));
+  verify(fn);
+  recoverTypes(fn);
+  expect(() => structure(fn, {})).toThrow(/from inside a nested loop/);
 });

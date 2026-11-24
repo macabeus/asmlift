@@ -441,7 +441,7 @@ interface JumpRanking {
 }
 
 /** Whether a case body's exit out of its loop past the switch's end is spelled with the exit flag
- *  (`caseExitBreak`), and an exit to an enclosing switch's merge with its flag
+ *  (`caseExitBreak`), and an exit to an enclosing switch's merge with its flag or `return;`
  *  (`switchMergeExit`), and whether a structuring without them met one. Asked only in the runs
  *  `structure` makes after every run without it declined and one met such an exit, so it turns a
  *  decline into a lift and never one lift into another: where the code from the exit on can be
@@ -5067,20 +5067,26 @@ function structureRanked(
   // last one leaves the switch `b` ends (agbcc, IDO and GCC 2.7.2 lay sw_gotocase_inner's inner
   // `goto shared;` out this way). Taken only where no loop was entered since that switch's arm began
   // (each test's `break;` binds to the next switch out) and every switch between has its own flag
-  // scope. Asked only in the reruns made once every run without it declined (`CaseExitRanking`), so
-  // a published lift never moves.
+  // scope. A merge that is a bare `ret` is `return;` instead, from inside a nested loop as well:
+  // mwcc's sw_xjret_end leaves its inner switch and loop for the outer switch's merge, the epilogue.
+  // Both are asked only in the reruns made once every run without them declined
+  // (`CaseExitRanking`), so a published lift never moves.
   const switchMergeExit = (b: Block, i: number): Stmt[] | undefined => {
+    const bareRet = b.params.length === 0 && b.ops.length === 1 && isRet(b) && b.ops[0].operands.length === 0;
     const between = switchFrames.slice(i + 1);
     const flagged =
       between.length > 0 &&
       [switchFrames[i], ...between].every((f) => f.loop === loopCtx && f.flags !== null) &&
       new Set([switchFrames[i], ...between].map((f) => f.flags)).size === between.length + 1;
-    if (!flagged) {
+    if (!bareRet && !flagged) {
       return undefined;
     }
     caseExit.wanted ||= !caseExit.asked;
     if (!caseExit.asked) {
       return undefined;
+    }
+    if (bareRet) {
+      return [{ k: 'return' }];
     }
     const flag = switchMergeFlag(b);
     between.forEach((f) => f.flags!.add(flag));
