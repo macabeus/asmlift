@@ -18053,6 +18053,62 @@ export const SYNTHETIC: SynthSpec[] = [
       'void sw_gotocase_inner(s32 lo, s32 hi);',
     proto: { sw_gotocase_inner: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
   },
+  //      dw_outerlatch_arms (kl2dct sub_080349AC's script loop): a do-while over a script pointer
+  //      whose switch breaks to the code after the loop, and whose cases 8 and 9 leave for the outer
+  //      latch reading the pointer. Those arms are reached from the break's exit only round the
+  //      outer loop and back through the inner header, which binds the pointer afresh, so the break
+  //      rule's exit region stops at the loop (structure.ts `exitRegionOf`). Only agbcc and IDO:
+  //      the other three decline in their frontends first (the GCC 2.7.2 pair's `jr v0` dispatch,
+  //      mwcc's `lis` high half reaching a merge), and IDO declines on its case body reaching
+  //      several sibling cases.
+  {
+    sym: 'dw_outerlatch_arms',
+    src:
+      'extern void g(s32 x);\n' +
+      'extern void h(s32 i, s32 x, s32 y, s32 z);\n' +
+      'struct E { u8 *p; s32 st; s32 a, b, c, d; };\n' +
+      'extern struct E *gE;\n' +
+      'void dw_outerlatch_arms(s32 n, s32 q, s32 r, s32 s)\n' +
+      '{\n' +
+      '    s32 i, cont, a, b, c, d, e;\n' +
+      '    a = q; b = r; c = s; d = n * 3; e = q + r;\n' +
+      '    for (i = 0; i < n; i++) {\n' +
+      '        u8 *p = gE[i].p;\n' +
+      '        cont = 1;\n' +
+      '        do {\n' +
+      '            switch (*p) {\n' +
+      '            case 1: g(a); p += 1; break;\n' +
+      '            case 2: g(b); p += 2; break;\n' +
+      '            case 3: g(p[1] + c); p += 3; break;\n' +
+      '            case 4: if (p[1]) { p += 2; break; } goto out;\n' +
+      '            case 5: g(d); goto out;\n' +
+      '            case 6: goto out;\n' +
+      '            case 8: gE[i].st = p[1]; goto next;\n' +
+      '            case 9: g(p[2]); goto next;\n' +
+      '            case 7: g(e); p += 1; break;\n' +
+      '            default: p += 1; break;\n' +
+      '            }\n' +
+      '        } while (cont);\n' +
+      '    out:\n' +
+      '        if (p != 0) gE[i].p = p;\n' +
+      '        h(i, a + b, c + d, e);\n' +
+      '    next:;\n' +
+      '    }\n' +
+      '}',
+    features: ['branch', 'switch-arms', 'break'],
+    toolchains: ['agbcc', 'ido7.1'],
+    ctx:
+      'extern void g(s32 x);\n' +
+      'extern void h(s32 i, s32 x, s32 y, s32 z);\n' +
+      'struct E { u8 *p; s32 st; s32 a, b, c, d; };\n' +
+      'extern struct E *gE;\n' +
+      'void dw_outerlatch_arms(s32 n, s32 q, s32 r, s32 s);',
+    proto: {
+      dw_outerlatch_arms: { returnsVoid: true },
+      g: { params: 1, returnsVoid: true },
+      h: { params: 4, returnsVoid: true },
+    },
+  },
   // sw_caseexit_goto / sw_caseexit_dwflag (kl2dct sub_0801A798, sub_080349AC): a case body that
   // leaves an inner loop past the code after the switch, for the code after that loop, which runs
   // on to the outer latch, so no copy of it ends in a `return`. The goto source (A798) and a flag
