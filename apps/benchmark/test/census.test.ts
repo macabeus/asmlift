@@ -78,6 +78,7 @@ describe("the properties of the winners' variations rank.ts argues from", () => 
       'synthetic:mixwalk32:agbcc  unsigned/unreduce/for-read',
       // a loop over a local array strength-reduced into a pointer stepped through the frame
       'synthetic:stkwalk_call:mwcc_242_81  unsigned/unreduce',
+      'synthetic:stkwalk_kr:mwcc_242_81  unsigned/unreduce',
       'synthetic:stkwalk_up:mwcc_242_81  unsigned/unreduce',
       // a switch on `p[i]` in a counted loop: the mwcc controls of the stolen-likely-slot rows
       'synthetic:sw_h3:mwcc_242_81  signed/unreduce',
