@@ -445,10 +445,16 @@ interface JumpRanking {
  *  (`switchMergeExit`), and whether a structuring without them met one. Asked only in the runs
  *  `structure` makes after every run without it declined and one met such an exit, so it turns a
  *  decline into a lift and never one lift into another: where the code from the exit on can be
- *  copied into the arm, or a last-resort rung reads the loop, that spelling is published already. */
+ *  copied into the arm, or a last-resort rung reads the loop, that spelling is published already.
+ *  The exits to an enclosing switch's merge are not asked in the join reading's ladder where the
+ *  copies' ladder runs after it (`mergeExits`, `structureWithinBudget`): a function the join reading
+ *  would lift with the flag can be one the copies lift without it, published so already (two of
+ *  case-goto.test.ts's and join-past-returns.test.ts's fixtures). */
 interface CaseExitRanking {
   readonly asked: boolean;
   wanted: boolean;
+  /** whether `switchMergeExit` is asked too, in a run that asks */
+  readonly mergeExits?: boolean;
 }
 
 /** The `while (1)` loops spelled `for (init; cond; inc)` with `continue;` into their latch (THE LOOP
@@ -801,7 +807,7 @@ function structureLadder(
   // far, so where they decline too, theirs is the refusal that stands
   if (sfn === null && caseExit.wanted && hooks.caseExitFlags !== false) {
     refused = undefined;
-    caseExit = { asked: true, wanted: false };
+    caseExit = { asked: true, wanted: false, mergeExits: reading.copies || !reading.asked };
     sfn = jumpRanked();
   }
   if (sfn !== null) {
@@ -5082,7 +5088,7 @@ function structureRanked(
       return undefined;
     }
     caseExit.wanted ||= !caseExit.asked;
-    if (!caseExit.asked) {
+    if (caseExit.mergeExits !== true) {
       return undefined;
     }
     if (bareRet) {
