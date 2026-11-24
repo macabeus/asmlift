@@ -4818,6 +4818,23 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void sretbody_const(unsigned char *src);',
     proto: { sretbody_const: { returnsVoid: true } },
   },
+  // AN EARLIER CALL'S RESULT HANDED ON TO A CALLEE WHOSE BODY READS IT REFUSES (frontend/call-plan.ts,
+  // the trim's `dropsCalleeResult`). `mkbuf`'s result is still in the return register at the call to
+  // `fill`, and `f(); g();` and `g(f())` are the same bytes where that register is the first argument
+  // register (agbcc r0, mwcc r3), so the trim drops it as no argument: `fill()`, a buffer nothing fills.
+  // `fill`'s body reads it, so the lift declines (pokeemerald GenerateBattlePyramidFloorLayout passes
+  // AllocZeroed's buffer to GetPyramidFloorLayoutOffsets so). The two compilers whose return register
+  // is the first argument one.
+  {
+    sym: 'resultbody',
+    src:
+      'extern int gk;\nextern unsigned char *mkbuf(int);\n' +
+      'void fill(unsigned char *p)\n{\n    int i;\n    for (i = 0; i < 4; i++) p[i] = gk + i;\n}\n' +
+      'int resultbody(int a)\n{\n    unsigned char *o = mkbuf(16);\n    fill(o);\n    return o[a];\n}',
+    features: [],
+    toolchains: ['agbcc', 'mwcc_242_81'],
+    ctx: 'extern int gk;\nint resultbody(int a);',
+  },
   // `spillarg` is `spill10` with a genuine outgoing argument under the spills: `five(i, 1, 2, 3,
   // v0)` stages argument 5 at [sp,#0] before every call and agbcc moves the spills above it, to
   // [sp,#4]..[sp,#0x20]. Several reach `bl five` unread, so the declaration (`five` takes one stack

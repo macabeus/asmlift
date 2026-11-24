@@ -416,6 +416,29 @@ describe('the argument words a callee body handed in from outside the input read
       decompile('f', `${rd0}${f}`, t).source,
     );
   });
+  // agbcc -O2's own output for `static void fill(u8 *p) { int i; for (i = 0; i < 4; i++) p[i] = gk + i; }
+  // int f(int a) { u8 *o = AllocZeroed(16); fill(o); return o[a]; }`: AllocZeroed's result is still
+  // in r0 at `bl fill`, which the trim drops as no argument (`f(); g();` and `g(f())` are the same
+  // bytes). fill's body reads r0, so dropping it lifted `fill()` and a buffer nothing fills
+  test('decompile: an earlier call`s result the callee`s body may read refuses, one it reads none of is dropped', () => {
+    const t = TOOLCHAIN_TARGETS.agbcc.description;
+    const fill =
+      '\t.thumb_func\nfill:\n\tpush\t{lr}\n\tadd\tr2, r0, #0\n\tldr\tr0, .L8\n\tldr\tr0, [r0]\n' +
+      '\tadd\tr0, r0, #0x3\n\tadd\tr1, r2, #0x3\n.L6:\n\tstrb\tr0, [r1]\n\tsub\tr0, r0, #0x1\n' +
+      '\tsub\tr1, r1, #0x1\n\tcmp\tr1, r2\n\tbge\t.L6\n\tpop\t{r0}\n\tbx\tr0\n.L8:\n\t.word\tgk\n';
+    const f =
+      '\t.thumb_func\nf:\n\tpush\t{r4, r5, lr}\n\tadd\tr4, r0, #0\n\tmov\tr0, #0x10\n\tbl\tAllocZeroed\n' +
+      '\tadd\tr5, r0, #0\n\tbl\tfill\n\tadd\tr5, r5, r4\n\tldrb\tr0, [r5]\n\tpop\t{r4, r5}\n' +
+      '\tpop\t{r1}\n\tbx\tr1\n';
+    const head = '\t.code\t16\n\t.text\n';
+    expect(() => decompile('f', head + fill + f, t)).toThrow(
+      /'bl fill' .* has no prototype, r0 still holds what an earlier call returned, and fill's own body may read it/,
+    );
+    // with no body, or one that reads no argument register, the result stays the trim's to drop
+    expect(decompile('f', head + f, t).source).toContain('    fill();\n');
+    const rd0 = '\t.thumb_func\nfill:\n\tmov\tr0, #0x1\n\tbx\tlr\n';
+    expect(decompile('f', head + rd0 + f, t).source).toContain('    fill();\n');
+  });
 });
 
 // A CALLEE'S BODY PROVES IT TAKES NO HIDDEN STRUCT-RETURN POINTER where its compiler hands the pointer

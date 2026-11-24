@@ -1421,7 +1421,21 @@ export function callDeclarations(
         site.asksEveryCut,
         // a decided gap puts its words beyond doubt, so neither reading cuts below them
         Math.max(floor, decidedWords),
-      );
+        // AN EARLIER CALL'S RESULT LEFT IN THE RETURN REGISTER, WHICH THE TRIM DROPS AS NO ARGUMENT
+        // (`bl f; bl g` read as `f(); g();`, call-arity.ts `trimClobberedCallArgs`), is refused
+        // where the callee's own body may read that register: `f(); g();` and `g(f())` are the same
+        // bytes, and the shorter reading hands g nothing where it reads its first parameter
+        // (`o = AllocZeroed(16); fill(o); return o[a];` lifted `fill()`, leaving the buffer
+        // unfilled). The bound is an UPPER bound on what the body reads, so this is fail-closed,
+        // not a proof the result is passed; a body that reads no argument register still drops it.
+        () => {
+          if ((bodyWords() ?? 0) > 0) {
+            fail(
+              `cannot lift '${name}': the call ${typeof guess.at === 'number' ? `at 0x${guess.at.toString(16)}` : guess.at} ` +
+                `has no prototype, ${target.returnReg} still holds what an earlier call returned, and ` +
+                `${callee}'s own body may read it — a call passed that result and one passed nothing look the same ` +
+                'here, so the argument count is not decidable',
+            );
     }
     if (p.declaredVoid) {
       voidResults.add(res);

@@ -236,6 +236,11 @@ export interface GuessedCallSite {
   /** which earlier callee's result in the return register is an argument here, not a leftover:
    *  the site's lowering says so (`SsaBuilder.recordGuessedCall` (frontend/ssa.ts)). Absent where none is. */
   passesCalleeResult?: (result: Value) => boolean;
+  /** called where the trim drops an earlier callee's result that the return register still holds
+   *  as argument 0 (`bl f; bl g` read as `f(); g();`), so the lowering can refuse where it knows
+   *  that register may be read (frontend/call-plan.ts: the callee's own body reads it). Absent where
+   *  nothing is asked. */
+  dropsCalleeResult?: () => void;
   /** handed the FRESH argument registers the trim cuts from this site's guess, and the ones it
    *  keeps — the lowering's `CallSite.leftOut` question, asked again where the arity shrinks a
    *  second time. An unfresh cut is the trim's own proof; a fresh one went with a hole below it
@@ -496,6 +501,7 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
     if (setsUpLater(fresh) || !calleeResults.has(callArgs(op)[0]) || passedResult(s) !== undefined) {
       return runOfFresh(new Set([argRegs[0], ...fresh]), 0);
     }
+    s.dropsCalleeResult?.();
     return 0;
   };
   for (const s of sites) {
