@@ -106,6 +106,8 @@ const MWCC_O0P = [
 ];
 // The same set at -O4,p, which the update-form rows (`upd_*`) build at.
 const MWCC_O4P = MWCC_O0P.map((f) => (f === '-O0,p' ? '-O4,p' : f));
+// …and with `-inline off`, for a row whose callee `-inline auto` would fold into the caller.
+const MWCC_O4P_INLINE_OFF = MWCC_O4P.map((f) => (f === 'auto' ? 'off' : f));
 // The float compare rows that branch rather than return the relation, and those of them the source
 // declares void (each a float block below).
 const FCMP_BRANCH_ROWS: ReadonlySet<string> = new Set([
@@ -4824,8 +4826,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // register is the first argument register (agbcc r0, mwcc r3), so the trim drops it as no argument:
   // `fill()`, a buffer nothing fills. `fill`'s body reads it as a parameter, so the call takes that
   // word and lifts `fill(v0)` (pokeemerald GenerateBattlePyramidFloorLayout passes AllocZeroed's
-  // buffer to GetPyramidFloorLayoutOffsets so). agbcc only: mwcc, the other compiler whose return
-  // register is the first argument one, inlines `fill` at its flags.
+  // buffer to GetPyramidFloorLayoutOffsets so). mwcc, the other compiler whose return register is
+  // the first argument one, inlines `fill` at its canonical `-inline auto`, so its rows build at
+  // `-inline off`, where the call stays and its body is read the same way (`fill(v0)`).
   {
     sym: 'resultbody',
     src:
@@ -4835,6 +4838,47 @@ export const SYNTHETIC: SynthSpec[] = [
     features: [],
     toolchains: ['agbcc'],
     ctx: 'extern int gk;\nint resultbody(int a);',
+  },
+  {
+    sym: 'resultbody',
+    src:
+      'extern int gk;\nextern unsigned char *mkbuf(int);\n' +
+      'void fill(unsigned char *p)\n{\n    int i;\n    for (i = 0; i < 4; i++) p[i] = gk + i;\n}\n' +
+      'int resultbody(int a)\n{\n    unsigned char *o = mkbuf(16);\n    fill(o);\n    return o[a];\n}',
+    features: [],
+    toolchains: ['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'],
+    cflags: MWCC_O4P_INLINE_OFF,
+    ctx: 'extern int gk;\nint resultbody(int a);',
+  },
+  // …AND NONE IS HANDED ON WHERE THE BODY READS THE REGISTER ONLY THROUGH A JOIN WITH A VALUE IT
+  // WROTE (frontend/callee-body.ts `readsFirstArgument`): `settle`'s uninitialised `x` sits in the
+  // first argument register (agbcc r0, mwcc r3), read where the loop never ran, the same bytes as a
+  // reassigned parameter, so `mkval(); settle();` lifts as written, where reading it as a
+  // parameter lifted `settle(mkval())`, which the source's `void settle(void)` does not compile.
+  // Both spellings are the same caller bytes, so the score cannot tell them apart; the unit test in
+  // callee-body.test.ts pins the spelling, and this row the lift.
+  {
+    sym: 'resultuninit',
+    src:
+      'extern int gk, gy;\nextern int mkval(void);\n' +
+      'void settle(void)\n{\n    int x;\n    while (gk) { gk--; x = gk; }\n    gy = x + 1;\n}\n' +
+      'void resultuninit(void)\n{\n    mkval();\n    settle();\n}',
+    features: [],
+    toolchains: ['agbcc'],
+    ctx: 'extern int gk, gy;\nvoid resultuninit(void);',
+    proto: { resultuninit: { returnsVoid: true } },
+  },
+  {
+    sym: 'resultuninit',
+    src:
+      'extern int gk, gy;\nextern int mkval(void);\n' +
+      'void settle(void)\n{\n    int x;\n    while (gk) { gk--; x = gk; }\n    gy = x + 1;\n}\n' +
+      'void resultuninit(void)\n{\n    mkval();\n    settle();\n}',
+    features: [],
+    toolchains: ['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'],
+    cflags: MWCC_O4P_INLINE_OFF,
+    ctx: 'extern int gk, gy;\nvoid resultuninit(void);',
+    proto: { resultuninit: { returnsVoid: true } },
   },
   // `spillarg` is `spill10` with a genuine outgoing argument under the spills: `five(i, 1, 2, 3,
   // v0)` stages argument 5 at [sp,#0] before every call and agbcc moves the spills above it, to
