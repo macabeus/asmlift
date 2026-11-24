@@ -5019,7 +5019,8 @@ function measureThumbFrame({
   // says why the base it reports is the lowest word the load can read). Such a read is an event
   // only where its ceiling is `Infinity` — every call reachable after it is stated exactly by a
   // typed parameter list, so a word it clears that one of them takes is missing at that call and
-  // refuses there — and it never bounds the area (`stepped`, frontend/stackargs.ts).
+  // refuses there. It is an `indexed-read` like any other, so it lowers the loaded-word bound to
+  // its base on the same store-read-back proof (frontend/stackargs.ts `loadedWordBound`).
   const steppedReadOf = new Map<Instr, number>();
   for (const [ins, { at, b, i }] of steppedFrameReads(asmBlocks, preds, entryReachable, narrowCallClobbers)) {
     if (clearsBelowFrom(b, i + 1, clearsBelowAtStart) === Infinity) {
