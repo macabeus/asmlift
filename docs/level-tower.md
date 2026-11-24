@@ -850,8 +850,15 @@ phi moved each trip (kmc `addiu s1,sp,16 … addiu s1,s1,4`, mwcc `addi r31,r1,8
 agbcc `mov r5, sp / ldmia r5!, {r0}`), and `u16 *p = buf + n; *p-- = v` starts one at a runtime index.
 Such a value names a different byte each trip, so a load or store through it, at any displacement,
 is an access through a runtime index nothing bounds, which may reach every byte of the frame
-(`steppedPointers`); any other use of it (an escape, a compare) refuses. A phi that holds ONE
-object on every path is no such pointer but that object's address. The one-object read has a
+(`steppedPointers`); any other use of it (an escape, a compare) refuses. On Thumb agbcc captures
+it before the loop, so the outgoing-argument analysis reads a load through it as a read of the frame
+from the capture up only across blocks, by a must-hold, and only with every later call typed
+(thumb.ts `steppedFrameReads`). A capture BELOW the locals is the one object's address moved down
+where the target says nothing C names lives there (`captureBelowLocalsRebases`: O32 and PPC, which
+fold `a[i - 1]`'s constant into the base; PPC also for a pointer stepped from it, mwcc's update-form
+copy), and only where it escapes nowhere and no constant-displacement access through it lands
+beneath the locals. A phi that holds ONE object on every path is no such pointer but that object's
+address. The one-object read has a
 second inhabitant on Thumb, and the frontend tells them apart before the audit: agbcc promotes a
 `u8` or `u16` local to a word, spills it with `str`, and reloads only the narrow part through a copy of sp
 made for that one load (`mov r2, sp / ldrh r2, [r2, #4]`), because Thumb has no sp-relative
