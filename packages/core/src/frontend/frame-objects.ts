@@ -469,7 +469,8 @@ function auditFrame({
   }
   const facts = frameAddressFacts(irBlocks, symbols, target);
   const { laddrs, splitRefusal } = splitAddressingCopies(irBlocks, captures, foldedHere, declaredStructs(irBlocks));
-  const objects = frameObjects(laddrs, owned, fail);
+  const rebasesBelow = target.compilerBehaviors.captureBelowLocalsRebases;
+  const objects = frameObjects(laddrs, owned, fail, rebasesBelow !== undefined);
   const flow = addressFlow(irBlocks, objects, facts);
   const uses = classifyFrameUses({
     irBlocks,
@@ -483,6 +484,19 @@ function auditFrame({
   });
   const windows = escapeWindows(irBlocks, uses, flow, facts, target);
   const model = chooseFrameModel({ oneObject, uses, merges: flow.merges, windows, returnsWithoutHiddenPointer, fail });
+  // A CAPTURE BELOW THE LOCALS (`captureBelowLocalsRebases`) is no object of its own: only the one
+  // object holds it, rebased (`keepAsOneObject`), so the per-object model refuses it — and so does
+  // the audit, wherever the capture may reach a word beneath the locals other than by an index.
+  const below = new Set([...objects.keys()].filter((off) => off < owned.from));
+  for (const off of below) {
+    const why = belowRebaseRefusal(off, owned, uses, flow, rebasesBelow);
+    if (why !== null) {
+      fail(why);
+    }
+    if (oneObject === undefined) {
+      model.shapeRefused(belowLocalArea(off, owned));
+    }
+  }
   if (capturedObjectIsTheWholeFrame) {
     recheckWholeFramePremise({ uses, returnsWithoutHiddenPointer, fail });
   }
@@ -495,6 +509,7 @@ function auditFrame({
       oneObject,
       irBlocks,
       objects,
+      below,
       uses,
       usedSlotOffsets,
       returnsWithoutHiddenPointer,
@@ -1086,7 +1101,7 @@ function splitAddressingCopies(
  *  different offsets are different objects, so width, signedness, escape and the overlap
  *  window are decided per offset — one width shared by every capture in the function would
  *  declare a halfword spill and a word spill as one object. */
-function frameObjects(laddrs: readonly Op[], owned: FrameRange, fail: Refuse): Map<number, Op[]> {
+function frameObjects(laddrs: readonly Op[], owned: FrameRange, fail: Refuse, rebasesBelow = false): Map<number, Op[]> {
   const objects = new Map<number, Op[]>();
   for (const op of laddrs) {
     const off = op.attrs.off as number;
@@ -1098,14 +1113,13 @@ function frameObjects(laddrs: readonly Op[], owned: FrameRange, fail: Refuse): M
   // local area — and no other rule of the audit is about that gap. The TOP itself is also C's
   // one-past-the-end pointer, `g(buf, buf + 8)` over an 8-byte array, and the refusal names both
   // readings. BELOW IT is the outgoing block a call's stack words are staged in, and on O32 also
-  // the saves IDO keeps under its locals: an address there is no local's either. Every object's
-  // extent is held to the area again below; this says why, for the frontend that supplied it.
+  // the saves IDO keeps under its locals: an address there is no local's either — and where the
+  // target says so, pointer arithmetic on the object above it, which `belowRebaseRefusal` judges
+  // once the uses are known. Every object's extent is held to the area again below; this says why,
+  // for the frontend that supplied it.
   for (const off of objects.keys()) {
-    if (off < owned.from) {
-      fail(
-        `the captured address at [sp,#${off}) is below the reserved local area, which starts at [sp,#${owned.from}) — ` +
-          'an outgoing stack argument word or a saved register, whose address is not modelled',
-      );
+    if (off < owned.from && !rebasesBelow) {
+      fail(belowLocalArea(off, owned));
     }
     if (off === owned.to) {
       fail(
@@ -1121,6 +1135,43 @@ function frameObjects(laddrs: readonly Op[], owned: FrameRange, fail: Refuse): M
     }
   }
   return objects;
+}
+
+function belowLocalArea(off: number, owned: FrameRange): string {
+  return (
+    `the captured address at [sp,#${off}) is below the reserved local area, which starts at [sp,#${owned.from}) — ` +
+    'an outgoing stack argument word or a saved register, whose address is not modelled'
+  );
+}
+
+/** Why a capture at `off`, below the reserved local area, is not pointer arithmetic on the object
+ *  above it (`captureBelowLocalsRebases`), or null where it is. The words beneath the locals are no
+ *  C name's, so the capture is that object's address moved down only where nothing it reaches
+ *  could be one of those words in the C: it escapes nowhere (a callee, memory, a by-value read or a
+ *  return temp would be handed the outgoing words), no access at a constant displacement lands
+ *  beneath the locals (a copy into the outgoing area is exactly that), and no pointer is stepped
+ *  from it (an O32 copy of a by-value struct into the outgoing area may be).
+ *  What is left is an access at a runtime index, whose reach and width the one object's rules
+ *  judge like any other. */
+function belowRebaseRefusal(
+  off: number,
+  owned: FrameRange,
+  uses: FrameUses,
+  flow: AddressFlow,
+  rebases: 'indexed' | undefined,
+): string | null {
+  const handedOver =
+    uses.escaped.has(off) ||
+    uses.sourceStores.has(off) ||
+    uses.published.has(off) ||
+    uses.passedToCallee.has(off) ||
+    uses.calleeReads.has(off) ||
+    uses.filledFrom.has(off) ||
+    uses.byValueReads.has(off) ||
+    uses.returnTemps.has(off);
+  const fixedBeneath = uses.fixed.some((f) => f.at < owned.from);
+  const stepped = [...flow.stepped.values()].includes(off);
+  return rebases === undefined || handedOver || fixedBeneath || stepped ? belowLocalArea(off, owned) : null;
 }
 
 /** Where each frame address may flow: `taint`, the object a value may hold the address of on SOME
@@ -2761,6 +2812,7 @@ function keepAsOneObject({
   oneObject: { from, to },
   irBlocks,
   objects,
+  below,
   uses,
   usedSlotOffsets,
   returnsWithoutHiddenPointer,
@@ -2771,6 +2823,9 @@ function keepAsOneObject({
   oneObject: FrameRange;
   irBlocks: Block[];
   objects: ReadonlyMap<number, readonly Op[]>;
+  /** the captures beneath the reserved local area `belowRebaseRefusal` let through: rebased onto
+   *  the lowest part, as the object's address moved down */
+  below: ReadonlySet<number>;
   uses: FrameUses;
   usedSlotOffsets: ReadonlySet<number>;
   returnsWithoutHiddenPointer: (callee: string) => boolean;
@@ -2780,7 +2835,7 @@ function keepAsOneObject({
 }): void {
   const kept = `the bytes [sp,#${from}) to [sp,#${to}) kept as one object`;
   for (const off of objects.keys()) {
-    if (off < from || off >= to) {
+    if ((off < from && !below.has(off)) || off >= to) {
       fail(`the object at [sp,#${off}) lies outside ${kept}`);
     }
   }
@@ -2884,8 +2939,10 @@ function keepAsOneObject({
   // taken arrays in a known order against their declarations (`addressTakenArrayOrder`): the
   // parts are declared in that order, or the recompile swaps their addresses. And at a known
   // alignment (`addressTakenArrayAlignment`), which says where a part may start.
+  // A capture rebased from beneath the locals (`below`) addresses the object it is moved down from
+  // by a runtime index alone, which may reach any part, so there is one part.
   const parts =
-    twoWidths === undefined && arrayOrder !== undefined && arrayAlignment !== undefined
+    twoWidths === undefined && below.size === 0 && arrayOrder !== undefined && arrayAlignment !== undefined
       ? provenParts({ from, to }, objects, uses, arrayAlignment)
       : [{ from, to }];
   // …stamped `part` where there are several: storage a copy proved one object of the source's, so
@@ -2898,7 +2955,7 @@ function keepAsOneObject({
       attrs: { off: lo, width: 1, signed: false, count: hi - lo, ...(parts.length > 1 ? { part: true } : {}) },
     }),
   );
-  const partOf = (at: number) => parts.findIndex((p) => at >= p.from && at < p.to);
+  const partOf = (at: number) => (at < from ? 0 : parts.findIndex((p) => at >= p.from && at < p.to));
   const object = laddrs[0];
   const base = object.results[0];
   const memberAt = new Map<Value, number>();

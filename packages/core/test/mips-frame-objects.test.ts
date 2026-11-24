@@ -212,6 +212,88 @@ describe('a captured local lifts as one object in the local area', () => {
   });
 });
 
+// `void f(s32 i){ u32 a[2]; a[0] = gA; a[1] = gB; five(1, 2, 3, a[i - 1], gC); }` at ido7.1 -O2
+// (bench row stkidx_five): the `- 1` is folded into the base, so the read is `lw a3,28(a3)` off
+// `addu a3,sp,t9`, beneath `a` at 32, at the very word `ra` is saved in. Nothing the C names lives
+// there, so the address is `a`'s moved down (`captureBelowLocalsRebases`).
+const FIVE_IDO = [
+  '0:\taddiu\tsp,sp,-40',
+  '4:\tsw\ta0,40(sp)',
+  '8:\tlw\tt8,40(sp)',
+  'c:\tlui\tt6,0x0',
+  '10:\tlui\tt7,0x0',
+  '14:\tlw\tt6,0(t6)',
+  '18:\tlw\tt7,0(t7)',
+  '1c:\tlui\tt0,0x0',
+  '20:\tsll\tt9,t8,0x2',
+  '24:\tlw\tt0,0(t0)',
+  '28:\tsw\tra,28(sp)',
+  '2c:\taddu\ta3,sp,t9',
+  '30:\tsw\tt6,32(sp)',
+  '34:\tsw\tt7,36(sp)',
+  '38:\tlw\ta3,28(a3)',
+  '3c:\tli\ta0,1',
+  '40:\tli\ta1,2',
+  '44:\tli\ta2,3',
+  '48:\tjal\t0 <f>',
+  '4c:\tsw\tt0,16(sp)',
+  '50:\tlw\tra,28(sp)',
+  '54:\taddiu\tsp,sp,40',
+  '58:\tjr\tra',
+  '5c:\tnop',
+];
+const FIVE_RELOCS: [number, string, string][] = [
+  [0xc, 'R_MIPS_HI16', 'gA'],
+  [0x14, 'R_MIPS_LO16', 'gA'],
+  [0x10, 'R_MIPS_HI16', 'gB'],
+  [0x18, 'R_MIPS_LO16', 'gB'],
+  [0x1c, 'R_MIPS_HI16', 'gC'],
+  [0x24, 'R_MIPS_LO16', 'gC'],
+  [0x48, 'R_MIPS_26', 'five'],
+];
+const FIVE_PROTOS: Prototypes = {
+  f: { params: ['s32'], returnsVoid: true },
+  five: { params: ['s32', 's32', 's32', 's32', 's32'], returnsVoid: true },
+  k: { params: ['void *'], returnsVoid: true },
+};
+
+describe('a capture below the local area is the object above it, moved down', () => {
+  test('ido7.1 `a[i - 1]`: the base at the saved `ra` word reads `a` through the index', () => {
+    const out = src(FIVE_IDO, FIVE_RELOCS, MIPS_IDO, FIVE_PROTOS);
+    expect(out).toContain('u8 sp32[8];');
+    expect(out).toContain('five(1, 2, 3, ((s32 *)((u32)sp32 + -4))[a0], v1);');
+  });
+
+  // Each of these could put a word beneath the locals in the C's hands, so the capture refuses as
+  // before: handed to a callee, read at a constant displacement there, or stepped through.
+  test('…only where it escapes nowhere, reads nothing beneath at a constant, and steps nowhere', () => {
+    const below = /the captured address at \[sp,#28\) is below the reserved local area, which starts at \[sp,#32\)/;
+    const edit = (...pairs: [string, string][]) => FIVE_IDO.map((l) => pairs.find(([at]) => at === l)?.[1] ?? l);
+    // handed to a callee
+    const escaped = [
+      '0:\taddiu\tsp,sp,-40',
+      '4:\tsw\tra,28(sp)',
+      '8:\tli\tt6,1',
+      'c:\tsw\tt6,32(sp)',
+      '10:\tjal\t0 <f>',
+      '14:\taddiu\ta0,sp,28',
+      '18:\tlw\tra,28(sp)',
+      '1c:\tjr\tra',
+      '20:\taddiu\tsp,sp,40',
+    ];
+    expect(lift(escaped, [[0x10, 'R_MIPS_26', 'k']], MIPS_IDO, FIVE_PROTOS)).toThrow(below);
+    // read at a constant displacement, the `ra` word itself
+    const fixed = edit(['2c:\taddu\ta3,sp,t9', '2c:\taddiu\ta3,sp,28'], ['38:\tlw\ta3,28(a3)', '38:\tlw\ta3,0(a3)']);
+    expect(lift(fixed, FIVE_RELOCS, MIPS_IDO, FIVE_PROTOS)).toThrow(below);
+    // without the target's word for it, the old refusal
+    const NO_REBASE = {
+      ...MIPS_IDO,
+      compilerBehaviors: { ...MIPS_IDO.compilerBehaviors, captureBelowLocalsRebases: undefined },
+    };
+    expect(lift(FIVE_IDO, FIVE_RELOCS, NO_REBASE, FIVE_PROTOS)).toThrow(below);
+  });
+});
+
 describe('a frame word that is not a local refuses', () => {
   test('an address below the local area is an outgoing word or a save', () => {
     // `h5`'s fifth word is staged at 16, so the area starts at 24; an address taken at 16 is not a local's

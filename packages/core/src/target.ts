@@ -997,6 +997,23 @@ export interface FrameLayoutBehaviors {
   // declines. It is no fact of the ISA, so a second compiler of the same ISA states it rather than
   // inheriting it from `escapedFrameAddressNamesALocal`.
   stagedStackWordReachesOnlyItsCall?: boolean;
+  // A FRAME ADDRESS FORMED BELOW THE LOCALS IS POINTER ARITHMETIC ON THE OBJECT ABOVE IT. A
+  // compiler folds the constant of `a[i - 1]`, `(b - 3)[i]` or a copy's first `stwu` displacement
+  // into the base, so the address it forms lies beneath the array, in words no C name owns: the
+  // O32 outgoing area (the a0..a3 home and the stack words) and IDO's saved `ra` beneath its
+  // locals (ido7.1 bases `a[i - 1]`, `a` at 32, at the `sw ra,28(sp)` word), PPC's outgoing
+  // parameter words and the callee's LR-save word at 4(r1) — and below sp itself (mwcc bases
+  // `(b - 3)[i]` at -4). The frame-object audit then keeps the locals as one object and rebases such
+  // a capture onto it as `(u8 *)obj - k` (frontend/frame-objects.ts `belowRebaseRefusal`), where it
+  // escapes nowhere, every constant-displacement access through it lands inside the object, and no
+  // pointer is stepped from it: what goes through it is a runtime index, a load or store at the
+  // base plus a register, whose reach and width the audit judges per byte. O32 passes a struct by
+  // value in a0..a3 and the stack words, and a copy of one into the outgoing area through a stepped
+  // pointer is a write no object owns.
+  // Absent (Thumb) => such a capture refuses: agbcc adds an array's offset after the index, so it
+  // forms no such base (`corpus/agbcc-indexed.s`), and a pointer the source forms below its array
+  // is at a word an outgoing argument may own (`stagedStackWordReachesOnlyItsCall`).
+  captureBelowLocalsRebases?: 'indexed';
   // WHERE AN O32 FUNCTION KEEPS ITS LOCALS in the one frame `addiu sp,sp,-N` reserves — the area
   // the MIPS frontend hands the frame-object audit as `ownedLocals`/`declaredLocals`. Below it
   // lies the OUTGOING area, the 16-byte home of a0..a3 every calling function reserves and then
@@ -1978,6 +1995,8 @@ export const MIPS_IDO: TargetDescription = {
     // MEASURED, the probes at the field: past the `addiu` reach every member access gets its own
     // `lui`/`addu`, and a held pointer shares one.
     farMemberBasePerAccess: { past: 32767 },
+    // the O32 ABI's, the field says why (stkidx_five, stkidx_m2, stkidx_bm3)
+    captureBelowLocalsRebases: 'indexed',
   },
 };
 
@@ -2146,6 +2165,8 @@ export const MIPS_GCC: TargetDescription = {
     // MEASURED on BOTH toolchains this description serves: the probes at the fields.
     forwardsStructReturnDestination: false,
     discardedReadMayFillArgRegister: true,
+    // the O32 ABI's, the field says why (stkidx_five, stkidx_m2, stkidx_bm3)
+    captureBelowLocalsRebases: 'indexed',
   },
 };
 
@@ -2200,6 +2221,8 @@ export const PPC_MWCC: TargetDescription = {
   // defaults; coalesceLoopInit false until a CW loop fixture says otherwise — the second of the
   // two compiler-wide guesses standing in for the per-function observation named at MIPS_GCC.
   compilerBehaviors: {
+    // the PPC ABI's, the field says why (stkidx_five, stkidx_m2, stkidx_bm3)
+    captureBelowLocalsRebases: 'indexed',
     plainCharSigned: true,
     contractsFloatProducts: true,
     // a store in a loop keeps its plain poll read in it (the field; poll probes on all three builds)
