@@ -34,7 +34,7 @@ import type { ContextGlobals } from '../proto-context';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import { ARM_REGISTER_ALIASES, type TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
-import { type CallDeclarations, type CallLowering, callDeclarations } from './call-plan';
+import { type CallDeclarations, type CallLowering, argRegisterBound, callDeclarations } from './call-plan';
 import { type CalleeStackWords, asksCalleeBody } from './callee-body';
 import { CONTROL_BYTE, asciiTrim, isNonAscii } from './control-byte';
 import { unreadPairHalf } from './dead-reads';
@@ -5622,9 +5622,10 @@ function frameAddressReceivers(
   if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
     const targetReg = calleeRegister(ins, target);
     const declared = targetReg === null ? calls.declaredCall(ins.ops[0] ?? '?') : null;
-    // …and through argument register rK, r0..r(K-1) alone: the lowering reads no more
-    // (`THUMB_CALL_LOWERING.argRegisterBoundsArity`), and agbcc passes no more (`_call_via_rK`)
-    const through = typeof targetReg === 'string' ? target.argRegs.indexOf(targetReg) : -1;
+    // …and through argument register rK, r0..r(K-1) alone: the lowering reads no more, from the
+    // same answer (`argRegisterBound` of `THUMB_CALL_LOWERING`), and agbcc passes no more
+    // (`_call_via_rK`)
+    const through = typeof targetReg === 'string' ? argRegisterBound(THUMB_CALL_LOWERING, target, targetReg) : -1;
     const words =
       declared?.widths.reduce((n, w) => n + Math.ceil(w / 32), 0) ?? (through < 0 ? target.argRegs.length : through);
     return target.argRegs.slice(0, words).filter((r) => r !== targetReg);

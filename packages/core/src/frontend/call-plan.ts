@@ -158,7 +158,8 @@ export interface CallDeclarations {
   /** what any call leaves holding nothing this function can name (`clobberedByCall`) */
   readonly callClobbers: readonly string[];
   /** whether a declaration rules out a struct returned through a hidden pointer at argument 0
-   *  (`returnsWithoutHiddenPointer`, aggregate.ts) */
+   *  (`returnsWithoutHiddenPointer`, aggregate.ts), or, where none declares the callee's return, its
+   *  own compiled body does (`CalleeReturnsNoHiddenPointer`, frontend/callee-body.ts) */
   returnsWithoutHiddenPointer(callee: string): boolean;
   /** the callee's declared argument widths, for a frontend that places them before it lowers the
    *  call; null where no declaration sizes them */
@@ -261,10 +262,11 @@ export interface CallSite {
      *  frontend's frame model already refuses every word such a guess could leave out */
     refuse?(argc: number): void;
   };
-  /** handed the argument registers an UNDECLARED arity leaves out although a value reaches them —
-   *  past a guessed count, or past the bound of a call through an argument register — and the ones
-   *  it passes. The call drops what the left-out ones hold, so a frontend that knows one to be an
-   *  argument all the same refuses here. */
+  /** handed the argument registers a GUESSED arity leaves out although a value reaches them — past
+   *  the guessed count — and the ones it passes. The call drops what the left-out ones hold, so a
+   *  frontend that knows one to be an argument all the same refuses here. Not asked of a call
+   *  through an argument register where the lowering states that register bounds the arity
+   *  (`CallLowering.argRegisterBoundsArity`): no register at or past it is an argument. */
   readonly leftOut?: (regs: readonly string[], passed: readonly string[]) => void;
   /** whether the frontend withholds the shorter `/setup-args` reading from THIS CALL whatever it
    *  cuts; the frontend says why where it sets it. A thunk: it is asked once every block is lowered. */
@@ -282,6 +284,14 @@ export interface IndirectCallee {
   readonly address: Value;
   /** the register the address is in */
   readonly reg: string;
+}
+
+/** How many argument words a call through register `reg` passes where its lowering states that
+ *  register bounds the arity (`CallLowering.argRegisterBoundsArity`): its index among the argument
+ *  registers. -1 where the lowering states no bound or `reg` is no argument register. The lowering
+ *  (`CallDeclarations.lower`) and a frontend's own escape model read this one answer. */
+export function argRegisterBound(lowering: CallLowering, target: TargetDescription, reg: string): number {
+  return lowering.argRegisterBoundsArity ? target.argRegs.indexOf(reg) : -1;
 }
 
 /** How a frontend builds a 64-bit value out of two words and splits one. */
@@ -950,8 +960,7 @@ export function callDeclarations(
     // (`void f(int x, void (*g)(void)) { g(); }` calls through r1, the bytes `g(x)` compiles to), so
     // the registers in between read as arguments the source never passed. Only the pointer's
     // declared type decides the arity, and nothing reads one.
-    const bound =
-      indirect === undefined || !lowering.argRegisterBoundsArity ? -1 : target.argRegs.indexOf(indirect.reg);
+    const bound = indirect === undefined ? -1 : argRegisterBound(lowering, target, indirect.reg);
     const p: CallPlan =
       indirect === undefined
         ? plan(callee!)
@@ -1436,6 +1445,9 @@ export function callDeclarations(
                 `${callee}'s own body may read it — a call passed that result and one passed nothing look the same ` +
                 'here, so the argument count is not decidable',
             );
+          }
+        },
+      );
     }
     if (p.declaredVoid) {
       voidResults.add(res);
