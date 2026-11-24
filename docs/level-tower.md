@@ -1013,6 +1013,11 @@ x + 1; }` adds to the entry r0) in the same bytes as a reassigned parameter, so 
 the trim's to drop, as with no body. A value the body computes from the incoming one and literals
 alone is no such write: a loop-carried parameter reaches its header merged with its own step
 (`*p++ = 7`, `a++`), which still reads it, so `fill(o)` with a walking `fill` lifts as written.
+A literal is a constant or a value computed from constants alone: agbcc builds `a += 300` with
+`mov r2, #0x96; lsl r2, r2, #0x1` hoisted above the loop. The cost is the mirror of the reassigned
+parameter: an uninitialised local left in the register and stepped by a literal alone (agbcc's
+`void u(void) { unsigned char x; while (gk) { gk--; x++; } gy = x; }`) has the bytes of
+`void u(int x)` stepping it, so it reads as a parameter and `h(); u();` lifts as `u(h())`.
 The bound counts the body's entry parameters, so it is none where that count is not one per argument
 word: a floating-point parameter (o32's `$f12` double covers a0 and a1), or a struct return handed
 back through a hidden pointer. Nor is a lift holding an `opaque` op any bound: which registers an

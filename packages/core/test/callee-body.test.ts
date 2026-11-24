@@ -478,6 +478,37 @@ describe('the argument words a callee body handed in from outside the input read
       '\t.thumb_func\nfill:\n\tmov\tr2, #0x7\n\tmov\tr1, #0xf\n.L6:\n\tstrb\tr2, [r0]\n' +
       '\tadd\tr0, r0, #0x1\n\tsub\tr1, r1, #0x1\n\tcmp\tr1, #0\n\tbge\t.L6\n\tbx\tlr\n';
     expect(decompile('f', head + walk + f, t).source).toContain('    fill(v0);\n');
+    // …and so is a step by a constant agbcc builds from literals alone: `p += 1000` past imm8 is
+    // `mov r2, #0xfa; lsl r2, r2, #0x2`, hoisted above the loop (agbcc -O2, `void fill(u8 *p) {
+    // while (gk) { gk--; *p = 7; p += 1000; } }`)
+    const far =
+      '\t.thumb_func\nfill:\n\tpush\t{r4, lr}\n\tldr\tr2, .L8\n\tldr\tr1, [r2]\n\tcmp\tr1, #0\n' +
+      '\tbeq\t.L4\n\tadd\tr4, r2, #0\n\tmov\tr3, #0x7\n\tmov\tr2, #0xfa\n\tlsl\tr2, r2, #0x2\n' +
+      '.L5:\n\tsub\tr1, r1, #0x1\n\tstrb\tr3, [r0]\n\tadd\tr0, r0, r2\n\tcmp\tr1, #0\n\tbne\t.L5\n' +
+      '\tstr\tr1, [r4]\n.L4:\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.L8:\n\t.word\tgk\n';
+    expect(decompile('f', head + far + f, t).source).toContain('    fill(v0);\n');
+  });
+  test('decompile: a parameter stepped by a shifted immediate is read, and so is an uninitialised local stepped alike', () => {
+    const t = TOOLCHAIN_TARGETS.agbcc.description;
+    const head = '\t.code\t16\n\t.text\n';
+    const c = '\t.thumb_func\nc:\n\tpush\t{lr}\n\tbl\th\n\tbl\tu\n\tpop\t{r0}\n\tbx\tr0\n';
+    // agbcc -O2's `void u(int a) { while (gk) { gk--; a += 300; } gy = a; }`: the step is
+    // `mov r2, #0x96; lsl r2, r2, #0x1`, computed from literals alone, so `u(h())` passes the result
+    const step =
+      '\t.thumb_func\nu:\n\tpush\t{r4, lr}\n\tldr\tr2, .L8\n\tldr\tr1, [r2]\n\tldr\tr4, .L8+0x4\n' +
+      '\tcmp\tr1, #0\n\tbeq\t.L4\n\tadd\tr3, r2, #0\n\tmov\tr2, #0x96\n\tlsl\tr2, r2, #0x1\n' +
+      '.L5:\n\tsub\tr1, r1, #0x1\n\tadd\tr0, r0, r2\n\tcmp\tr1, #0\n\tbne\t.L5\n\tstr\tr1, [r3]\n' +
+      '.L4:\n\tstr\tr0, [r4]\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.L8:\n\t.word\tgk\n\t.word\tgy\n';
+    expect(decompile('c', head + step + c, t).source).toContain('    u(h());\n');
+    // KNOWN COST: agbcc -O2's `void u(void) { unsigned char x; while (gk) { gk--; x++; } gy = x; }`
+    // has the bytes of `void u(int x)` stepping `x = (u8)(x + 1)`, so it reads as a parameter and the
+    // source's `h(); u();` lifts as `u(h())`, the mirror of a reassigned parameter read as none
+    const uninit =
+      '\t.thumb_func\nu:\n\tldr\tr2, .L8\n\tldr\tr1, [r2]\n\tldr\tr3, .L8+0x4\n\tcmp\tr1, #0\n' +
+      '\tbeq\t.L4\n.L5:\n\tsub\tr1, r1, #0x1\n\tadd\tr0, r0, #0x1\n\tlsl\tr0, r0, #0x18\n' +
+      '\tlsr\tr0, r0, #0x18\n\tcmp\tr1, #0\n\tbne\t.L5\n\tstr\tr1, [r2]\n.L4:\n\tstr\tr0, [r3]\n' +
+      '\tbx\tlr\n.L8:\n\t.word\tgk\n\t.word\tgy\n';
+    expect(decompile('c', head + uninit + c, t).source).toContain('    u(h());\n');
   });
 });
 

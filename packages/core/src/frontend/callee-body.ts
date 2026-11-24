@@ -84,6 +84,7 @@ import {
   calleeValue,
   successorsOf,
 } from '../ir/core';
+import { OPCODES } from '../ir/opcodes';
 import {
   type FnProto,
   type Prototypes,
@@ -93,7 +94,6 @@ import {
   declaresParams,
   declaresVoidReturn,
 } from '../proto';
-import { OPCODES } from '../ir/opcodes';
 import { helperPrototypes } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 import { armArgumentWords, scansArgumentsOf } from './arm-body';
@@ -417,8 +417,9 @@ function returnsUntouched(fn: Fn): boolean {
  *  it reads, where the register bound (`CalleeBodyBound`) is an upper one. An op reads it, directly
  *  or through a join no value the body wrote also flows into (one that does is an uninitialised
  *  local's bytes as much as a reassigned parameter's, and reads as neither; a value computed from
- *  the incoming one and literals alone is no such write, so a loop-carried `p++` still reads
- *  through its header), other than a return,
+ *  the incoming one and literals alone, a literal being a constant or a value computed from
+ *  constants alone, is no such write, so a loop-carried `p++` or `a += 300` still reads through
+ *  its header), other than a return,
  *  and other than as an argument of a call the lift forced to every register, or of one through a
  *  register that bounds it (`ARGS_BOUND_BY_ADDRESS`) whose address arrives in a block parameter:
  *  either is handed the register whatever the source passed, and a return hands r0 back whether or
@@ -432,7 +433,11 @@ function returnsUntouched(fn: Fn): boolean {
  *  drop an earlier call's result left in that register (frontend/call-plan.ts), which the call is
  *  then passed: it takes at least that word, and nothing else wrote it.
  *  KNOWN GAP: a body that only forwards the register to an undeclared callee reads nothing here, so
- *  the result is dropped as with no body at all. */
+ *  the result is dropped as with no body at all.
+ *  KNOWN COST: an uninitialised local in that register stepped by a literal alone has the bytes of a
+ *  stepped parameter (agbcc -O2's `void u(void) { unsigned char x; while (gk) { gk--; x++; } gy =
+ *  x; }` is `void u(int x)` stepping `x = (u8)(x + 1)`), so it reads as one and `h(); u();` lifts as
+ *  `u(h())`: the mirror of the reassigned parameter read as none. */
 export type CalleeReadsFirstArgument = (callee: string) => boolean;
 
 function readsFirstArgument(fn: Fn, forced: ReadonlySet<string>): boolean {
@@ -459,6 +464,17 @@ function readsFirstArgument(fn: Fn, forced: ReadonlySet<string>): boolean {
         o.results.forEach((r) => literals.add(r));
       } else if (o.results.length === 1 && o.operands.length > 0 && sig?.effects !== true && sig?.reads !== true) {
         steps.push(o);
+      }
+    }
+  }
+  // a step computed from literals alone is one too: agbcc builds a constant past imm8 as
+  // `mov r2, #0x96; lsl r2, r2, #0x1` (`a += 300`), hoisted above the loop
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const o of steps) {
+      if (!literals.has(o.results[0]) && o.operands.every((v) => literals.has(v))) {
+        literals.add(o.results[0]);
+        grew = true;
       }
     }
   }

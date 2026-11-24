@@ -4928,6 +4928,31 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'extern int gk, gy;\nvoid resultcount(void);',
     proto: { resultcount: { returnsVoid: true } },
   },
+  // …and so is one stepped by a constant built from literals alone: agbcc makes `a += 300` past
+  // imm8 as `mov r2, #0x96; lsl r2, r2, #0x1` above the loop, which lifted `mkval(); cnt();`.
+  {
+    sym: 'resultstep',
+    src:
+      'extern int gk, gy;\nextern int mkval(void);\n' +
+      'void cnt(int a)\n{\n    while (gk) { gk--; a += 300; }\n    gy = a;\n}\n' +
+      'void resultstep(void)\n{\n    cnt(mkval());\n}',
+    features: [],
+    toolchains: ['agbcc'],
+    ctx: 'extern int gk, gy;\nvoid resultstep(void);',
+    proto: { resultstep: { returnsVoid: true } },
+  },
+  {
+    sym: 'resultstep',
+    src:
+      'extern int gk, gy;\nextern int mkval(void);\n' +
+      'void cnt(int a)\n{\n    while (gk) { gk--; a += 300; }\n    gy = a;\n}\n' +
+      'void resultstep(void)\n{\n    cnt(mkval());\n}',
+    features: [],
+    toolchains: ['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'],
+    cflags: MWCC_O4P_INLINE_OFF,
+    ctx: 'extern int gk, gy;\nvoid resultstep(void);',
+    proto: { resultstep: { returnsVoid: true } },
+  },
   // `spillarg` is `spill10` with a genuine outgoing argument under the spills: `five(i, 1, 2, 3,
   // v0)` stages argument 5 at [sp,#0] before every call and agbcc moves the spills above it, to
   // [sp,#4]..[sp,#0x20]. Several reach `bl five` unread, so the declaration (`five` takes one stack
