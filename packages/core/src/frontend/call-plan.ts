@@ -65,7 +65,12 @@ import { type ContextGlobals, structNamed } from '../proto-context';
 import { floatSidesOf, helperPrototypes, isFloatHelper, isWideHelper, lookupHelper } from '../runtime-helpers';
 import { type SymbolMap, symbolsByName } from '../symbols';
 import { type TargetDescription, argRegisterHoles } from '../target';
-import { type CalleeBodyBound, type CalleeReturnsNoHiddenPointer, asksCalleeBody } from './callee-body';
+import {
+  type CalleeBodyBound,
+  type CalleeReadsFirstArgument,
+  type CalleeReturnsNoHiddenPointer,
+  asksCalleeBody,
+} from './callee-body';
 import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 import { type OwnDeclaration, ownDeclarationOf } from './frontend';
 import type { HighHalves } from './high-half';
@@ -321,6 +326,9 @@ export function callDeclarations(
   /** whether a callee's own body proves it returns no struct through a hidden pointer
    *  (frontend/callee-body.ts) — asked where no declaration rules one out */
   calleeReturnsNoHiddenPointer?: CalleeReturnsNoHiddenPointer,
+  /** whether a callee's own body reads its first argument register's incoming value
+   *  (frontend/callee-body.ts) — asked where the trim would drop an earlier call's result there */
+  calleeReadsFirstArgument?: CalleeReadsFirstArgument,
 ): CallDeclarations {
   // What a call leaves holding nothing this function can name — checked against `argRegs` there.
   const callClobbers = clobberedByCall(target);
@@ -1432,17 +1440,19 @@ export function callDeclarations(
         Math.max(floor, decidedWords),
         // AN EARLIER CALL'S RESULT LEFT IN THE RETURN REGISTER, WHICH THE TRIM DROPS AS NO ARGUMENT
         // (`bl f; bl g` read as `f(); g();`, call-arity.ts `trimClobberedCallArgs`), is refused
-        // where the callee's own body may read that register: `f(); g();` and `g(f())` are the same
+        // where the callee's own body reads that register: `f(); g();` and `g(f())` are the same
         // bytes, and the shorter reading hands g nothing where it reads its first parameter
         // (`o = AllocZeroed(16); fill(o); return o[a];` lifted `fill()`, leaving the buffer
-        // unfilled). The bound is an UPPER bound on what the body reads, so this is fail-closed,
-        // not a proof the result is passed; a body that reads no argument register still drops it.
+        // unfilled). Asked of a LOWER bound (`CalleeReadsFirstArgument`): a read other than a
+        // return or a call the body's lift forced. The register bound is an upper one, and asked
+        // instead it declined every `f(); g();` whose g makes an undeclared call or returns its r0
+        // untouched (pokeemerald: ~300 functions such as `SyncBgVisibilityAndMode`'s callers).
         () => {
-          if ((bodyWords() ?? 0) > 0) {
+          if (unstated && calleeReadsFirstArgument?.(callee!) === true) {
             fail(
               `cannot lift '${name}': the call ${typeof guess.at === 'number' ? `at 0x${guess.at.toString(16)}` : guess.at} ` +
                 `has no prototype, ${target.returnReg} still holds what an earlier call returned, and ` +
-                `${callee}'s own body may read it — a call passed that result and one passed nothing look the same ` +
+                `${callee}'s own body reads it — a call passed that result and one passed nothing look the same ` +
                 'here, so the argument count is not decidable',
             );
           }

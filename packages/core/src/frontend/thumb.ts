@@ -3499,6 +3499,7 @@ function liftOnce(
     | 'calleeBodyBound'
     | 'calleeStackWords'
     | 'calleeReturnsNoHiddenPointer'
+    | 'calleeReadsFirstArgument'
     | 'stackSized'
     | 'entryReadCalls'
     | 'asmIncludes'
@@ -6779,6 +6780,7 @@ function thumbFillOf(
     calleeBodyBound,
     calleeStackWords,
     calleeReturnsNoHiddenPointer,
+    calleeReadsFirstArgument,
     stackSized,
     entryReadCalls,
     asmIncludes,
@@ -6790,6 +6792,7 @@ function thumbFillOf(
     | 'calleeBodyBound'
     | 'calleeStackWords'
     | 'calleeReturnsNoHiddenPointer'
+    | 'calleeReadsFirstArgument'
     | 'stackSized'
     | 'entryReadCalls'
     | 'asmIncludes'
@@ -6812,6 +6815,7 @@ function thumbFillOf(
     entryReadCalls,
     stackSized,
     calleeReturnsNoHiddenPointer,
+    calleeReadsFirstArgument,
   );
   const frame = measureThumbFrame({
     name,

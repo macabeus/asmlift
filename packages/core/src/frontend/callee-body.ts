@@ -74,7 +74,7 @@
 // KNOWN GAP: an objdump listing (MIPS, PowerPC) shows no symbol binding, so a weak definition there
 // is read as the one the link keeps. A weak copy of one inline definition is that definition; a weak
 // default some other object overrides is not, and no row here has one.
-import { ARGS_BOUND_BY_ADDRESS, type Block, type Fn, successorsOf } from '../ir/core';
+import { ARGS_BOUND_BY_ADDRESS, type Block, type Fn, type Op, type Value, callArgs, successorsOf } from '../ir/core';
 import {
   type FnProto,
   type Prototypes,
@@ -144,7 +144,12 @@ export function calleeBodyReads(
   lift: CalleeLift,
   external?: CalleeBodies,
   frontend?: Pick<Frontend, 'entryStackWords' | 'returnsThroughReturnReg'>,
-): { bound: CalleeBodyBound; stackWords: CalleeStackWords; returnsNoHiddenPointer: CalleeReturnsNoHiddenPointer } {
+): {
+  bound: CalleeBodyBound;
+  stackWords: CalleeStackWords;
+  returnsNoHiddenPointer: CalleeReturnsNoHiddenPointer;
+  readsFirstArgument: CalleeReadsFirstArgument;
+} {
   const memo = new Map<string, BodyReads>();
   const read = (callee: string): BodyReads => {
     if (!memo.has(callee)) {
@@ -156,6 +161,7 @@ export function calleeBodyReads(
     bound: (callee) => read(callee).bound,
     stackWords: (callee) => read(callee).stack,
     returnsNoHiddenPointer: (callee) => read(callee).noHiddenPointer === true,
+    readsFirstArgument: (callee) => read(callee).readsFirst === true,
   };
 }
 
@@ -219,6 +225,8 @@ interface BodyReads {
   readonly bound?: number;
   readonly stack?: number;
   readonly noHiddenPointer?: true;
+  /** the body reads its first argument register's incoming value (`CalleeReadsFirstArgument`) */
+  readonly readsFirst?: true;
 }
 
 function bodyReads(
@@ -328,6 +336,7 @@ function liftedReads(
       const top = Math.max(0, ...params.map((p) => (entryArgRank(p) ?? -1) + 1));
       const stack = Math.max(0, top - target.argRegs.length);
       return {
+        ...(readsFirstArgument(fn, forced) ? { readsFirst: true as const } : {}),
         bound: Math.max(params.length, passesFirst ? 1 : 0),
         stack:
           stack > 0 && target.evenWordAlignedArgs === true && !readsEveryArgReg(fn, target, forced) ? undefined : stack,
@@ -385,6 +394,56 @@ function returnsUntouched(fn: Fn): boolean {
   }
   return [...callFree].some((b) =>
     b.ops.some((o) => o.opcode === 'ret' && o.operands.length === 0 && o.attrs.viaReturnReg !== true),
+  );
+}
+
+/** WHETHER A CALLEE'S BODY READS ITS FIRST ARGUMENT REGISTER'S INCOMING VALUE: a LOWER bound on what
+ *  it reads, where the register bound (`CalleeBodyBound`) is an upper one. An op reads it, through
+ *  any join it flows into, other than a return, and other than as an argument of a call the lift
+ *  forced to every register or of one through a register that bounds it (`ARGS_BOUND_BY_ADDRESS`):
+ *  either is handed the register whatever the source passed, and a return hands r0 back whether or
+ *  not it was a parameter (`int g(void)` returns through `pop {r1}; bx r1` too). Read off the same
+ *  lift as the register bound, and false wherever that answers nothing. Asked where the trim would
+ *  drop an earlier call's result left in that register (frontend/call-plan.ts), which then refuses.
+ *  KNOWN GAP: a body that only forwards the register to an undeclared callee reads nothing here, so
+ *  the result is dropped as with no body at all. */
+export type CalleeReadsFirstArgument = (callee: string) => boolean;
+
+function readsFirstArgument(fn: Fn, forced: ReadonlySet<string>): boolean {
+  const first = fn.blocks[0]?.params.find((p) => entryArgRank(p) === 0);
+  if (first === undefined) {
+    return false;
+  }
+  const names = new Set<Value>([first]);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const b of fn.blocks) {
+      for (const o of b.ops) {
+        for (const e of o.successors) {
+          e.args.forEach((a, i) => {
+            const into = e.block.params[i];
+            if (names.has(a) && into !== undefined && !names.has(into)) {
+              names.add(into);
+              grew = true;
+            }
+          });
+        }
+      }
+    }
+  }
+  const handedOn = (o: Op): ReadonlySet<Value> =>
+    o.opcode === 'call' &&
+    (o.attrs[ARGS_BOUND_BY_ADDRESS] === true || (typeof o.attrs.target === 'string' && forced.has(o.attrs.target)))
+      ? new Set(callArgs(o))
+      : new Set();
+  return fn.blocks.some((b) =>
+    b.ops.some((o) => {
+      if (o.opcode === 'ret') {
+        return false;
+      }
+      const passed = handedOn(o);
+      return o.operands.some((v) => names.has(v) && !passed.has(v));
+    }),
   );
 }
 

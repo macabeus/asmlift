@@ -70,7 +70,7 @@ import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable } from './asmdata';
 import { type CallDeclarations, type ParamClass, callDeclarations } from './call-plan';
-import type { CalleeBodyBound } from './callee-body';
+import type { CalleeBodyBound, CalleeReadsFirstArgument } from './callee-body';
 import { type Declarations, computedOnlyToReturn, leftInDiscardRegister, unreadPairHalf } from './dead-reads';
 import { type DisasmInstr, parseDisasm as parseSharedDisasm, parseMem as parseSharedMem, sliceSymbol } from './disasm';
 import { mkEmitKit, pushSwitchBr } from './emit';
@@ -1337,6 +1337,7 @@ function liftPrelude(
   ownDeclaration?: () => OwnDeclaration | undefined,
   calleeBodyBound?: CalleeBodyBound,
   entryReadCalls?: ReadonlySet<string>,
+  calleeReadsFirstArgument?: CalleeReadsFirstArgument,
 ) {
   const recoveredBctr = new Set([...jts.values()].map((j) => j.bctrAddr));
   // TRUSTWORTHINESS: fail loud on an unmodelled control transfer rather than dropping it (which
@@ -1394,6 +1395,9 @@ function liftPrelude(
     ownDeclaration,
     calleeBodyBound,
     entryReadCalls,
+    undefined,
+    undefined,
+    calleeReadsFirstArgument,
   );
   // THE LOCAL AREA, where a function takes a frame address, reaches its frame below a word, or
   // keeps a dead local there (`measurePpcFrame`, `compilerBehaviors.linkageLocalArea`): every r1
@@ -1451,7 +1455,11 @@ function liftOnce(
     contextOwnProto,
     calleeBodyBound,
     entryReadCalls,
-  }: Pick<LiftOptions, 'contextOwnWords' | 'contextOwnProto' | 'calleeBodyBound' | 'entryReadCalls'>,
+    calleeReadsFirstArgument,
+  }: Pick<
+    LiftOptions,
+    'contextOwnWords' | 'contextOwnProto' | 'calleeBodyBound' | 'entryReadCalls' | 'calleeReadsFirstArgument'
+  >,
 ): Fn | FrameObjectRelift {
   assertInputFormat('ppc', 'objdump', asm);
   const instrs = parseDisasm(sliceSymbol(asm, name)); // ONE function only — an absent symbol declines loud
@@ -1534,6 +1542,7 @@ function liftOnce(
     () => (!ownDeclared ? undefined : ownDeclarationOf(name, prototypes, contextOwnProto)),
     calleeBodyBound,
     entryReadCalls,
+    calleeReadsFirstArgument,
   );
   const lrUnproven = linkRegisterProof(blocks, succIdx, r1At, target);
 

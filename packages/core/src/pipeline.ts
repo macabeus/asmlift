@@ -17,6 +17,7 @@ import { returnedStruct, structLocalType } from './frontend/call-plan';
 import {
   type CalleeBodies,
   type CalleeBodyBound,
+  type CalleeReadsFirstArgument,
   type CalleeReturnsNoHiddenPointer,
   type CalleeStackWords,
   calleeBodyReads,
@@ -503,7 +504,8 @@ export function liftStamped(
   const read =
     liftOptions.calleeBodyBound === undefined ||
     liftOptions.calleeStackWords === undefined ||
-    liftOptions.calleeReturnsNoHiddenPointer === undefined
+    liftOptions.calleeReturnsNoHiddenPointer === undefined ||
+    liftOptions.calleeReadsFirstArgument === undefined
       ? bodyReadsIn(
           name,
           asm,
@@ -532,6 +534,7 @@ export function liftStamped(
     calleeBodyBound,
     calleeStackWords: liftOptions.calleeStackWords ?? read!.stackWords,
     calleeReturnsNoHiddenPointer: liftOptions.calleeReturnsNoHiddenPointer ?? read!.returnsNoHiddenPointer,
+    calleeReadsFirstArgument: liftOptions.calleeReadsFirstArgument ?? read!.readsFirstArgument,
     ...(stacksSized === undefined
       ? {}
       : { stackSized: (callee: string, words: number) => stacksSized.set(callee, words) }),
@@ -574,6 +577,7 @@ type BodyReaders = {
   bound: CalleeBodyBound;
   stackWords: CalleeStackWords;
   returnsNoHiddenPointer: CalleeReturnsNoHiddenPointer;
+  readsFirstArgument: CalleeReadsFirstArgument;
 };
 
 /** The readers already built, per caller table as handed to `liftStamped`, each with what else it was
@@ -632,6 +636,7 @@ function bodyReadsIn(
           calleeBodyBound: () => undefined,
           calleeStackWords: () => undefined,
           calleeReturnsNoHiddenPointer: () => false,
+          calleeReadsFirstArgument: () => false,
           entryReadCalls,
           ...(text === asm ? { asmIncludes } : {}),
         },

@@ -1000,7 +1000,8 @@ register below that one, as a forced call is, so it no longer costs the body its
 call through a register still does. The same lift says whether the body returns a struct through
 a hidden pointer ("A struct returned by value, across the tower" below). An earlier call's result
 left in the return register, which the trim drops as no argument (`bl f; bl g` read as
-`f(); g();`), refuses where the callee's body bound covers that register:
+`f(); g();`), refuses where the callee's body reads that register in an op other than a return or
+a call its lift forced (`CalleeReadsFirstArgument`, a lower bound where the bound is an upper one):
 `fill(AllocZeroed(16))` would otherwise lift `fill()`.
 The bound counts the body's entry parameters, so it is none where that count is not one per argument
 word: a floating-point parameter (o32's `$f12` double covers a0 and a1), or a struct return handed

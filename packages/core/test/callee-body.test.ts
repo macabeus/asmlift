@@ -432,12 +432,18 @@ describe('the argument words a callee body handed in from outside the input read
       '\tpop\t{r1}\n\tbx\tr1\n';
     const head = '\t.code\t16\n\t.text\n';
     expect(() => decompile('f', head + fill + f, t)).toThrow(
-      /'bl fill' .* has no prototype, r0 still holds what an earlier call returned, and fill's own body may read it/,
+      /'bl fill' .* has no prototype, r0 still holds what an earlier call returned, and fill's own body reads it/,
     );
     // with no body, or one that reads no argument register, the result stays the trim's to drop
     expect(decompile('f', head + f, t).source).toContain('    fill();\n');
     const rd0 = '\t.thumb_func\nfill:\n\tmov\tr0, #0x1\n\tbx\tlr\n';
     expect(decompile('f', head + rd0 + f, t).source).toContain('    fill();\n');
+    // …or one whose bound covers r0 only through an undeclared call it makes, or a return of r0
+    // untouched: the bound is an upper one, and neither is a read of a parameter
+    const fwd = '\t.thumb_func\nfill:\n\tpush\t{lr}\n\tbl\th\n\tpop\t{r0}\n\tbx\tr0\n';
+    expect(decompile('f', head + fwd + f, t).source).toContain('    fill();\n');
+    const id = '\t.thumb_func\nfill:\n\tbx\tlr\n';
+    expect(decompile('f', head + id + f, t).source).toContain('    fill();\n');
   });
 });
 

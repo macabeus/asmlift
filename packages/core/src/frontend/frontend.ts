@@ -8,7 +8,13 @@ import type { ContextGlobals } from '../proto-context';
 import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
-import type { CalleeBodyBound, CalleeReturnsNoHiddenPointer, CalleeStackWords, EntryStackWords } from './callee-body';
+import type {
+  CalleeBodyBound,
+  CalleeReadsFirstArgument,
+  CalleeReturnsNoHiddenPointer,
+  CalleeStackWords,
+  EntryStackWords,
+} from './callee-body';
 import type { AsmTextFormat } from './format';
 
 export interface Frontend {
@@ -118,6 +124,10 @@ export interface LiftOptions {
    *  hidden pointer (frontend/callee-body.ts `CalleeReturnsNoHiddenPointer`), asked of a callee no
    *  declaration answers it for. pipeline.ts `liftStamped` supplies it on every lift. */
   calleeReturnsNoHiddenPointer?: CalleeReturnsNoHiddenPointer;
+  /** Whether a callee's own body, in the input or handed in, reads its first argument register's
+   *  incoming value (frontend/callee-body.ts `CalleeReadsFirstArgument`), asked where a guessed call
+   *  would drop an earlier call's result left there. pipeline.ts `liftStamped` supplies it. */
+  calleeReadsFirstArgument?: CalleeReadsFirstArgument;
   /** Told of each call nothing declares that the lift laid out at every argument register and the
    *  stack words its callee's body loads (`calleeStackWords`), with that word count. */
   stackSized?: (callee: string, words: number) => void;

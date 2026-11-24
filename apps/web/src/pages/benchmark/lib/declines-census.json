@@ -1,6 +1,6 @@
 {
   "generatedBy": "pnpm regen:declines-census (scripts/regen-decline-census.ts) — do not hand-edit",
-  "distinctMessages": 352,
+  "distinctMessages": 353,
   "residueTotal": 156,
   "residueByFile": [
     {
