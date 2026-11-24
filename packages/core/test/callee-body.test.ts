@@ -419,8 +419,9 @@ describe('the argument words a callee body handed in from outside the input read
   // agbcc -O2's own output for `static void fill(u8 *p) { int i; for (i = 0; i < 4; i++) p[i] = gk + i; }
   // int f(int a) { u8 *o = AllocZeroed(16); fill(o); return o[a]; }`: AllocZeroed's result is still
   // in r0 at `bl fill`, which the trim drops as no argument (`f(); g();` and `g(f())` are the same
-  // bytes). fill's body reads r0, so dropping it lifted `fill()` and a buffer nothing fills
-  test('decompile: an earlier call`s result the callee`s body may read refuses, one it reads none of is dropped', () => {
+  // bytes). fill's body reads r0 as a parameter, so the call takes it: dropping it lifted `fill()`
+  // and a buffer nothing fills
+  test('decompile: an earlier call`s result the callee`s body reads is passed, one it reads none of is dropped', () => {
     const t = TOOLCHAIN_TARGETS.agbcc.description;
     const fill =
       '\t.thumb_func\nfill:\n\tpush\t{lr}\n\tadd\tr2, r0, #0\n\tldr\tr0, .L8\n\tldr\tr0, [r0]\n' +
@@ -431,9 +432,11 @@ describe('the argument words a callee body handed in from outside the input read
       '\tadd\tr5, r0, #0\n\tbl\tfill\n\tadd\tr5, r5, r4\n\tldrb\tr0, [r5]\n\tpop\t{r4, r5}\n' +
       '\tpop\t{r1}\n\tbx\tr1\n';
     const head = '\t.code\t16\n\t.text\n';
-    expect(() => decompile('f', head + fill + f, t)).toThrow(
-      /'bl fill' .* has no prototype, r0 still holds what an earlier call returned, and fill's own body reads it/,
-    );
+    expect(decompile('f', head + fill + f, t).source).toContain('    fill(v0);\n');
+    // …unless that result is declared void, which names nothing a call is passed
+    expect(
+      decompile('f', head + fill + f, t, { prototypes: { AllocZeroed: { params: 1, returnsVoid: true } } }).source,
+    ).toContain('    fill();\n');
     // with no body, or one that reads no argument register, the result stays the trim's to drop
     expect(decompile('f', head + f, t).source).toContain('    fill();\n');
     const rd0 = '\t.thumb_func\nfill:\n\tmov\tr0, #0x1\n\tbx\tlr\n';
@@ -444,6 +447,17 @@ describe('the argument words a callee body handed in from outside the input read
     expect(decompile('f', head + fwd + f, t).source).toContain('    fill();\n');
     const id = '\t.thumb_func\nfill:\n\tbx\tlr\n';
     expect(decompile('f', head + id + f, t).source).toContain('    fill();\n');
+    // A CALL THROUGH A THUNK REGISTER ON AN ADDRESS THE BODY LOADS passes what is below it: agbcc
+    // -O2's `static void fill(u8 *p) { gfn1(p); }` is `ldr r1, =gfn1; ldr r1, [r1]; bl _call_via_r1`,
+    // where a call passing nothing loads the address into r0 (`gS.fn()` is `bl _call_via_r0`)
+    const thunk =
+      '\t.thumb_func\nfill:\n\tpush\t{lr}\n\tldr\tr1, .L3\n\tldr\tr1, [r1]\n\tbl\t_call_via_r1\n' +
+      '\tpop\t{r0}\n\tbx\tr0\n.L3:\n\t.word\tgfn1\n';
+    expect(decompile('f', head + thunk + f, t).source).toContain('    fill(v0);\n');
+    // …while one called where it arrived may pass nothing below it: `void fill(int u, void (*fn)(void))
+    // { fn(); }` is `bl _call_via_r1` on the entry r1
+    const inPlace = '\t.thumb_func\nfill:\n\tpush\t{lr}\n\tbl\t_call_via_r1\n\tpop\t{r0}\n\tbx\tr0\n';
+    expect(decompile('f', head + inPlace + f, t).source).toContain('    fill();\n');
   });
 });
 

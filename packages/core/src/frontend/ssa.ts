@@ -234,8 +234,8 @@ export interface SsaBuilder {
    *  argument registers that were actually set up on every path (see {@link trimClobberedCallArgs}).
    *  `abi` is the target's argument-register order and its return register. It snapshots what the
    *  caller wrote, so it comes before the call's result is written ({@link noteCall}).
-   *  `passesCalleeResult`, `trimmed`, `withholdsSetupArgs`, `asksEveryCut`, `floor` and
-   *  `dropsCalleeResult`: see {@link GuessedCallSite}. */
+   *  `passesCalleeResult`, `trimmed`, `withholdsSetupArgs`, `asksEveryCut` and `floor`: see
+   *  {@link GuessedCallSite}. */
   recordGuessedCall(
     op: Op,
     b: number,
@@ -245,7 +245,6 @@ export interface SsaBuilder {
     withholdsSetupArgs?: () => boolean,
     asksEveryCut?: () => boolean,
     floor?: number,
-    dropsCalleeResult?: () => void,
   ): void;
   /** Require that nothing but `op` reads `v` once the function is lifted — no other op, no join that
    *  survives, no frame store (`frameWrites`), no op-less use (`useOutsideOps`) — or call `refuse`.
@@ -1986,7 +1985,6 @@ export function makeSsaBuilder(
       withholdsSetupArgs?: () => boolean,
       asksEveryCut?: () => boolean,
       floor?: number,
-      dropsCalleeResult?: () => void,
     ) => {
       abiSeen = abi;
       guessedCalls.push({
@@ -1997,7 +1995,6 @@ export function makeSsaBuilder(
         withholdsSetupArgs,
         asksEveryCut,
         ...(floor ? { floor } : {}),
-        ...(dropsCalleeResult ? { dropsCalleeResult } : {}),
         freshBefore: new Set(writtenSinceCall[b]),
         afterCallInBlock: callsIn.has(b), // `noteCall` runs after this, so this means an EARLIER call
         returnRegBefore:

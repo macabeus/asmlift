@@ -1000,9 +1000,13 @@ register below that one, as a forced call is, so it no longer costs the body its
 call through a register still does. The same lift says whether the body returns a struct through
 a hidden pointer ("A struct returned by value, across the tower" below). An earlier call's result
 left in the return register, which the trim drops as no argument (`bl f; bl g` read as
-`f(); g();`), refuses where the callee's body reads that register in an op other than a return or
-a call its lift forced (`CalleeReadsFirstArgument`, a lower bound where the bound is an upper one):
-`fill(AllocZeroed(16))` would otherwise lift `fill()`.
+`f(); g();`), is passed on where the callee's body reads that register in an op other than a
+return, a call its lift forced, or a bound call on an address that arrived where it is called
+(`CalleeReadsFirstArgument`, a lower bound where the bound is an upper one): the call then takes at
+least that word, and nothing but the earlier call wrote it, so `fill(AllocZeroed(16))` lifts as
+written where the trim read `fill()`. A bound call on an address the body loads or computes is a
+read: agbcc calls such an address through the first register past the arguments (`s->fn()` loads
+it into r0 and calls `_call_via_r0`), so `bl _call_via_r1` there passes r0.
 The bound counts the body's entry parameters, so it is none where that count is not one per argument
 word: a floating-point parameter (o32's `$f12` double covers a0 and a1), or a struct return handed
 back through a hidden pointer. Nor is a lift holding an `opaque` op any bound: which registers an

@@ -1416,17 +1416,36 @@ export function callDeclarations(
     // as well: a guess of four the check above passed can still lose a frame address in r2 when
     // the trim cuts it back to the run below an unfresh r1 (`v = f64(); g(v, &s)` with neither
     // declared, which otherwise lifts as `g(v)`).
+    //
+    // A NAMED CALL IS PASSED AN EARLIER CALLEE'S RESULT ITS OWN BODY READS AS A PARAMETER: `f(); g();`
+    // and `g(f())` are the same bytes, and the trim reads the first (call-arity.ts
+    // `trimClobberedCallArgs`), but where g's body reads its first argument register's incoming
+    // value (`CalleeReadsFirstArgument`, a lower bound: a read other than a return or a call its
+    // lift forced) the call takes at least that word, and nothing since the earlier call wrote it,
+    // so the word is that call's result. `o = AllocZeroed(16); fill(o); return o[a];` lifts
+    // `fill(v0)`, where the trim read `fill()` and left the buffer unfilled. A result declared void
+    // names nothing a call can be passed. The register bound is an upper one, and is not asked: it
+    // counts r0 for a body whose undeclared call or untouched return reads it, which no parameter
+    // need be (`int g(void)` returns through `pop {r1}; bx r1` too). KNOWN GAP: a body that only
+    // forwards r0 to an undeclared callee reads nothing here, so the result is dropped as with no
+    // body at all.
     if (widths === null) {
       const leftOut = site.leftOut;
+      const libcallResult =
+        target.compilerBehaviors.deletesDeadLibcalls === true
+          ? (r: Value) => helperResults.has(r) && ssa.readByGuessedCallsAlone(r)
+          : undefined;
+      let readsFirst: boolean | undefined;
+      const bodyReadsFirst = (): boolean => (readsFirst ??= calleeReadsFirstArgument!(callee!) === true);
       ssa.recordGuessedCall(
         call,
         bi,
         target,
         indirect !== undefined
           ? (r) => !voidResults.has(r)
-          : target.compilerBehaviors.deletesDeadLibcalls === true
-            ? (r) => helperResults.has(r) && ssa.readByGuessedCallsAlone(r)
-            : undefined,
+          : unstated && calleeReadsFirstArgument !== undefined
+            ? (r) => (!voidResults.has(r) && bodyReadsFirst()) || libcallResult?.(r) === true
+            : libcallResult,
         leftOut === undefined
           ? undefined
           : (cut, kept) =>
@@ -1438,25 +1457,6 @@ export function callDeclarations(
         site.asksEveryCut,
         // a decided gap puts its words beyond doubt, so neither reading cuts below them
         Math.max(floor, decidedWords),
-        // AN EARLIER CALL'S RESULT LEFT IN THE RETURN REGISTER, WHICH THE TRIM DROPS AS NO ARGUMENT
-        // (`bl f; bl g` read as `f(); g();`, call-arity.ts `trimClobberedCallArgs`), is refused
-        // where the callee's own body reads that register: `f(); g();` and `g(f())` are the same
-        // bytes, and the shorter reading hands g nothing where it reads its first parameter
-        // (`o = AllocZeroed(16); fill(o); return o[a];` lifted `fill()`, leaving the buffer
-        // unfilled). Asked of a LOWER bound (`CalleeReadsFirstArgument`): a read other than a
-        // return or a call the body's lift forced. The register bound is an upper one, and asked
-        // instead it declined every `f(); g();` whose g makes an undeclared call or returns its r0
-        // untouched (pokeemerald: ~300 functions such as `SyncBgVisibilityAndMode`'s callers).
-        () => {
-          if (unstated && calleeReadsFirstArgument?.(callee!) === true) {
-            fail(
-              `cannot lift '${name}': the call ${typeof guess.at === 'number' ? `at 0x${guess.at.toString(16)}` : guess.at} ` +
-                `has no prototype, ${target.returnReg} still holds what an earlier call returned, and ` +
-                `${callee}'s own body reads it — a call passed that result and one passed nothing look the same ` +
-                'here, so the argument count is not decidable',
-            );
-          }
-        },
       );
     }
     if (p.declaredVoid) {

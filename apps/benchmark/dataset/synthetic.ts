@@ -4818,13 +4818,14 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void sretbody_const(unsigned char *src);',
     proto: { sretbody_const: { returnsVoid: true } },
   },
-  // AN EARLIER CALL'S RESULT HANDED ON TO A CALLEE WHOSE BODY READS IT REFUSES (frontend/call-plan.ts,
-  // the trim's `dropsCalleeResult`). `mkbuf`'s result is still in the return register at the call to
-  // `fill`, and `f(); g();` and `g(f())` are the same bytes where that register is the first argument
-  // register (agbcc r0, mwcc r3), so the trim drops it as no argument: `fill()`, a buffer nothing fills.
-  // `fill`'s body reads it, so the lift declines (pokeemerald GenerateBattlePyramidFloorLayout passes
-  // AllocZeroed's buffer to GetPyramidFloorLayoutOffsets so). agbcc only: mwcc, the other compiler
-  // whose return register is the first argument one, inlines `fill` at its flags.
+  // AN EARLIER CALL'S RESULT HANDED ON TO A CALLEE WHOSE BODY READS IT IS AN ARGUMENT
+  // (frontend/call-plan.ts, the named call's `passesCalleeResult`). `mkbuf`'s result is still in the
+  // return register at the call to `fill`, and `f(); g();` and `g(f())` are the same bytes where that
+  // register is the first argument register (agbcc r0, mwcc r3), so the trim drops it as no argument:
+  // `fill()`, a buffer nothing fills. `fill`'s body reads it as a parameter, so the call takes that
+  // word and lifts `fill(v0)` (pokeemerald GenerateBattlePyramidFloorLayout passes AllocZeroed's
+  // buffer to GetPyramidFloorLayoutOffsets so). agbcc only: mwcc, the other compiler whose return
+  // register is the first argument one, inlines `fill` at its flags.
   {
     sym: 'resultbody',
     src:

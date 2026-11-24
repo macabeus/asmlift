@@ -74,7 +74,16 @@
 // KNOWN GAP: an objdump listing (MIPS, PowerPC) shows no symbol binding, so a weak definition there
 // is read as the one the link keeps. A weak copy of one inline definition is that definition; a weak
 // default some other object overrides is not, and no row here has one.
-import { ARGS_BOUND_BY_ADDRESS, type Block, type Fn, type Op, type Value, callArgs, successorsOf } from '../ir/core';
+import {
+  ARGS_BOUND_BY_ADDRESS,
+  type Block,
+  type Fn,
+  type Op,
+  type Value,
+  callArgs,
+  calleeValue,
+  successorsOf,
+} from '../ir/core';
 import {
   type FnProto,
   type Prototypes,
@@ -400,11 +409,18 @@ function returnsUntouched(fn: Fn): boolean {
 /** WHETHER A CALLEE'S BODY READS ITS FIRST ARGUMENT REGISTER'S INCOMING VALUE: a LOWER bound on what
  *  it reads, where the register bound (`CalleeBodyBound`) is an upper one. An op reads it, through
  *  any join it flows into, other than a return, and other than as an argument of a call the lift
- *  forced to every register or of one through a register that bounds it (`ARGS_BOUND_BY_ADDRESS`):
- *  either is handed the register whatever the source passed, and a return hands r0 back whether or
- *  not it was a parameter (`int g(void)` returns through `pop {r1}; bx r1` too). Read off the same
+ *  forced to every register, or of one through a register that bounds it (`ARGS_BOUND_BY_ADDRESS`)
+ *  whose address arrives in a block parameter: either is handed the register whatever the source
+ *  passed, and a return hands r0 back whether or not it was a parameter (`int g(void)` returns
+ *  through `pop {r1}; bx r1` too). The address is what decides a bound call: agbcc calls an address
+ *  it computes or loads through the first register past the arguments (compiled at -O1 and -O2,
+ *  `s->fn()`, `tab[i]()` and `gS.fn()` with the pointer in r1 all load into r0 and call
+ *  `_call_via_r0`; -O0 uses r4), so `bl _call_via_r1` on a loaded address passes r0. One left where
+ *  it arrived is called in place: `void h(int u, void (*fn)(void)) { fn(); }` is `bl _call_via_r1`
+ *  with r0 never passed, and a join may carry such an address round a loop. Read off the same
  *  lift as the register bound, and false wherever that answers nothing. Asked where the trim would
- *  drop an earlier call's result left in that register (frontend/call-plan.ts), which then refuses.
+ *  drop an earlier call's result left in that register (frontend/call-plan.ts), which the call is
+ *  then passed: it takes at least that word, and nothing else wrote it.
  *  KNOWN GAP: a body that only forwards the register to an undeclared callee reads nothing here, so
  *  the result is dropped as with no body at all. */
 export type CalleeReadsFirstArgument = (callee: string) => boolean;
@@ -431,9 +447,15 @@ function readsFirstArgument(fn: Fn, forced: ReadonlySet<string>): boolean {
       }
     }
   }
+  const blockParams = new Set<Value>(fn.blocks.flatMap((b) => b.params));
+  const inPlace = (o: Op): boolean => {
+    const at = calleeValue(o);
+    return at === undefined || blockParams.has(at);
+  };
   const handedOn = (o: Op): ReadonlySet<Value> =>
     o.opcode === 'call' &&
-    (o.attrs[ARGS_BOUND_BY_ADDRESS] === true || (typeof o.attrs.target === 'string' && forced.has(o.attrs.target)))
+    ((o.attrs[ARGS_BOUND_BY_ADDRESS] === true && inPlace(o)) ||
+      (typeof o.attrs.target === 'string' && forced.has(o.attrs.target)))
       ? new Set(callArgs(o))
       : new Set();
   return fn.blocks.some((b) =>
