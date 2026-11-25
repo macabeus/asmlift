@@ -306,8 +306,8 @@ merge too and its arm leaves sideways, the inner arm's `break;` reaches the inne
 which is the merge, and structuring goes on there inside the outer arm, which writes its own
 `break;` after the inner switch (`switchMergeExit` in `structure.ts`; `synthetic:sw_gotocase_inner`
 on agbcc, IDO and both GCC 2.7.2). An inner switch with code of its own after it, which the exit
-would skip, still declines: no compiled function has one yet. A merge that is a bare return is
-`return;` instead, from inside a nested loop or switch alike
+would skip, still declines: no compiled function has one yet. A merge that is a `ret` with no
+effect is that `return` instead, from inside a nested loop or switch alike
 (`synthetic:sw_xjret_end` on mwcc). Both are the next rung of the same reruns (`CASE_EXIT_RUNGS`),
 asked once every run before it declined and the last one met such an exit: straight after the
 first run where no case exit was met, otherwise after the runs asking the case-exit flag alone,

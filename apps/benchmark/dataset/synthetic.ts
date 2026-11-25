@@ -16482,6 +16482,57 @@ export const SYNTHETIC: SynthSpec[] = [
       fin: { params: 4, returnsVoid: true },
     },
   },
+  // sw_xjret_val: sw_xjret_end's exit from a loop in a case body to the outer switch's merge, with
+  // a merge that returns a value (`return gOut;`) rather than a bare `return;`. The merge is one
+  // effect-free `ret` block, so structure.ts `switchMergeExit` copies that `return` into the loop
+  // where the exit leaves, as `exitArmOf` copies one into a loop body; a `break;` there would leave
+  // only the loop.
+  {
+    sym: 'sw_xjret_val',
+    src:
+      'extern s32 gLo, gHi, gOut;\n' +
+      'void a(s32 x);\n' +
+      'void fin(s32 x);\n' +
+      'void g(s32 x);\n' +
+      'void d(s32 x);\n' +
+      's32 sw_xjret_val(s32 p, s32 q)\n' +
+      '{\n' +
+      '    s32 j;\n' +
+      '    switch (p) {\n' +
+      '    case 0:\n' +
+      '        for (j = gLo; j < gHi; j++) {\n' +
+      '            a(j);\n' +
+      '            if (q < j) {\n' +
+      '                fin(j);\n' +
+      '                goto out;\n' +
+      '            }\n' +
+      '        }\n' +
+      '        g(p);\n' +
+      '        break;\n' +
+      '    case 1: d(p); break;\n' +
+      '    case 2: d(q); break;\n' +
+      '    case 3: g(q); break;\n' +
+      '    }\n' +
+      'out:\n' +
+      '    return gOut;\n' +
+      '}',
+    features: ['dense', 'switch-arms', 'break'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx:
+      'extern s32 gLo, gHi, gOut;\n' +
+      'void a(s32 x);\n' +
+      'void fin(s32 x);\n' +
+      'void g(s32 x);\n' +
+      'void d(s32 x);\n' +
+      's32 sw_xjret_val(s32 p, s32 q);',
+    proto: {
+      sw_xjret_val: { params: 2 },
+      a: { params: 1, returnsVoid: true },
+      fin: { params: 1, returnsVoid: true },
+      g: { params: 1, returnsVoid: true },
+      d: { params: 1, returnsVoid: true },
+    },
+  },
   {
     sym: 'cmn_store',
     src:

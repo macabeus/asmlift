@@ -4,8 +4,8 @@
 // reaches the outer switch's merge from inside the inner one, where C binds a `break;` to the inner
 // switch. Where the inner switch ends at that merge too, structure.ts `switchMergeExit` writes the
 // inner `break;`, and the outer arm its own `break;` after the inner switch; an inner switch with a
-// merge of its own, code the exit would skip, still declines. A merge that is a bare `ret` is
-// `return;` instead, from inside a loop nested in the arm as well; an exit from
+// merge of its own, code the exit would skip, still declines. A merge that is a `ret` with no
+// effect is that `return` instead, from inside a loop nested in the arm as well; an exit from
 // inside such a loop to a merge that runs code still declines. Each fixture is judged
 // against its own IR by the trace oracle (`irAgreement`), as `structure()` returns it and as it
 // ships after `readabilityRewrites`. Both spellings are asked only once every run without them
@@ -144,7 +144,7 @@ const GOTOCASE_INNER = `fn gi {
 /** `switch (p) { case 0: for (j = 0; j < 3; j++) { a(j); if (q < j) { fin(j); goto out; } } g(m); break;
  *  case 1: d(m); } out: ${tail}` — mwcc's sw_xjret_end shape: the merge is the epilogue, reached
  *  from inside the loop in the arm through a block of its own. */
-const loopInArm = (tail: 'return' | 'k(m); return') =>
+const loopInArm = (tail: 'return' | 'k(m); return' | 'return q + 1') =>
   `fn sr {
 ^bb0(%p: s32, %q: s32):
   %z: s32 = const {value=0}
@@ -170,7 +170,13 @@ const loopInArm = (tail: 'return' | 'k(m); return') =>
   %d: s32 = call %m {target="d"}
   br ^bb7()
 ^bb7():
-${tail === 'return' ? '  ret' : '  %k: s32 = call %m {target="k"}\n  ret'}
+${
+  tail === 'return'
+    ? '  ret'
+    : tail === 'return q + 1'
+      ? '  %r: s32 = add %q, %one\n  ret %r'
+      : '  %k: s32 = call %m {target="k"}\n  ret'
+}
 }`;
 
 test("an arm of a nested switch reaches the outer switch's merge with the inner `break;`", () => {
@@ -213,6 +219,18 @@ test('a merge that is a bare return is `return;` from a loop nested in the arm, 
   const ir = loopInArm('return');
   const { src, agreement, shipped } = judged(ir);
   expect(src).toMatch(/fin\(v\d+\);\n\s*return;/);
+  expect(src).not.toMatch(/= 1;\n\s*break;/);
+  alike(agreement);
+  alike(shipped);
+  expect(ran(ir, 'g')).toBeGreaterThan(SEEDS.length / 40);
+  expect(ran(ir, 'fin')).toBeGreaterThan(SEEDS.length / 40);
+});
+
+test('a merge that returns a value it computes with no effect is that `return` from the loop', () => {
+  // agbcc -O2 lays `… out: return q + 1;` (or `return gOut;`) out as one effect-free `ret` block
+  const ir = loopInArm('return q + 1');
+  const { src, agreement, shipped } = judged(ir);
+  expect(src).toMatch(/fin\(v\d+\);\n\s*return a1 \+ v\d+;/);
   expect(src).not.toMatch(/= 1;\n\s*break;/);
   alike(agreement);
   alike(shipped);

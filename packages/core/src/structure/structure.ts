@@ -5096,8 +5096,9 @@ function structureRanked(
   };
   // AN EXIT TO AN ENCLOSING SWITCH'S MERGE, `b`, from inside a loop or switch nested in its arm
   // `i`, where `break;` binds to the nested one (`switchBreakAt`). Two spellings:
-  // - a merge that is a bare `ret` is `return;` (mwcc's sw_xjret_end leaves its inner switch and
-  //   loop for the outer switch's merge, the epilogue);
+  // - a merge that is a `ret` with nothing a second copy would run twice is that `return` itself,
+  //   copied here as `exitArmOf` copies one into a loop's body (mwcc's sw_xjret_end leaves its inner
+  //   switch and loop for the outer switch's merge, the epilogue);
   // - from the arm of a switch nested in arm `i`, with no loop entered since `i` began: where that
   //   innermost switch ends at `b` too and does not fall into a sibling, its `break;` reaches `b`.
   //   The innermost arm has no region of its own, or `switchBreakAt` would have chosen it: it leaves
@@ -5107,7 +5108,7 @@ function structureRanked(
   //   `break;` after the one nested in it, or declines where it has a merge of its own.
   // Asked only in the `merge` rung's runs (`CASE_EXIT_RUNGS`), so a published lift never moves.
   const switchMergeExit = (b: Block, i: number): Stmt[] | undefined => {
-    const copiedRet = b.params.length === 0 && b.ops.length === 1 && isRet(b) && b.ops[0].operands.length === 0;
+    const copiedRet = b.params.length === 0 && copyableRet(b);
     const inner = switchFrames[switchFrames.length - 1];
     const shared =
       i < switchFrames.length - 1 &&
@@ -5122,7 +5123,7 @@ function structureRanked(
       caseExit.met.add('merge');
       return undefined;
     }
-    return copiedRet ? [{ k: 'return' }] : [{ k: 'break', ofSwitch: true }];
+    return copiedRet ? structureBlock(b, null) : [{ k: 'break', ofSwitch: true }];
   };
   // A CASE BODY'S JUMP OUT OF THE LOOP ITS SWITCH SITS IN, past the switch's end (the merge is
   // `switchBreakAt`'s): `f = 1; break;`, and the flag goes to the switch's scope, whose
