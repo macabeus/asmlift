@@ -151,3 +151,53 @@ stkbody_rnest:
 	.word	gv
 .Lfe6:
 	.size	 stkbody_rnest,.Lfe6-stkbody_rnest
+	.align	2, 0
+	.globl	stkbody_self
+	.type	 stkbody_self,function
+	.thumb_func
+stkbody_self:
+	push	{r4, r5, r6, r7, lr}
+	add	sp, sp, #-0x14
+	add	r4, r0, #0
+	add	r5, r1, #0
+	ldr	r6, [sp, #0x28]
+	ldr	r1, .L27
+	add	r0, r4, r6
+	str	r0, [r1]
+	ldr	r7, [sp, #0x2c]
+	add	r0, r5, r7
+	str	r0, [r1, #0x4]
+	ldr	r7, [sp, #0x30]
+	add	r0, r2, r7
+	str	r0, [r1, #0x8]
+	ldr	r7, [sp, #0x34]
+	add	r0, r3, r7
+	str	r0, [r1, #0xc]
+	ldr	r0, [sp, #0x38]
+	str	r0, [r1, #0x10]
+	cmp	r4, #0
+	ble	.L26	@cond_branch
+	sub	r0, r4, #0x1
+	str	r6, [sp]
+	ldr	r1, [sp, #0x2c]
+	str	r1, [sp, #0x4]
+	ldr	r7, [sp, #0x30]
+	str	r7, [sp, #0x8]
+	ldr	r1, [sp, #0x34]
+	str	r1, [sp, #0xc]
+	ldr	r1, [sp, #0x38]
+	add	r1, r1, #0x1
+	str	r1, [sp, #0x10]
+	add	r1, r5, #0
+	bl	stkbody_self
+.L26:
+	add	sp, sp, #0x14
+	pop	{r4, r5, r6, r7}
+	pop	{r0}
+	bx	r0
+.L28:
+	.align	2, 0
+.L27:
+	.word	gv
+.Lfe7:
+	.size	 stkbody_self,.Lfe7-stkbody_self

@@ -4749,6 +4749,25 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'extern int gv[];\nint one();\nvoid mid2();\nvoid stkbody_rnest(int *p, int b, int c);',
     proto: { stkbody_rnest: { returnsVoid: true }, one: { returns: 'int' }, mid2: { returnsVoid: true } },
   },
+  // A CALL TO ITSELF IS SIZED BY ITS OWN ENTRY (frontend/callee-body.ts `bodyReads`): kl2dct's
+  // EntityCreate calls itself with nine words, and no body read sized that call, so it declined "the
+  // store to [sp,#0] is never reloaded". The stack words its own entry loads (frontend/thumb-entry.ts,
+  // never a lift of itself) size it as they would any callee whose body does not lift. agbcc only:
+  // no O32 frontend scans an entry.
+  {
+    sym: 'stkbody_self',
+    src:
+      'extern int gv[];\n' +
+      'void stkbody_self(int a, int b, int c, int d, int e, int f, int g, int h, int i)\n' +
+      '{\n' +
+      '    gv[0] = a + e; gv[1] = b + f; gv[2] = c + g; gv[3] = d + h; gv[4] = i;\n' +
+      '    if (a > 0) stkbody_self(a - 1, b, c, d, e, f, g, h, i + 1);\n' +
+      '}',
+    features: ['multi-arg', 'array'],
+    toolchains: ['agbcc'],
+    ctx: 'extern int gv[];\nvoid stkbody_self();',
+    proto: { stkbody_self: { returnsVoid: true } },
+  },
   // A CALLEE BODY'S STAGED HIGH-REGISTER RESTORE READS NO ARGUMENT (frontend/thumb.ts
   // `bodySavedRegs`, `restoreCopies`). agbcc restores r8-sl through `pop {r3, r4, r5}; mov r8, r3; …`,
   // and some path reaches that restore without writing r3 (here `hiw`'s `a >= 8` exit). Lifted as the

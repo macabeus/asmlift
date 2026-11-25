@@ -34,7 +34,8 @@
 // register PAIR (r0:r1, r3:r4) that nothing declares is counted for its first register only.
 //
 // It answers nothing where:
-//   - the callee is the function being lifted (its own declaration is a different question);
+//   - the callee is the function being lifted (its own declaration is a different question), save
+//     the incoming stack words its own entry loads, which size a call to itself (`bodyReads`);
 //   - the text the body is read from (the input, or a body handed in) defines no label of that
 //     name: a `name:` line, an objdump `<name>:` header or a `glabel name` (the Thumb frontend lifts
 //     a text with no such label whole, as one function, so a lift alone does not say the callee is
@@ -256,8 +257,17 @@ function bodyReads(
   external: CalleeBodies | undefined,
   frontend: Pick<Frontend, 'entryStackWords' | 'returnsThroughReturnReg'> | undefined,
 ): BodyReads {
-  if (callee === self || declaresAggregateReturn(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined)) {
+  if (declaresAggregateReturn(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined)) {
     return {};
+  }
+  // A CALL TO ITSELF is sized by the stack words its own entry loads, read by the frontend's scan
+  // (`Frontend.entryStackWords`) and never by a lift of itself, which would be the lift being made:
+  // that scan is what a callee whose body does not lift answers, and the same lower bound. Nothing
+  // else is read of it (see the header).
+  if (callee === self) {
+    return definesLabel(asm, self) && !weakNames(asm).has(self) && target.evenWordAlignedArgs !== true
+      ? { stack: frontend?.entryStackWords?.(self, asm) }
+      : {};
   }
   // a body that lifts answers every reader; one that does not answers its entry's loads and whether
   // the frontend's scan finds a return through the return register, and no bound

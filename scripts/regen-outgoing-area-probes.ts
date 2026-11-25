@@ -41,7 +41,8 @@
 //     Read by `packages/core/test/frame-dmafill-probes.test.ts`.
 //   agbcc-nested-body.s — a callee's body is lifted reading its own callees' bodies (core
 //     pipeline.ts `bodyReadsIn`): `mid` stages `nine`'s five stack words, and `mid2` calls `one`,
-//     which reads r0 alone, at a point where r1-r3 still hold `mid2`'s incoming values.
+//     which reads r0 alone, at a point where r1-r3 still hold `mid2`'s incoming values; and
+//     `stkbody_self` stages its own five stack words for a call to itself.
 //     Read by `packages/core/test/callee-body-nested.test.ts`.
 //
 //   ASMLIFT_AGBCC=… npx tsx scripts/regen-outgoing-area-probes.ts
