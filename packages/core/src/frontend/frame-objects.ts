@@ -38,6 +38,13 @@ export interface FrameObjectAudit {
   /** where its locals are declared (`LiveInModel.declaredLocals`): `ownedLocals` less the outgoing
    *  stack-argument block staged at its bottom, which is where an untyped object claims to start */
   declaredLocals: NonNullable<LiveInModel['declaredLocals']>;
+  /** WHERE THE AREA'S START RESTS ON DECLARATIONS: the lowest frame word a callee's declared stack
+   *  words may claim, where the frontend draws `ownedLocals.from` past them (gcc2.7.2's
+   *  `above-outgoing-area`, 16). A callee declared with more stack words than its call passes then
+   *  leaves a local in `[declaredWordsFrom, ownedLocals.from)`, which a store through a capture
+   *  below the locals may be writing (`belowRebaseRefusal`). Absent where the start rests on the
+   *  code alone (IDO's saves, PPC, which refuses a call that takes stack words). */
+  declaredWordsFrom?: number;
   usedSlotOffsets: ReadonlySet<number>;
   /** THE FRONTEND'S LOADED-WORD BOUND, present where the target states `outgoingAreaNeverLoadedFrom`:
    *  `from` is that offset and `bound` the lowest frame word, in this audit's offsets, the frontend
@@ -444,6 +451,7 @@ function auditFrame({
   irBlocks,
   ownedLocals: owned,
   declaredLocals: declared,
+  declaredWordsFrom,
   usedSlotOffsets,
   loadedWords,
   capturedObjectIsTheWholeFrame,
@@ -469,7 +477,8 @@ function auditFrame({
   }
   const facts = frameAddressFacts(irBlocks, symbols, target);
   const { laddrs, splitRefusal } = splitAddressingCopies(irBlocks, captures, foldedHere, declaredStructs(irBlocks));
-  const objects = frameObjects(laddrs, owned, fail);
+  const rebasesBelow = target.compilerBehaviors.captureBelowLocalsRebases === true;
+  const objects = frameObjects(laddrs, owned, fail, rebasesBelow);
   const flow = addressFlow(irBlocks, objects, facts);
   const uses = classifyFrameUses({
     irBlocks,
@@ -483,6 +492,27 @@ function auditFrame({
   });
   const windows = escapeWindows(irBlocks, uses, flow, facts, target);
   const model = chooseFrameModel({ oneObject, uses, merges: flow.merges, windows, returnsWithoutHiddenPointer, fail });
+  // A CAPTURE BELOW THE LOCALS (`captureBelowLocalsRebases`) is no object of its own: only the one
+  // object holds it, rebased (`keepAsOneObject`), so the per-object model refuses it — and so does
+  // the audit, wherever `belowRebaseRefusal` finds it may reach a word C names beneath the locals.
+  const below = new Set([...objects.keys()].filter((off) => off < owned.from));
+  for (const off of below) {
+    const why = belowRebaseRefusal(off, {
+      owned,
+      declaredWordsFrom,
+      uses,
+      flow,
+      irBlocks,
+      usedSlotOffsets,
+      rebasesBelow,
+    });
+    if (why !== null) {
+      fail(why);
+    }
+    if (oneObject === undefined) {
+      model.shapeRefused(belowLocalArea(off, owned));
+    }
+  }
   if (capturedObjectIsTheWholeFrame) {
     recheckWholeFramePremise({ uses, returnsWithoutHiddenPointer, fail });
   }
@@ -495,6 +525,7 @@ function auditFrame({
       oneObject,
       irBlocks,
       objects,
+      below,
       uses,
       usedSlotOffsets,
       returnsWithoutHiddenPointer,
@@ -1086,7 +1117,7 @@ function splitAddressingCopies(
  *  different offsets are different objects, so width, signedness, escape and the overlap
  *  window are decided per offset — one width shared by every capture in the function would
  *  declare a halfword spill and a word spill as one object. */
-function frameObjects(laddrs: readonly Op[], owned: FrameRange, fail: Refuse): Map<number, Op[]> {
+function frameObjects(laddrs: readonly Op[], owned: FrameRange, fail: Refuse, rebasesBelow = false): Map<number, Op[]> {
   const objects = new Map<number, Op[]>();
   for (const op of laddrs) {
     const off = op.attrs.off as number;
@@ -1098,14 +1129,13 @@ function frameObjects(laddrs: readonly Op[], owned: FrameRange, fail: Refuse): M
   // local area — and no other rule of the audit is about that gap. The TOP itself is also C's
   // one-past-the-end pointer, `g(buf, buf + 8)` over an 8-byte array, and the refusal names both
   // readings. BELOW IT is the outgoing block a call's stack words are staged in, and on O32 also
-  // the saves IDO keeps under its locals: an address there is no local's either. Every object's
-  // extent is held to the area again below; this says why, for the frontend that supplied it.
+  // the saves IDO keeps under its locals: an address there is no local's either — and where the
+  // target says so, pointer arithmetic on the object above it, which `belowRebaseRefusal` judges
+  // once the uses are known. Every object's extent is held to the area again below; this says why,
+  // for the frontend that supplied it.
   for (const off of objects.keys()) {
-    if (off < owned.from) {
-      fail(
-        `the captured address at [sp,#${off}) is below the reserved local area, which starts at [sp,#${owned.from}) — ` +
-          'an outgoing stack argument word or a saved register, whose address is not modelled',
-      );
+    if (off < owned.from && !rebasesBelow) {
+      fail(belowLocalArea(off, owned));
     }
     if (off === owned.to) {
       fail(
@@ -1123,6 +1153,129 @@ function frameObjects(laddrs: readonly Op[], owned: FrameRange, fail: Refuse): M
   return objects;
 }
 
+function belowLocalArea(off: number, owned: FrameRange): string {
+  return (
+    `the captured address at [sp,#${off}) is below the reserved local area, which starts at [sp,#${owned.from}) — ` +
+    'an outgoing stack argument word or a saved register, whose address is not modelled'
+  );
+}
+
+/** Why a capture at `off`, below the reserved local area, is not pointer arithmetic on the object
+ *  above it (`captureBelowLocalsRebases`), or null where it is. The words beneath the locals are no
+ *  C name's, so the capture is that object's address moved down only where nothing it reaches
+ *  could be one of those words in the C:
+ *  - it escapes nowhere where the area leaves words out on declarations alone (gcc's
+ *    `declaredWordsFrom`): what receives it may reach a local a callee declared with more stack
+ *    words than its call passes pushed beneath the area (`fill(s.c)` with `s.c` at 20 under a
+ *    five-word `four(1, 2, 3, 4)`). Elsewhere nothing C names lives beneath the locals, and handing
+ *    the base on is the same pointer arithmetic as indexing it;
+ *  - no access through it at a constant displacement lands beneath the locals (a copy into the
+ *    outgoing area is exactly that);
+ *  - no slot between it and the locals is stored to directly. Such a word is a staged stack
+ *    argument the index could reach, or a local the area does not hold because a callee is
+ *    declared with more stack words than its call passes (gcc's `above-outgoing-area` sizes the
+ *    outgoing block by the declarations), and either way the index's reach is no longer the one
+ *    object's;
+ *  - no store at a runtime index, through it or through any other capture, may land in the words
+ *    the area leaves out on those declarations: `struct { s32 h; u32 c[3]; } s` at 16 under a
+ *    five-word `four(1, 2, 3, 4)` puts gcc's area at 24, and the loop filling `s.c[k]` writes
+ *    `s.c[0]` at 20 through the base at 20 — or through `p = &s.c[1]` at 24 as `p[k]` from -1, and
+ *    gcc folds `s.c[j + 1]`'s `+ 1` into a base at 24 too. Elsewhere the words beneath the locals
+ *    hold no local, and a store there is one the C's own index puts outside its array;
+ *  - every access through a pointer stepped through the frame, from any capture, lands inside the
+ *    locals where the pointer is lowest (`AddressFlow.floor`): on its first trip for one stepped up
+ *    from a capture beneath them, which is how a copy of a by-value struct into the O32 outgoing
+ *    area starts (kmc's `addiu a3,sp,16`), and never for one stepped down (kmc fills the `s.c`
+ *    above down a pointer from 24, whose last trip stores 20).
+ *  What is left is an access at a runtime index or through a pointer stepped up from it, whose
+ *  reach and width the one object's rules judge like any other. Each refusal names its clause. */
+function belowRebaseRefusal(
+  off: number,
+  {
+    owned,
+    declaredWordsFrom,
+    uses,
+    flow,
+    irBlocks,
+    usedSlotOffsets,
+    rebasesBelow,
+  }: {
+    owned: FrameRange;
+    declaredWordsFrom: number | undefined;
+    uses: FrameUses;
+    flow: AddressFlow;
+    irBlocks: readonly Block[];
+    usedSlotOffsets: ReadonlySet<number>;
+    rebasesBelow: boolean;
+  },
+): string | null {
+  if (!rebasesBelow) {
+    return belowLocalArea(off, owned);
+  }
+  const why = (clause: string): string =>
+    `the captured address at [sp,#${off}) is below the reserved local area, which starts at [sp,#${owned.from}), ` +
+    `and is no pointer arithmetic on the object above it: ${clause}`;
+  const handedOver =
+    uses.escaped.has(off) ||
+    uses.sourceStores.has(off) ||
+    uses.published.has(off) ||
+    uses.passedToCallee.has(off) ||
+    uses.calleeReads.has(off) ||
+    uses.filledFrom.has(off) ||
+    uses.byValueReads.has(off) ||
+    uses.returnTemps.has(off);
+  // the words beneath the locals a misdeclared callee may have pushed a local into
+  const misplaced = declaredWordsFrom === undefined ? 0 : owned.from - Math.max(off, declaredWordsFrom);
+  if (handedOver && misplaced > 0) {
+    return why(
+      `it is handed on, where what receives it may reach the words from [sp,#${owned.from - misplaced}) to the locals, ` +
+        'which the area leaves out on the stack words its calls are declared with — a local, where a callee is ' +
+        'declared with more stack words than its call passes',
+    );
+  }
+  const fixed = uses.fixed.find((f) => f.at < owned.from);
+  if (fixed !== undefined) {
+    return why(`an access through it at a constant displacement lands beneath the locals, at [sp,#${fixed.at})`);
+  }
+  const slot = [...usedSlotOffsets].sort((a, b) => a - b).find((s) => overlaps(s, 4, off, owned.from - off));
+  if (slot !== undefined) {
+    return why(
+      `the word at [sp,#${slot}) between it and the locals is stored to directly — a staged stack argument ` +
+        'its index may reach, or a local the area misses because a callee is declared with more stack words than its call passes',
+    );
+  }
+  for (const [op, { index }] of uses.accessOps) {
+    if (
+      misplaced > 0 &&
+      op.opcode === 'store' &&
+      index !== undefined &&
+      !flow.stepped.has(op.operands[0]) &&
+      mayTouch(index.reach, owned.from - misplaced, misplaced)
+    ) {
+      return why(
+        `a store at a runtime index may land in the words from [sp,#${owned.from - misplaced}) to the ` +
+          'locals, which the area leaves out on the stack words its calls are declared with — a local, where a ' +
+          'callee is declared with more stack words than its call passes',
+      );
+    }
+  }
+  for (const blk of irBlocks) {
+    for (const op of blk.ops) {
+      if ((op.opcode !== 'load' && op.opcode !== 'store') || !flow.stepped.has(op.operands[0])) {
+        continue;
+      }
+      const at = (flow.floor.get(op.operands[0]) ?? -Infinity) + ((op.attrs.off as number | undefined) ?? 0);
+      if (at < owned.from) {
+        return why(
+          `a ${op.opcode} through a pointer stepped through the frame may land beneath the locals where the pointer is lowest` +
+            (Number.isFinite(at) ? `, at [sp,#${at})` : ', at no displacement known'),
+        );
+      }
+    }
+  }
+  return null;
+}
+
 /** Where each frame address may flow: `taint`, the object a value may hold the address of on SOME
  *  path, and `frameOnEveryPath`, the values that hold a frame address on EVERY path. */
 interface AddressFlow {
@@ -1131,6 +1284,9 @@ interface AddressFlow {
   /** the values that hold an address INTO the object at their offset, at no one displacement from
    *  it: a pointer stepped through the frame (`steppedPointers`) */
   readonly stepped: ReadonlyMap<Value, number>;
+  /** the lowest frame byte each `stepped` value may hold, -Infinity where nothing bounds it from
+   *  below (a runtime start, a runtime move, a step down) */
+  readonly floor: ReadonlyMap<Value, number>;
   /** why one value may hold the address of two objects: a pointer into the one object at no one
    *  member, which only that answer declares (`chooseFrameModel`) */
   readonly merges: string | undefined;
@@ -1238,7 +1394,14 @@ function addressFlow(
   for (const p of stepped.twoObjects) {
     merged.add(p);
   }
-  return { taint, frameOnEveryPath, stepped: stepped.stepped, merges: merges ?? stepped.merges, merged };
+  return {
+    taint,
+    frameOnEveryPath,
+    stepped: stepped.stepped,
+    floor: stepped.floor,
+    merges: merges ?? stepped.merges,
+    merged,
+  };
 }
 
 /** A POINTER STEPPED THROUGH THE FRAME. Strength reduction turns `for (i = 0; i < n; i++)
@@ -1268,7 +1431,12 @@ function steppedPointers(
   taint: ReadonlyMap<Value, number>,
   incoming: ReadonlyMap<Value, readonly Value[]>,
   { defOf, constOf }: LiteralAddresses,
-): { stepped: Map<Value, number>; merges: string | undefined; twoObjects: ReadonlySet<Value> } {
+): {
+  stepped: Map<Value, number>;
+  merges: string | undefined;
+  twoObjects: ReadonlySet<Value>;
+  floor: ReadonlyMap<Value, number>;
+} {
   // the object values, and the phis that carry exactly one of them on every path
   const exact = new Map<Value, number>();
   for (const [off, ops] of objects) {
@@ -1393,7 +1561,34 @@ function steppedPointers(
     merges ??= `a phi merges the frame objects at [sp,#${stepped.get(v)}] and [sp,#${hi}] — one value, two objects`;
     twoObjects.add(v);
   }
-  return { stepped, merges, twoObjects };
+  // …and the LOWEST FRAME BYTE each surviving value may hold, lowered through the same phis and
+  // moves: an object's own address is its offset, a phi the least of what it carries, a move by a
+  // constant `k` its pointer's floor plus (`add`) or less (`sub`) `k`. A runtime index sum, a move by
+  // a runtime value, and a cycle that keeps lowering it (a step down) have none: -Infinity. A
+  // shortest path uses no cycle, so a value still lowering after `stepped.size` rounds is on or past
+  // a step down.
+  const floor = new Map<Value, number>();
+  const floorOf = (a: Value): number => floor.get(a) ?? exactOf(a) ?? (stepped.has(a) ? Infinity : -Infinity);
+  const nextFloor = (v: Value): number => {
+    const d = defOf.get(v);
+    if (d === undefined) {
+      return Math.min(...incoming.get(v)!.map(floorOf));
+    }
+    const { from, by } = moved(d)!;
+    const k = constOf(by);
+    return k === undefined ? -Infinity : floorOf(from) + (d.opcode === 'add' ? k : -k);
+  };
+  for (let round = 0, lowered = true; lowered; round++) {
+    lowered = false;
+    for (const v of stepped.keys()) {
+      const n = nextFloor(v);
+      if (n < floorOf(v)) {
+        floor.set(v, round > stepped.size ? -Infinity : n);
+        lowered = true;
+      }
+    }
+  }
+  return { stepped, merges, twoObjects, floor };
 }
 
 /** One fixed-offset access at an object's own address. */
@@ -2761,6 +2956,7 @@ function keepAsOneObject({
   oneObject: { from, to },
   irBlocks,
   objects,
+  below,
   uses,
   usedSlotOffsets,
   returnsWithoutHiddenPointer,
@@ -2771,6 +2967,9 @@ function keepAsOneObject({
   oneObject: FrameRange;
   irBlocks: Block[];
   objects: ReadonlyMap<number, readonly Op[]>;
+  /** the captures beneath the reserved local area `belowRebaseRefusal` let through: rebased onto
+   *  the lowest part, as the object's address moved down */
+  below: ReadonlySet<number>;
   uses: FrameUses;
   usedSlotOffsets: ReadonlySet<number>;
   returnsWithoutHiddenPointer: (callee: string) => boolean;
@@ -2780,7 +2979,7 @@ function keepAsOneObject({
 }): void {
   const kept = `the bytes [sp,#${from}) to [sp,#${to}) kept as one object`;
   for (const off of objects.keys()) {
-    if (off < from || off >= to) {
+    if ((off < from && !below.has(off)) || off >= to) {
       fail(`the object at [sp,#${off}) lies outside ${kept}`);
     }
   }
@@ -2884,8 +3083,10 @@ function keepAsOneObject({
   // taken arrays in a known order against their declarations (`addressTakenArrayOrder`): the
   // parts are declared in that order, or the recompile swaps their addresses. And at a known
   // alignment (`addressTakenArrayAlignment`), which says where a part may start.
+  // A capture rebased from beneath the locals (`below`) addresses the object it is moved down from
+  // by a runtime index alone, which may reach any part, so there is one part.
   const parts =
-    twoWidths === undefined && arrayOrder !== undefined && arrayAlignment !== undefined
+    twoWidths === undefined && below.size === 0 && arrayOrder !== undefined && arrayAlignment !== undefined
       ? provenParts({ from, to }, objects, uses, arrayAlignment)
       : [{ from, to }];
   // …stamped `part` where there are several: storage a copy proved one object of the source's, so
@@ -2898,7 +3099,7 @@ function keepAsOneObject({
       attrs: { off: lo, width: 1, signed: false, count: hi - lo, ...(parts.length > 1 ? { part: true } : {}) },
     }),
   );
-  const partOf = (at: number) => parts.findIndex((p) => at >= p.from && at < p.to);
+  const partOf = (at: number) => (at < from ? 0 : parts.findIndex((p) => at >= p.from && at < p.to));
   const object = laddrs[0];
   const base = object.results[0];
   const memberAt = new Map<Value, number>();

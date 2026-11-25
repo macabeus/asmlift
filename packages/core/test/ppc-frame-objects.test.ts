@@ -704,3 +704,56 @@ describe("an unsized call's outgoing area ends at the loaded-word bound", () => 
     ).toMatchObject({ outgoingEnd: 8 });
   });
 });
+
+// `struct UpdBig { s32 w[18]; }; void f(struct UpdBig *s){ struct UpdBig b; b = *s; upd_useb(&b); }`
+// at mwcc_242_81 -O4,p (bench row upd_lcopy): the copy is an update-form loop whose destination
+// pointer starts one word beneath `b` at 8, `addi r5,r1,4 / … / stwu r0,8(r5)`, at the LR-save
+// word's offset. Its first store lands in `b`, so the pointer stepped from there is
+// `b`'s moved down (`captureBelowLocalsRebases`).
+describe('a pointer stepped from below the local area', () => {
+  const LCOPY = [
+    'stwu    r1,-80(r1)',
+    'mflr    r0',
+    'addi    r4,r3,-4',
+    'stw     r0,84(r1)',
+    'li      r0,9',
+    'addi    r5,r1,4',
+    'mtctr   r0',
+    'lwz     r3,4(r4)',
+    'lwzu    r0,8(r4)',
+    'stw     r3,4(r5)',
+    'stwu    r0,8(r5)',
+    'bdnz+   @7',
+    'addi    r3,r1,8',
+    'bl upd_useb',
+    'lwz     r0,84(r1)',
+    'mtlr    r0',
+    'addi    r1,r1,80',
+    'blr',
+  ];
+  const UPD: Prototypes = {
+    f: { params: ['s32 *'], returnsVoid: true },
+    upd_useb: { params: ['void *'], returnsVoid: true },
+  };
+
+  test('mwcc: the update-form copy is the local struct, moved down by a word', () => {
+    const out = lift('f', LCOPY, UPD);
+    expect(out).toContain('u8 sp8[72];');
+    expect(out).toContain('(s32 *)((u32)sp8 + -4)');
+    expect(out).toContain('upd_useb((void *)sp8);');
+  });
+
+  // `u32 a[3]; u32 *p = a - 1; for (…) use1(*p++);` at mwcc_242_81 is `addi r31,r1,4 / lwz
+  // r3,0(r31)`: the first trip reads the LR-save word at 4, and `*p++ = x` writes it the same way.
+  test('…and only where every access through it lands inside the locals on the first trip', () => {
+    const at = (old: string, now: string) => LCOPY.map((l) => (l === old ? now : l));
+    const beneath =
+      /\[sp,#4\) is below the reserved local area, .*through a pointer stepped through the frame may land beneath the locals where the pointer is lowest, at \[sp,#4\)/;
+    expect(() =>
+      decompile('f', fn('f', at('stw     r3,4(r5)', 'stw     r3,0(r5)')), PPC_MWCC, { prototypes: UPD }),
+    ).toThrow(beneath);
+    expect(() =>
+      decompile('f', fn('f', at('lwz     r3,4(r4)', 'lwz     r3,0(r5)')), PPC_MWCC, { prototypes: UPD }),
+    ).toThrow(beneath);
+  });
+});

@@ -844,3 +844,287 @@ fpspill:
 	.word	gFp
 .Lfe17:
 	.size	 fpspill,.Lfe17-fpspill
+	.align	2, 0
+	.globl	walk4
+	.type	 walk4,function
+	.thumb_func
+walk4:
+	push	{r4, r5, r6, lr}
+	add	sp, sp, #-0x10
+	ldr	r0, .L73
+	ldr	r0, [r0]
+	str	r0, [sp]
+	ldr	r0, .L73+0x4
+	ldr	r0, [r0]
+	str	r0, [sp, #0x4]
+	ldr	r0, .L73+0x8
+	ldr	r0, [r0]
+	str	r0, [sp, #0x8]
+	ldr	r0, .L73+0xc
+	ldr	r0, [r0]
+	str	r0, [sp, #0xc]
+	mov	r4, #0x0
+	ldr	r1, .L73+0x10
+	ldr	r0, [r1]
+	cmp	r4, r0
+	bge	.L69	@cond_branch
+	add	r6, r1, #0
+	mov	r5, sp
+.L71:
+	ldmia	r5!, {r0}
+	mov	r1, #0x0
+	bl	use
+	add	r4, r4, #0x1
+	ldr	r0, [r6]
+	cmp	r4, r0
+	blt	.L71	@cond_branch
+.L69:
+	add	sp, sp, #0x10
+	pop	{r4, r5, r6}
+	pop	{r0}
+	bx	r0
+.L74:
+	.align	2, 0
+.L73:
+	.word	gA
+	.word	gB
+	.word	gC
+	.word	gD
+	.word	gI
+.Lfe18:
+	.size	 walk4,.Lfe18-walk4
+	.align	2, 0
+	.globl	walkcall
+	.type	 walkcall,function
+	.thumb_func
+walkcall:
+	push	{r4, r5, r6, lr}
+	add	sp, sp, #-0x8
+	ldr	r0, .L81
+	ldr	r0, [r0]
+	str	r0, [sp]
+	ldr	r0, .L81+0x4
+	ldr	r0, [r0]
+	str	r0, [sp, #0x4]
+	mov	r4, #0x0
+	ldr	r1, .L81+0x8
+	ldr	r0, [r1]
+	cmp	r4, r0
+	bge	.L77	@cond_branch
+	mov	r5, sp
+	add	r6, r1, #0
+.L79:
+	ldmia	r5!, {r0}
+	add	r1, r4, #0
+	bl	use
+	add	r4, r4, #0x1
+	ldr	r0, [r6]
+	cmp	r4, r0
+	blt	.L79	@cond_branch
+.L77:
+	bl	rng
+	add	sp, sp, #0x8
+	pop	{r4, r5, r6}
+	pop	{r0}
+	bx	r0
+.L82:
+	.align	2, 0
+.L81:
+	.word	gA
+	.word	gB
+	.word	gI
+.Lfe19:
+	.size	 walkcall,.Lfe19-walkcall
+	.align	2, 0
+	.globl	walkkr
+	.type	 walkkr,function
+	.thumb_func
+walkkr:
+	push	{r4, r5, r6, lr}
+	add	sp, sp, #-0xc
+	ldr	r0, .L89
+	ldr	r0, [r0]
+	str	r0, [sp, #0x4]
+	ldr	r0, .L89+0x4
+	ldr	r0, [r0]
+	str	r0, [sp, #0x8]
+	mov	r4, #0x0
+	ldr	r1, .L89+0x8
+	ldr	r0, [r1]
+	cmp	r4, r0
+	bge	.L85	@cond_branch
+	add	r5, sp, #0x4
+	add	r6, r1, #0
+.L87:
+	ldmia	r5!, {r0}
+	add	r1, r4, #0
+	bl	use
+	add	r4, r4, #0x1
+	ldr	r0, [r6]
+	cmp	r4, r0
+	blt	.L87	@cond_branch
+.L85:
+	mov	r0, #0x5
+	str	r0, [sp]
+	mov	r0, #0x1
+	mov	r1, #0x2
+	mov	r2, #0x3
+	mov	r3, #0x4
+	bl	kr
+	add	sp, sp, #0xc
+	pop	{r4, r5, r6}
+	pop	{r0}
+	bx	r0
+.L90:
+	.align	2, 0
+.L89:
+	.word	gA
+	.word	gB
+	.word	gI
+.Lfe20:
+	.size	 walkkr,.Lfe20-walkkr
+	.align	2, 0
+	.globl	walkdn
+	.type	 walkdn,function
+	.thumb_func
+walkdn:
+	push	{r4, r5, lr}
+	add	sp, sp, #-0x8
+	ldr	r0, .L97
+	ldr	r0, [r0]
+	str	r0, [sp]
+	ldr	r0, .L97+0x4
+	ldr	r0, [r0]
+	str	r0, [sp, #0x4]
+	ldr	r0, .L97+0x8
+	ldr	r4, [r0]
+	cmp	r4, #0
+	blt	.L93	@cond_branch
+	lsl	r0, r4, #0x2
+	mov	r1, sp
+	add	r5, r0, r1
+.L95:
+	ldr	r0, [r5]
+	add	r1, r4, #0
+	bl	use
+	sub	r5, r5, #0x4
+	sub	r4, r4, #0x1
+	cmp	r4, #0
+	bge	.L95	@cond_branch
+.L93:
+	add	sp, sp, #0x8
+	pop	{r4, r5}
+	pop	{r0}
+	bx	r0
+.L98:
+	.align	2, 0
+.L97:
+	.word	gA
+	.word	gB
+	.word	gI
+.Lfe21:
+	.size	 walkdn,.Lfe21-walkdn
+	.align	2, 0
+	.globl	walkbelow
+	.type	 walkbelow,function
+	.thumb_func
+walkbelow:
+	push	{r4, r5, r6, lr}
+	add	sp, sp, #-0x10
+	mov	r5, sp
+	ldr	r0, .L105
+	ldr	r0, [r0]
+	str	r0, [sp, #0x4]
+	ldr	r0, .L105+0x4
+	ldr	r0, [r0]
+	str	r0, [sp, #0x8]
+	ldr	r0, .L105+0x8
+	ldr	r0, [r0]
+	str	r0, [sp, #0xc]
+	mov	r4, #0x0
+	ldr	r1, .L105+0xc
+	ldr	r0, [r1]
+	cmp	r4, r0
+	bge	.L101	@cond_branch
+	add	r6, r1, #0
+.L103:
+	add	r5, r5, #0x4
+	ldr	r0, [r5]
+	add	r1, r4, #0
+	bl	use
+	add	r4, r4, #0x1
+	ldr	r0, [r6]
+	cmp	r4, r0
+	blt	.L103	@cond_branch
+.L101:
+	ldr	r0, .L105+0x8
+	ldr	r0, [r0]
+	str	r0, [sp]
+	mov	r0, #0x1
+	mov	r1, #0x2
+	mov	r2, #0x3
+	mov	r3, #0x4
+	bl	five
+	add	sp, sp, #0x10
+	pop	{r4, r5, r6}
+	pop	{r0}
+	bx	r0
+.L106:
+	.align	2, 0
+.L105:
+	.word	gA
+	.word	gB
+	.word	gC
+	.word	gI
+.Lfe22:
+	.size	 walkbelow,.Lfe22-walkbelow
+	.align	2, 0
+	.globl	walkbefore
+	.type	 walkbefore,function
+	.thumb_func
+walkbefore:
+	push	{r4, r5, r6, lr}
+	add	sp, sp, #-0xc
+	ldr	r0, .L113
+	ldr	r0, [r0]
+	str	r0, [sp, #0x4]
+	ldr	r0, .L113+0x4
+	ldr	r0, [r0]
+	str	r0, [sp, #0x8]
+	ldr	r0, .L113+0x8
+	ldr	r0, [r0]
+	str	r0, [sp]
+	mov	r0, #0x1
+	mov	r1, #0x2
+	mov	r2, #0x3
+	mov	r3, #0x4
+	bl	kr
+	mov	r4, #0x0
+	ldr	r1, .L113+0xc
+	ldr	r0, [r1]
+	cmp	r4, r0
+	bge	.L109	@cond_branch
+	add	r5, sp, #0x4
+	add	r6, r1, #0
+.L111:
+	ldmia	r5!, {r0}
+	add	r1, r4, #0
+	bl	use
+	add	r4, r4, #0x1
+	ldr	r0, [r6]
+	cmp	r4, r0
+	blt	.L111	@cond_branch
+.L109:
+	add	sp, sp, #0xc
+	pop	{r4, r5, r6}
+	pop	{r0}
+	bx	r0
+.L114:
+	.align	2, 0
+.L113:
+	.word	gA
+	.word	gB
+	.word	gC
+	.word	gI
+.Lfe23:
+	.size	 walkbefore,.Lfe23-walkbefore

@@ -31,6 +31,8 @@
 //     `below1`..`below6` read through `a - 1` / `a - 2`, beneath the array, beside a K&R call's
 //     stack arguments staged after the read, before it, and on another path; `blk1`..`blk3` pass a
 //     struct by value through such a pointer, its register words loaded after the stack words.
+//     `walk4`/`walkcall`/`walkkr`/`walkbefore`/`walkdn`/`walkbelow` loop over a local array through
+//     a pointer captured before the loop and stepped up by the load (`ldmia r5!`), or down.
 //     Read by `packages/core/test/frame-indexed-probes.test.ts`.
 //   agbcc-dmafill.s — a DMA fill's source temp, its address stored to the device's source register:
 //     `dcall`/`dpaths` load that register's address into a register that holds a frame address

@@ -945,7 +945,11 @@ export interface FrameLayoutBehaviors {
   // r4`), and a pointer formed below its array bases its read on words a declaration may leave
   // unstated (`blk1`/`blk2` under a 4-word `kr`, `blk3` under a 5-word one), so it clears nothing
   // and those keep the refusal a plain call gets. A struct member's array (`p[i].y`, `add r1, sp,
-  // #8 / add r1, r1, r0`) has the pointer's spelling and clears nothing either.
+  // #8 / add r1, r1, r0`) has the pointer's spelling and clears nothing either. A pointer captured
+  // before a loop and stepped up by its load (`mov r5, sp` … `ldmia r5!`, thumb.ts
+  // `steppedFrameReads`) is read only with no ceiling at all, every call after it stated exactly by
+  // a typed parameter list, based at its capture, the lowest word it can read (`walk4`, `walkcall`;
+  // `walkbelow` captures beneath its array, at a typed call's staged word, and declines).
   // The Thumb frontend gives each read a ceiling (`below`): with no call that may take a stack word
   // after it, none; otherwise the lowest, over the paths to such calls, of the words each one's
   // declaration states, and no event at all where a call nothing sizes lies ahead. Under this
@@ -993,6 +997,27 @@ export interface FrameLayoutBehaviors {
   // declines. It is no fact of the ISA, so a second compiler of the same ISA states it rather than
   // inheriting it from `escapedFrameAddressNamesALocal`.
   stagedStackWordReachesOnlyItsCall?: boolean;
+  // A FRAME ADDRESS FORMED BELOW THE LOCALS IS POINTER ARITHMETIC ON THE OBJECT ABOVE IT. A
+  // compiler folds the constant of `a[i - 1]`, `(b - 3)[i]` or a copy's first `stwu` displacement
+  // into the base, so the address it forms lies beneath the array, in words no C name owns: the
+  // O32 outgoing area (the a0..a3 home and the stack words) and IDO's saved `ra` beneath its
+  // locals (ido7.1 bases `a[i - 1]`, `a` at 32, at the `sw ra,28(sp)` word), PPC's outgoing
+  // parameter words and the callee's LR-save word at 4(r1) — and below sp itself (mwcc bases
+  // `(b - 3)[i]` at -4). The frame-object audit then keeps the locals as one object and rebases such
+  // a capture onto it as `(u8 *)obj - k` (frontend/frame-objects.ts `belowRebaseRefusal`), where
+  // every constant-displacement access through it lands inside the object, no word between it and
+  // the locals is stored to directly, neither an escape of it nor a store at a runtime index through
+  // any capture may land in words the area leaves out on declarations alone (gcc's,
+  // `declaredWordsFrom`), and every access through a pointer stepped through the frame lands inside
+  // the locals where the pointer is lowest. What goes through it is then a runtime index whose reach
+  // and width the audit judges per byte, or a pointer stepped up from it (mwcc's
+  // update-form copy, `addi r5,r1,4 / stwu r0,8(r5)`; kmc's `*++p` from `a - 1`). An O32 copy of a
+  // struct passed by value into the outgoing area steps a pointer too, but from a capture IN that
+  // area, so its first store lands beneath the locals and refuses.
+  // Absent (Thumb) => such a capture refuses: agbcc adds an array's offset after the index, so it
+  // forms no such base (`corpus/agbcc-indexed.s`), and a pointer the source forms below its array
+  // is at a word an outgoing argument may own (`stagedStackWordReachesOnlyItsCall`).
+  captureBelowLocalsRebases?: boolean;
   // WHERE AN O32 FUNCTION KEEPS ITS LOCALS in the one frame `addiu sp,sp,-N` reserves — the area
   // the MIPS frontend hands the frame-object audit as `ownedLocals`/`declaredLocals`. Below it
   // lies the OUTGOING area, the 16-byte home of a0..a3 every calling function reserves and then
@@ -1974,6 +1999,8 @@ export const MIPS_IDO: TargetDescription = {
     // MEASURED, the probes at the field: past the `addiu` reach every member access gets its own
     // `lui`/`addu`, and a held pointer shares one.
     farMemberBasePerAccess: { past: 32767 },
+    // the O32 ABI's, the field says why (stkidx_five, stkidx_m2, stkidx_bm3)
+    captureBelowLocalsRebases: true,
   },
 };
 
@@ -2142,6 +2169,8 @@ export const MIPS_GCC: TargetDescription = {
     // MEASURED on BOTH toolchains this description serves: the probes at the fields.
     forwardsStructReturnDestination: false,
     discardedReadMayFillArgRegister: true,
+    // the O32 ABI's, the field says why (stkidx_five, stkidx_m2, stkidx_bm3)
+    captureBelowLocalsRebases: true,
   },
 };
 
@@ -2196,6 +2225,8 @@ export const PPC_MWCC: TargetDescription = {
   // defaults; coalesceLoopInit false until a CW loop fixture says otherwise — the second of the
   // two compiler-wide guesses standing in for the per-function observation named at MIPS_GCC.
   compilerBehaviors: {
+    // the PPC ABI's, the field says why (upd_lcopy, stkidx_five, stkidx_m2, stkidx_bm3)
+    captureBelowLocalsRebases: true,
     plainCharSigned: true,
     contractsFloatProducts: true,
     // a store in a loop keeps its plain poll read in it (the field; poll probes on all three builds)
