@@ -447,7 +447,7 @@ interface JumpRanking {
  *  decline into a lift and never one lift into another: where the code from the exit on can be
  *  copied into the arm, or a last-resort rung reads the loop, that spelling is published already.
  *  The exits to an enclosing switch's merge are asked one level later still (`mergeExits`), once the
- *  runs asking the case-exit flags alone declined: those runs can lift through a later rung where an
+ *  runs asking the case-exit flags alone declined, or at once where no run met a case exit: those runs can lift through a later rung where an
  *  earlier one met a merge exit, and asking both at once would publish the earlier rung's lift in
  *  its place (an mwcc nest of switches in a loop). Nor are they asked in the join reading's ladder
  *  where the copies' ladder runs after it (`structureWithinBudget`): a function the join reading
@@ -455,10 +455,13 @@ interface JumpRanking {
  *  case-goto.test.ts's and join-past-returns.test.ts's fixtures). */
 interface CaseExitRanking {
   readonly asked: boolean;
+  /** whether a run that did not ask the case-exit flags met an exit one spells */
   wanted: boolean;
-  /** whether `switchMergeExit` is asked too, in a run that asks; a run that does not ask it sets
-   *  `wanted` where it meets one */
+  /** whether `switchMergeExit` is asked too, in a run that asks */
   readonly mergeExits?: boolean;
+  /** whether a run that did not ask `switchMergeExit` met an exit it spells: a function that met
+   *  only those goes straight to the run that asks them */
+  wantedMerge: boolean;
 }
 
 /** The `while (1)` loops spelled `for (init; cond; inc)` with `continue;` into their latch (THE LOOP
@@ -673,7 +676,7 @@ function structureLadder(
   refusedHeld: (() => void)[],
 ): SFn {
   let refused: { error: StructureError; held: (() => void)[] } | undefined;
-  let caseExit: CaseExitRanking = { asked: false, wanted: false };
+  let caseExit: CaseExitRanking = { asked: false, wanted: false, wantedMerge: false };
   const attempt = (
     loopTailCopy: LoopTailCopyRanking,
     pastExit: PastExitRanking,
@@ -808,15 +811,17 @@ function structureLadder(
   let sfn = jumpRanked();
   // the case bodies' exit flags, asked once every run without them declined and one met an exit
   // they spell, and then the exits to an enclosing switch's merge too, once the runs asking the
-  // flags alone declined and one met such a merge; those runs read every switch at least as far, so
-  // where they decline too, theirs is the refusal that stands
-  if (sfn === null && caseExit.wanted && hooks.caseExitFlags !== false) {
-    refused = undefined;
-    caseExit = { asked: true, wanted: false, mergeExits: false };
-    sfn = jumpRanked();
-    if (sfn === null && caseExit.wanted && (reading.copies || !reading.asked)) {
+  // flags alone declined (or none was met) and the last run met such a merge; those runs read every
+  // switch at least as far, so where they decline too, theirs is the refusal that stands
+  if (sfn === null && (caseExit.wanted || caseExit.wantedMerge) && hooks.caseExitFlags !== false) {
+    if (caseExit.wanted) {
       refused = undefined;
-      caseExit = { asked: true, wanted: false, mergeExits: true };
+      caseExit = { asked: true, wanted: false, mergeExits: false, wantedMerge: false };
+      sfn = jumpRanked();
+    }
+    if (sfn === null && caseExit.wantedMerge && (reading.copies || !reading.asked)) {
+      refused = undefined;
+      caseExit = { asked: true, wanted: false, mergeExits: true, wantedMerge: false };
       sfn = jumpRanked();
     }
   }
@@ -5106,7 +5111,7 @@ function structureRanked(
     if (!bareRet && !shared) {
       return undefined;
     }
-    caseExit.wanted ||= caseExit.mergeExits !== true;
+    caseExit.wantedMerge ||= caseExit.mergeExits !== true;
     if (caseExit.mergeExits !== true) {
       return undefined;
     }
