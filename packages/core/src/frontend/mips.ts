@@ -564,11 +564,7 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
         while (p >= 0 && writtenReg(instrs[p]) !== x.ops[1]) {
           p--;
         }
-        const hi = p >= 0 && instrs[p].mnemonic === 'lui' ? tableBaseOf(instrs[p]) : null;
-        if (!hi || hi.sym !== lo.sym) {
-          return [{ sym: '', addend: NaN }];
-        }
-        return [paired(hi, parseImm(instrs[p].ops[1]), parseImm(x.ops[2]))];
+        return [luiPairedWith(x, lo.sym, p) ?? { sym: '', addend: NaN }];
       }),
     );
   /** The table a `%hi` / `%lo` pair addresses: the high record's symbol and addend plus both
@@ -580,6 +576,13 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
     sym: hi.sym,
     addend: hi.addend + (((hiImm & 0xffff) << 16) + (((loImm & 0xffff) << 16) >> 16)),
   });
+  /** The table an `addiu rB,rH,%lo(T)` (`lo`, whose LO16 names `loSym`) addresses with the `lui
+   *  rH,%hi(T)` at `hiIdx`, the nearest earlier writer of rH: null where that writer is no `lui` on
+   *  a table's section or names another symbol (`hoistedTable`, `formedTable`). */
+  const luiPairedWith = (lo: Instr, loSym: string, hiIdx: number): TableKey | null => {
+    const hi = hiIdx >= 0 && instrs[hiIdx].mnemonic === 'lui' ? tableBaseOf(instrs[hiIdx]) : null;
+    return hi && hi.sym === loSym ? paired(hi, parseImm(instrs[hiIdx].ops[1]), parseImm(lo.ops[2])) : null;
+  };
   /** The table a base the dispatch's block forms addresses, read with the load's displacement `off`.
    *  The base pairs with the load: IDO, KMC and gcc 2.7.2 fold the table's `%lo` into the `lw`
    *  whenever the block forms the base, so `lw rV,%lo(T+K)(at)`'s displacement is the low half of
@@ -625,11 +628,8 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
       return null;
     }
     const hiIdx = defBefore(lo.ops[1], bi2);
-    const hi = hiIdx >= 0 && instrs[hiIdx].mnemonic === 'lui' ? tableBaseOf(instrs[hiIdx]) : null;
-    if (!hi || hi.sym !== loRel.sym) {
-      return null;
-    }
-    return { key: paired(hi, parseImm(instrs[hiIdx].ops[1]), parseImm(lo.ops[2])), hiIdx };
+    const key = luiPairedWith(lo, loRel.sym, hiIdx);
+    return key && { key, hiIdx };
   };
 
   const out = new Map<number, MipsJT>();
