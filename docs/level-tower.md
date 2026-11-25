@@ -857,11 +857,12 @@ from the capture up only across blocks, by a must-hold, and only with every late
 where the target says nothing C names lives there (`captureBelowLocalsRebases`: O32 and PPC, which
 fold `a[i - 1]`'s constant into the base, and step a pointer up from below the array: mwcc's
 update-form copy, kmc's `*++p` from `a - 1`), and only where it escapes nowhere, no
-constant-displacement access through it lands beneath the locals, nothing may store to a word
-between it and the locals — directly, at a runtime index through it, or through a pointer stepped
-through the frame (a staged stack argument, or a local a callee declared with too many stack words
-pushed out of the area) — and every access through a stepped pointer lands inside the locals where
-the pointer is lowest (`AddressFlow.floor`: on the first trip of one stepped up). A phi that holds ONE object on every path is no such pointer but that object's
+constant-displacement access through it lands beneath the locals, no word between it and the
+locals is stored to directly, no store at a runtime index through it may land in words gcc's area
+leaves out on declarations alone (`declaredWordsFrom`: a local a callee declared with too many stack
+words pushed out of the area), and every access through a pointer stepped through the frame lands
+inside the locals where the pointer is lowest (`AddressFlow.floor`: on the first trip of one stepped
+up). A phi that holds ONE object on every path is no such pointer but that object's
 address. The one-object read has a
 second inhabitant on Thumb, and the frontend tells them apart before the audit: agbcc promotes a
 `u8` or `u16` local to a word, spills it with `str`, and reloads only the narrow part through a copy of sp

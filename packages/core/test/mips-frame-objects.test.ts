@@ -445,12 +445,49 @@ describe('a capture below the local area is the object above it, moved down', ()
     use1: { params: ['u32'], returnsVoid: true },
   });
 
-  test('…and not where a store at a runtime index through it may land between it and the locals', () => {
+  test('…and not where a store at a runtime index through it may land in words a declaration left out', () => {
     const rs = relocsAt(0x10, 0x24, 0x58, 0x70);
     expect(lift(QS4_GCC, rs, MIPS_GCC, HC3_PROTOS(5))).toThrow(
-      /\[sp,#20\) is below the reserved local area, which starts at \[sp,#24\), .*a store through it at a runtime index may land between it and the locals/,
+      /\[sp,#20\) is below the reserved local area, which starts at \[sp,#24\), .*a store through it at a runtime index may land in the words from \[sp,#20\) to the locals/,
     );
     expect(src(QS4_GCC, rs, MIPS_GCC, HC3_PROTOS(4))).toContain('u8 sp16[16];');
+  });
+
+  // `void f(s32 i){ u32 a[2]; a[0] = gA; a[1] = gB; a[i - 3] = gC; use1(a[1]); }` at gcc2.7.2
+  // -O1: the store's base is at 4, in the a0..a3 home, beneath an area no declaration moved
+  // (`use1` takes no stack word), so no local can lie there and the store is `a`'s.
+  test('…while a store at a runtime index below an area no declaration moved is the object above', () => {
+    const BS = [
+      '0:\taddiu\tsp,sp,-32',
+      '4:\tsw\tra,24(sp)',
+      '8:\tlui\tv0,0x0',
+      'c:\tlw\tv0,0(v0)',
+      '10:\tsw\tv0,16(sp)',
+      '14:\tlui\tv0,0x0',
+      '18:\tlw\tv0,0(v0)',
+      '1c:\tsw\tv0,20(sp)',
+      '20:\tsll\ta0,a0,0x2',
+      '24:\taddiu\tv0,sp,16',
+      '28:\taddu\ta0,a0,v0',
+      '2c:\tlui\tv0,0x0',
+      '30:\tlw\tv0,0(v0)',
+      '34:\tsw\tv0,-12(a0)',
+      '38:\tjal\t0 <f>',
+      '3c:\tlw\ta0,20(sp)',
+      '40:\tlw\tra,24(sp)',
+      '44:\tjr\tra',
+      '48:\taddiu\tsp,sp,32',
+    ];
+    const rs: [number, string, string][] = [
+      [0x8, 'R_MIPS_HI16', 'gA'],
+      [0xc, 'R_MIPS_LO16', 'gA'],
+      [0x14, 'R_MIPS_HI16', 'gB'],
+      [0x18, 'R_MIPS_LO16', 'gB'],
+      [0x2c, 'R_MIPS_HI16', 'gC'],
+      [0x30, 'R_MIPS_LO16', 'gC'],
+      [0x38, 'R_MIPS_26', 'use1'],
+    ];
+    expect(src(BS, rs, MIPS_GCC, HC3_PROTOS(4))).toContain('((s32 *)((u32)sp16 + -12))[a0] = gC;');
   });
 
   test('…nor where a pointer stepped down through the locals may store beneath them', () => {

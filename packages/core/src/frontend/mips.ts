@@ -3445,6 +3445,7 @@ function liftOnce(
         : () => ({
             ownedLocals: frame.area,
             declaredLocals: frame.area,
+            declaredWordsFrom: frame.declaredWordsFrom,
             usedSlotOffsets: new Set([...valueSlots].filter((o) => o < frame.size)),
             loadedWords: loadedFrom === undefined ? undefined : { from: loadedFrom, bound: loadedWordBound },
             capturedObjectIsTheWholeFrame: false,
@@ -3658,7 +3659,7 @@ export function measureO32Frame({
   /** The lowest frame word from 16 up this function loads (`lift`'s loaded-word bound), which caps
    *  how far an unsized call's stack words can reach; `Infinity` where nothing bounds it. */
   loadedWordBound?: number;
-}): { area: FrameRange; size: number } | null {
+}): { area: FrameRange; size: number; declaredWordsFrom?: number } | null {
   const captures = code.filter(takesFrameAddress);
   if (captures.length === 0 || depthAt === null || frameSize === undefined) {
     return null;
@@ -3717,7 +3718,11 @@ export function measureO32Frame({
       return null;
     }
   }
-  return { area, size: frameSize };
+  // gcc's area starts past the stack words its calls are DECLARED with, from 16 up: where a
+  // declaration overstates them, a local lies in those words (`FrameObjectAudit.declaredWordsFrom`)
+  return rule === 'above-outgoing-area'
+    ? { area, size: frameSize, declaredWordsFrom: STACK_ARGS_AT }
+    : { area, size: frameSize };
 }
 
 /** A `jal`'s callee: the Splat operand, or the R_MIPS_26 record's symbol. */
