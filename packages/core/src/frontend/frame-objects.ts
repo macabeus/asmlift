@@ -469,8 +469,8 @@ function auditFrame({
   }
   const facts = frameAddressFacts(irBlocks, symbols, target);
   const { laddrs, splitRefusal } = splitAddressingCopies(irBlocks, captures, foldedHere, declaredStructs(irBlocks));
-  const rebasesBelow = target.compilerBehaviors.captureBelowLocalsRebases;
-  const objects = frameObjects(laddrs, owned, fail, rebasesBelow !== undefined);
+  const rebasesBelow = target.compilerBehaviors.captureBelowLocalsRebases === true;
+  const objects = frameObjects(laddrs, owned, fail, rebasesBelow);
   const flow = addressFlow(irBlocks, objects, facts);
   const uses = classifyFrameUses({
     irBlocks,
@@ -489,7 +489,7 @@ function auditFrame({
   // the audit, wherever the capture may reach a word beneath the locals other than by an index.
   const below = new Set([...objects.keys()].filter((off) => off < owned.from));
   for (const off of below) {
-    const why = belowRebaseRefusal(off, { owned, uses, flow, objects, facts, irBlocks, usedSlotOffsets, rebasesBelow });
+    const why = belowRebaseRefusal(off, { owned, uses, flow, irBlocks, usedSlotOffsets, rebasesBelow });
     if (why !== null) {
       fail(why);
     }
@@ -1152,24 +1152,25 @@ function belowLocalArea(off: number, owned: FrameRange): string {
  *    outgoing words);
  *  - no access through it at a constant displacement lands beneath the locals (a copy into the
  *    outgoing area is exactly that);
- *  - no slot between it and the locals is stored to directly. Such a word is a staged stack
- *    argument the index could reach, or a local the area does not hold because a callee is
- *    declared with more stack words than its call passes (gcc's `above-outgoing-area` sizes the
- *    outgoing block by the declarations), and either way the index's reach is no longer the one
- *    object's;
- *  - under 'indexed' no pointer is stepped from it (an O32 copy of a by-value struct into the
- *    outgoing area may be), and under 'stepped' every access through a pointer stepped from it
- *    lands inside the locals on the first trip, where the pointer is lowest (`lowestFromCapture`).
- *  What is left is an access at a runtime index, whose reach and width the one object's rules
- *  judge like any other. Each refusal names its clause. */
+ *  - nothing may store to a word between it and the locals: not directly, not at a runtime index
+ *    through it, and not through a pointer stepped through the frame from any capture. Such a word
+ *    is a staged stack argument the index could reach, or a local the area does not hold because
+ *    a callee is declared with more stack words than its call passes (gcc's `above-outgoing-area`
+ *    sizes the outgoing block by the declarations: `struct { s32 h; u32 c[3]; } s` at 16 under a
+ *    five-word `four(1, 2, 3, 4)` puts the area at 24, so a loop filling `s.c[k]` writes 20 through
+ *    a base at 20, or on kmc through a pointer stepped down from 24), and either way the index's
+ *    reach is no longer the one object's;
+ *  - every access through a stepped pointer lands inside the locals where the pointer is lowest
+ *    (`AddressFlow.floor`): on its first trip for one stepped up from a capture beneath them, which
+ *    is how a copy of a by-value struct into the O32 outgoing area starts (kmc's `addiu a3,sp,16`).
+ *  What is left is a read at a runtime index, whose reach and width the one object's rules judge
+ *  like any other. Each refusal names its clause. */
 function belowRebaseRefusal(
   off: number,
   {
     owned,
     uses,
     flow,
-    objects,
-    facts,
     irBlocks,
     usedSlotOffsets,
     rebasesBelow,
@@ -1177,14 +1178,12 @@ function belowRebaseRefusal(
     owned: FrameRange;
     uses: FrameUses;
     flow: AddressFlow;
-    objects: ReadonlyMap<number, readonly Op[]>;
-    facts: LiteralAddresses;
     irBlocks: readonly Block[];
     usedSlotOffsets: ReadonlySet<number>;
-    rebasesBelow: 'indexed' | 'stepped' | undefined;
+    rebasesBelow: boolean;
   },
 ): string | null {
-  if (rebasesBelow === undefined) {
+  if (!rebasesBelow) {
     return belowLocalArea(off, owned);
   }
   const why = (clause: string): string =>
@@ -1206,96 +1205,39 @@ function belowRebaseRefusal(
   if (fixed !== undefined) {
     return why(`an access through it at a constant displacement lands beneath the locals, at [sp,#${fixed.at})`);
   }
+  const between =
+    'a staged stack argument its index may reach, or a local the area misses because a callee is declared with ' +
+    'more stack words than its call passes';
   const slot = [...usedSlotOffsets].sort((a, b) => a - b).find((s) => overlaps(s, 4, off, owned.from - off));
   if (slot !== undefined) {
-    return why(
-      `the word at [sp,#${slot}) between it and the locals is stored to directly — a staged stack argument ` +
-        'its index may reach, or a local the area misses because a callee is declared with more stack words than its call passes',
-    );
+    return why(`the word at [sp,#${slot}) between it and the locals is stored to directly — ${between}`);
   }
-  const steppedFrom = [...flow.stepped].filter(([, o]) => o === off).map(([v]) => v);
-  if (steppedFrom.length > 0 && rebasesBelow === 'indexed') {
-    return why('a pointer is stepped from it, which on this target may copy into the outgoing words');
+  for (const [op, { off: from, index }] of uses.accessOps) {
+    if (
+      op.opcode === 'store' &&
+      from === off &&
+      index !== undefined &&
+      !flow.stepped.has(op.operands[0]) &&
+      mayTouch(index.reach, off, owned.from - off)
+    ) {
+      return why(`a store through it at a runtime index may land between it and the locals — ${between}`);
+    }
   }
-  const lowest = lowestFromCapture(off, steppedFrom, objects, facts, irBlocks);
   for (const blk of irBlocks) {
     for (const op of blk.ops) {
-      if ((op.opcode !== 'load' && op.opcode !== 'store') || !steppedFrom.includes(op.operands[0])) {
+      if ((op.opcode !== 'load' && op.opcode !== 'store') || !flow.stepped.has(op.operands[0])) {
         continue;
       }
-      const at = off + (lowest.get(op.operands[0]) ?? -Infinity) + ((op.attrs.off as number | undefined) ?? 0);
+      const at = (flow.floor.get(op.operands[0]) ?? -Infinity) + ((op.attrs.off as number | undefined) ?? 0);
       if (at < owned.from) {
         return why(
-          `a ${op.opcode} through a pointer stepped from it lands beneath the locals on its first trip` +
+          `a ${op.opcode} through a pointer stepped through the frame may land beneath the locals where the pointer is lowest` +
             (Number.isFinite(at) ? `, at [sp,#${at})` : ', at no displacement known'),
         );
       }
     }
   }
   return null;
-}
-
-/** THE LOWEST DISPLACEMENT FROM THE CAPTURE AT `off` each pointer stepped from it may hold: 0 at
- *  the capture, a phi the least of what it carries, a move by a constant `k` its pointer's lowest
- *  plus (`add`) or less (`sub`) `k`. A move by a runtime value, a value from anywhere else, or a
- *  cycle that keeps lowering it (a step down) has none, and is left out of the map — `-Infinity`
- *  to the caller. A shortest path over non-negative steps uses no cycle, so `stepped.length + 1`
- *  rounds settle every value that has one. */
-function lowestFromCapture(
-  off: number,
-  stepped: readonly Value[],
-  objects: ReadonlyMap<number, readonly Op[]>,
-  { defOf, constOf }: LiteralAddresses,
-  irBlocks: readonly Block[],
-): Map<Value, number> {
-  const capture = new Set((objects.get(off) ?? []).map((op) => op.results[0]));
-  const inSet = new Set(stepped);
-  const incoming = new Map<Value, Value[]>();
-  for (const blk of irBlocks) {
-    for (const op of blk.ops) {
-      for (const s of op.successors ?? []) {
-        s.args.forEach((arg, i) => {
-          const param = s.block.params[i];
-          if (param !== undefined && inSet.has(param)) {
-            (incoming.get(param) ?? incoming.set(param, []).get(param)!).push(arg);
-          }
-        });
-      }
-    }
-  }
-  const lowest = new Map<Value, number>();
-  const of = (v: Value): number => (capture.has(v) ? 0 : (lowest.get(v) ?? Infinity));
-  const next = (v: Value): number => {
-    const d = defOf.get(v);
-    if (d === undefined) {
-      return Math.min(...(incoming.get(v) ?? []).map((a) => (capture.has(a) || inSet.has(a) ? of(a) : -Infinity)));
-    }
-    const [x, y] = d.operands;
-    const k = d.opcode === 'add' ? (constOf(y) ?? constOf(x)) : d.opcode === 'sub' ? constOf(y) : undefined;
-    const from = constOf(y) !== undefined ? x : y;
-    if (k === undefined || !(capture.has(from) || inSet.has(from))) {
-      return -Infinity;
-    }
-    return of(from) + (d.opcode === 'add' ? k : -k);
-  };
-  let changed = true;
-  for (let round = 0; changed && round <= stepped.length + 1; round++) {
-    changed = false;
-    for (const v of stepped) {
-      const n = next(v);
-      if (n < of(v)) {
-        lowest.set(v, n);
-        changed = true;
-      }
-    }
-  }
-  // still lowering past the rounds a shortest path needs: a step down, with no lowest
-  if (changed) {
-    for (const v of stepped) {
-      lowest.delete(v);
-    }
-  }
-  return lowest;
 }
 
 /** Where each frame address may flow: `taint`, the object a value may hold the address of on SOME
@@ -1306,6 +1248,9 @@ interface AddressFlow {
   /** the values that hold an address INTO the object at their offset, at no one displacement from
    *  it: a pointer stepped through the frame (`steppedPointers`) */
   readonly stepped: ReadonlyMap<Value, number>;
+  /** the lowest frame byte each `stepped` value may hold, -Infinity where nothing bounds it from
+   *  below (a runtime start, a runtime move, a step down) */
+  readonly floor: ReadonlyMap<Value, number>;
   /** why one value may hold the address of two objects: a pointer into the one object at no one
    *  member, which only that answer declares (`chooseFrameModel`) */
   readonly merges: string | undefined;
@@ -1413,7 +1358,14 @@ function addressFlow(
   for (const p of stepped.twoObjects) {
     merged.add(p);
   }
-  return { taint, frameOnEveryPath, stepped: stepped.stepped, merges: merges ?? stepped.merges, merged };
+  return {
+    taint,
+    frameOnEveryPath,
+    stepped: stepped.stepped,
+    floor: stepped.floor,
+    merges: merges ?? stepped.merges,
+    merged,
+  };
 }
 
 /** A POINTER STEPPED THROUGH THE FRAME. Strength reduction turns `for (i = 0; i < n; i++)
@@ -1443,7 +1395,12 @@ function steppedPointers(
   taint: ReadonlyMap<Value, number>,
   incoming: ReadonlyMap<Value, readonly Value[]>,
   { defOf, constOf }: LiteralAddresses,
-): { stepped: Map<Value, number>; merges: string | undefined; twoObjects: ReadonlySet<Value> } {
+): {
+  stepped: Map<Value, number>;
+  merges: string | undefined;
+  twoObjects: ReadonlySet<Value>;
+  floor: ReadonlyMap<Value, number>;
+} {
   // the object values, and the phis that carry exactly one of them on every path
   const exact = new Map<Value, number>();
   for (const [off, ops] of objects) {
@@ -1568,7 +1525,34 @@ function steppedPointers(
     merges ??= `a phi merges the frame objects at [sp,#${stepped.get(v)}] and [sp,#${hi}] — one value, two objects`;
     twoObjects.add(v);
   }
-  return { stepped, merges, twoObjects };
+  // …and the LOWEST FRAME BYTE each surviving value may hold, lowered through the same phis and
+  // moves: an object's own address is its offset, a phi the least of what it carries, a move by a
+  // constant `k` its pointer's floor plus (`add`) or less (`sub`) `k`. A runtime index sum, a move by
+  // a runtime value, and a cycle that keeps lowering it (a step down) have none: -Infinity. A
+  // shortest path uses no cycle, so a value still lowering after `stepped.size` rounds is on or past
+  // a step down.
+  const floor = new Map<Value, number>();
+  const floorOf = (a: Value): number => floor.get(a) ?? exactOf(a) ?? (stepped.has(a) ? Infinity : -Infinity);
+  const nextFloor = (v: Value): number => {
+    const d = defOf.get(v);
+    if (d === undefined) {
+      return Math.min(...incoming.get(v)!.map(floorOf));
+    }
+    const { from, by } = moved(d)!;
+    const k = constOf(by);
+    return k === undefined ? -Infinity : floorOf(from) + (d.opcode === 'add' ? k : -k);
+  };
+  for (let round = 0, lowered = true; lowered; round++) {
+    lowered = false;
+    for (const v of stepped.keys()) {
+      const n = nextFloor(v);
+      if (n < floorOf(v)) {
+        floor.set(v, round > stepped.size ? -Infinity : n);
+        lowered = true;
+      }
+    }
+  }
+  return { stepped, merges, twoObjects, floor };
 }
 
 /** One fixed-offset access at an object's own address. */

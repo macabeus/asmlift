@@ -265,8 +265,8 @@ describe('a capture below the local area is the object above it, moved down', ()
   });
 
   // Each of these could put a word beneath the locals in the C's hands, so the capture refuses as
-  // before: handed to a callee, read at a constant displacement there, or stepped through.
-  test('…only where it escapes nowhere, reads nothing beneath at a constant, and steps nowhere', () => {
+  // before: handed to a callee, or read at a constant displacement there.
+  test('…only where it escapes nowhere and reads nothing beneath at a constant', () => {
     const below = /the captured address at \[sp,#28\) is below the reserved local area, which starts at \[sp,#32\)/;
     const edit = (...pairs: [string, string][]) => FIVE_IDO.map((l) => pairs.find(([at]) => at === l)?.[1] ?? l);
     // handed to a callee
@@ -350,6 +350,160 @@ describe('a capture below the local area is the object above it, moved down', ()
       /\[sp,#16\) is below the reserved local area, which starts at \[sp,#24\), .*the word at \[sp,#16\) between it and the locals is stored to directly/,
     );
     expect(src(QOD, rs, MIPS_GCC, protos(4))).toContain('u8 sp16[16];');
+  });
+
+  // `struct HC3 { s32 h; u32 c[3]; }; void f(s32 i){ struct HC3 s; s32 k; s.h = gA; for (k = 0;
+  // k < 3; k++) s.c[k] = gB + k; four(1, 2, 3, 4); use1(s.c[i] + s.h); }` at gcc2.7.2 -O1: `s` at
+  // 16. Under a `four` declared with a fifth word the area starts at 24, `s.h` reads as that word,
+  // and `s.c` straddles the area's start. Its first element is stored only through the loop's
+  // runtime index off the base at 20 (`addiu a2,sp,16 / … / sw v1,4(v0)`), so no slot store names
+  // the word, and the rebase would declare a 12-byte array as an 8-byte object with `s.c[0]`
+  // outside it.
+  const QS4_GCC = [
+    '0:\taddiu\tsp,sp,-40',
+    '4:\tsw\tra,36(sp)',
+    '8:\tsw\ts0,32(sp)',
+    'c:\tmove\ts0,a0',
+    '10:\tlui\tv0,0x0',
+    '14:\tlw\tv0,0(v0)',
+    '18:\tsw\tv0,16(sp)',
+    '1c:\tmove\ta0,zero',
+    '20:\taddiu\ta2,sp,16',
+    '24:\tlui\ta1,0x0',
+    '28:\tlw\ta1,0(a1)',
+    '2c:\tsll\tv0,a0,0x2',
+    '30:\taddu\tv0,v0,a2',
+    '34:\taddu\tv1,a0,a1',
+    '38:\tsw\tv1,4(v0)',
+    '3c:\taddiu\ta0,a0,1',
+    '40:\tslti\tv0,a0,3',
+    '44:\tbnez\tv0,30 <f+0x30>',
+    '48:\tsll\tv0,a0,0x2',
+    '4c:\tli\ta0,1',
+    '50:\tli\ta1,2',
+    '54:\tli\ta2,3',
+    '58:\tjal\t0 <f>',
+    '5c:\tli\ta3,4',
+    '60:\tsll\tv0,s0,0x2',
+    '64:\taddu\tv0,sp,v0',
+    '68:\tlw\tv0,20(v0)',
+    '6c:\tlw\ta0,16(sp)',
+    '70:\tjal\t0 <f>',
+    '74:\taddu\ta0,v0,a0',
+    '78:\tlw\tra,36(sp)',
+    '7c:\tlw\ts0,32(sp)',
+    '80:\tjr\tra',
+    '84:\taddiu\tsp,sp,40',
+  ];
+  // …and at gcc2.7.2kmc -O2 the loop runs down a pointer stepped from `&s.c[2]`'s base at 24, which
+  // stores `s.c[0]` at 20 on its last trip.
+  const QS4_KMC = [
+    '0:\taddiu\tsp,sp,-40',
+    '4:\tsw\ts0,32(sp)',
+    '8:\tmove\ts0,a0',
+    'c:\tlui\tv0,0x0',
+    '10:\tlw\tv0,0(v0)',
+    '14:\tlui\tv1,0x0',
+    '18:\tlw\tv1,0(v1)',
+    '1c:\tli\ta1,2',
+    '20:\taddiu\ta0,sp,24',
+    '24:\tsw\tra,36(sp)',
+    '28:\taddiu\tv0,v0,2',
+    '2c:\tsw\tv1,16(sp)',
+    '30:\tsw\tv0,4(a0)',
+    '34:\taddiu\tv0,v0,-1',
+    '38:\taddiu\ta1,a1,-1',
+    '3c:\tbgez\ta1,30 <f+0x30>',
+    '40:\taddiu\ta0,a0,-4',
+    '44:\tli\ta0,1',
+    '48:\tli\ta1,2',
+    '4c:\tli\ta2,3',
+    '50:\tjal\t0 <f>',
+    '54:\tli\ta3,4',
+    '58:\tsll\tv0,s0,0x2',
+    '5c:\taddu\tv0,sp,v0',
+    '60:\tlw\tv0,20(v0)',
+    '64:\tlw\ta0,16(sp)',
+    '68:\tjal\t0 <f>',
+    '6c:\taddu\ta0,v0,a0',
+    '70:\tlw\tra,36(sp)',
+    '74:\tlw\ts0,32(sp)',
+    '78:\tjr\tra',
+    '7c:\taddiu\tsp,sp,40',
+  ];
+  const relocsAt = (gA: number, gB: number, four: number, use1: number): [number, string, string][] => [
+    [gA, 'R_MIPS_HI16', 'gA'],
+    [gA + 4, 'R_MIPS_LO16', 'gA'],
+    [gB, 'R_MIPS_HI16', 'gB'],
+    [gB + 4, 'R_MIPS_LO16', 'gB'],
+    [four, 'R_MIPS_26', 'four'],
+    [use1, 'R_MIPS_26', 'use1'],
+  ];
+  const HC3_PROTOS = (params: number): Prototypes => ({
+    f: { params: ['s32'], returnsVoid: true },
+    four: { params: Array<string>(params).fill('s32'), returnsVoid: true },
+    use1: { params: ['u32'], returnsVoid: true },
+  });
+
+  test('…and not where a store at a runtime index through it may land between it and the locals', () => {
+    const rs = relocsAt(0x10, 0x24, 0x58, 0x70);
+    expect(lift(QS4_GCC, rs, MIPS_GCC, HC3_PROTOS(5))).toThrow(
+      /\[sp,#20\) is below the reserved local area, which starts at \[sp,#24\), .*a store through it at a runtime index may land between it and the locals/,
+    );
+    expect(src(QS4_GCC, rs, MIPS_GCC, HC3_PROTOS(4))).toContain('u8 sp16[16];');
+  });
+
+  test('…nor where a pointer stepped down through the locals may store beneath them', () => {
+    const rs = relocsAt(0x14, 0xc, 0x50, 0x68);
+    expect(lift(QS4_KMC, rs, MIPS_GCC, HC3_PROTOS(5))).toThrow(
+      /\[sp,#20\) is below the reserved local area, .*a store through a pointer stepped through the frame may land beneath the locals where the pointer is lowest, at no displacement known/,
+    );
+    expect(src(QS4_KMC, rs, MIPS_GCC, HC3_PROTOS(4))).toContain('u8 sp16[16];');
+  });
+
+  // `void f(void){ u32 a[3]; u32 *p = a - 1; s32 k; for (k = 0; k < 3; k++) *++p = gA + k;
+  // use(a[0] + a[1], a[2]); }` at gcc2.7.2kmc -O2: the pointer starts at 12, beneath `a` at 16,
+  // and steps before its first store, so every store lands in `a`. A copy of a struct passed by
+  // value into the outgoing area steps a pointer too, but from a base in that area, so its first
+  // store lands beneath the locals and refuses on the same clause.
+  test('…while a pointer stepped up from it stores only inside the locals', () => {
+    const PREW = [
+      '0:\taddiu\tsp,sp,-40',
+      '4:\tsw\tra,32(sp)',
+      '8:\taddiu\ta0,sp,12',
+      'c:\tmove\tv1,zero',
+      '10:\tlui\tv0,0x0',
+      '14:\tlw\tv0,0(v0)',
+      '18:\taddiu\ta0,a0,4',
+      '1c:\taddu\tv0,v0,v1',
+      '20:\taddiu\tv1,v1,1',
+      '24:\tsw\tv0,0(a0)',
+      '28:\tslti\tv0,v1,3',
+      '2c:\tbnez\tv0,10 <f+0x10>',
+      '30:\tnop',
+      '34:\tlw\tv0,16(sp)',
+      '38:\tlw\ta0,20(sp)',
+      '3c:\tlw\ta1,24(sp)',
+      '40:\tjal\t0 <f>',
+      '44:\taddu\ta0,v0,a0',
+      '48:\tlw\tra,32(sp)',
+      '4c:\tjr\tra',
+      '50:\taddiu\tsp,sp,40',
+    ];
+    const rs: [number, string, string][] = [
+      [0x10, 'R_MIPS_HI16', 'gA'],
+      [0x14, 'R_MIPS_LO16', 'gA'],
+      [0x40, 'R_MIPS_26', 'use'],
+    ];
+    const protos: Prototypes = { f: { returnsVoid: true }, use: { params: ['u32', 's32'], returnsVoid: true } };
+    const out = src(PREW, rs, MIPS_GCC, protos);
+    expect(out).toContain('u8 sp16[16];');
+    expect(out).toContain('(s32 *)((u32)sp16 + -4)');
+    // the first store one word lower lands beneath the locals, at 12
+    const low = PREW.map((l) => (l === '24:\tsw\tv0,0(a0)' ? '24:\tsw\tv0,-4(a0)' : l));
+    expect(lift(low, rs, MIPS_GCC, protos)).toThrow(
+      /\[sp,#12\) is below the reserved local area, .*a store through a pointer stepped through the frame may land beneath the locals where the pointer is lowest, at \[sp,#12\)/,
+    );
   });
 });
 
