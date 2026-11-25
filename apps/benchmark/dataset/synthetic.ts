@@ -4889,6 +4889,40 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'extern void h(void);\nvoid sretbody_void(unsigned char *src);',
     proto: { sretbody_void: { returnsVoid: true }, h: { params: [], returnsVoid: true } },
   },
+  // A CALL TO ITSELF IS NO STRUCT RETURN WHERE ITS OWN RETURNS SAY SO (frontend/callee-body.ts
+  // `unliftedReads`, the return scan of a body that is not lifted). `sretbody_self` hands its own frame
+  // object `t` to a call to itself at argument 0, which with nothing declaring it is the same caller
+  // bytes as a struct returned through memory, and the frame audit declined (`hiddenReturnPointerStands`).
+  // Its own body is never lifted for that question (that lift is the one under way), but agbcc's
+  // `pop {r0}; bx r0` holds the return address at every return, so no return hands back a hidden
+  // pointer, and `t` is the 12 bytes the call fills. Nothing declares the function in the context: a
+  // declared return answers without the body. The return scan is the Thumb frontend's (the return
+  // through the return register is ARM's); the other compilers' rows pin their state.
+  {
+    sym: 'sretbody_self',
+    src:
+      'struct S { int a, b, c; };\nextern int gk;\n' +
+      'void sretbody_self(struct S *o, int n)\n{\n    struct S t;\n    if (n > 0) {\n' +
+      '        sretbody_self(&t, n - 1);\n        o->a = t.a + 1; o->b = t.b; o->c = t.c * 2;\n' +
+      '    } else {\n        o->a = 0; o->b = n; o->c = gk;\n    }\n}',
+    features: ['struct-return', 'stack-addr'],
+    toolchains: [...FIVE],
+    ctx: 'struct S { int a, b, c; };\nextern int gk;',
+  },
+  // …and its twin that does return the struct through memory still declines: `sretbody_selfret`'s
+  // returns hand back the hidden pointer in r0, so the scan proves nothing, and `t` may be the frame
+  // the callee fills as its return value. agbcc only, the one compiler with the return scan.
+  {
+    sym: 'sretbody_selfret',
+    src:
+      'struct S { int a, b, c; };\nextern int gk;\n' +
+      'struct S sretbody_selfret(int n)\n{\n    struct S t;\n    if (n > 0) {\n' +
+      '        t = sretbody_selfret(n - 1);\n        t.a += 1;\n' +
+      '    } else {\n        t.a = 0; t.b = n; t.c = gk;\n    }\n    return t;\n}',
+    features: ['struct-return'],
+    toolchains: ['agbcc'],
+    ctx: 'struct S { int a, b, c; };\nextern int gk;',
+  },
   // …and a body that returns a constant is no struct return either, on every compiler that hands the
   // pointer back at each return: agbcc and the three O32 ones (`move v0, a0`, measured at the field).
   // mwcc reloads r3 from a frame word before the `blr` (`structReturnHandsBackPointer: false`), so a
