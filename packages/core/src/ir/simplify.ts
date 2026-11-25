@@ -185,6 +185,26 @@ export function firstTrivialPhi(fn: Fn): { block: Block; param: Value } | null {
   return null;
 }
 
+/** A `ret` that returns nothing: every `ret` loses its operand, and the block params only those
+ *  operands read go with them (`pruneDeadParams`). The one rule a function whose stated declaration
+ *  is `void` is held to (pipeline.ts `dropVoidReturnOperands`, frontend/high-half.ts
+ *  `assertNoneEscaped`). Returns whether any operand was dropped. */
+export function dropRetOperands(fn: Fn): boolean {
+  let dropped = false;
+  for (const blk of fn.blocks) {
+    for (const op of blk.ops) {
+      if (op.opcode === 'ret' && op.operands.length > 0) {
+        op.operands = [];
+        dropped = true;
+      }
+    }
+  }
+  if (dropped) {
+    pruneDeadParams(fn);
+  }
+  return dropped;
+}
+
 /**
  * Remove block params NOTHING READS. Their edge args are dropped with them, so a dead join value
  * never surfaces downstream: left in place, the structurer dutifully materializes copies for it

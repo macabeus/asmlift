@@ -24,8 +24,7 @@
 // (`(hi_imm << 16) + (s16)lo_imm`), so the MIPS fold computes the high half's contribution itself.
 // Either way `addend` is "the part of the address this producer contributed", and the consumer adds
 // its own.
-import type { Block, Fn, Value } from '../ir/core';
-import { pruneDeadParams } from '../ir/simplify';
+import type { Block, Value } from '../ir/core';
 import type { FrontendRefusal } from './errors';
 
 /** A pending high half: what it names, what it contributed, and the instruction that produced it,
@@ -108,8 +107,9 @@ export interface HighHalves {
    *  `gA[i]`, live round the loop into the epilogue), and SSA hands it to the `ret` through the
    *  post-loop join. pipeline.ts `dropVoidReturnOperands` drops that operand and the joins only it
    *  read, the same reading jump-table.ts `refuseStaleIdiomReads` gives a stale dispatch register.
-   *  `dropVoidReturn` is that drop, done here and only where a half would otherwise refuse: the
-   *  check runs again after it, so a half any other op reads, or a join one feeds, still refuses. */
+   *  `dropVoidReturn` is that drop (ir/simplify.ts `dropRetOperands`), done here and only where a
+   *  half would otherwise refuse: the check runs again after it, so a half any other op reads, or a
+   *  join one feeds, still refuses. */
   assertNoneEscaped(name: string, blocks: Block[], dropVoidReturn?: () => void): void;
 }
 
@@ -209,21 +209,5 @@ export function makeHighHalves(d: HighHalfDialect): HighHalves {
         );
       }
     },
-  };
-}
-
-/** THE VOID RETURN'S DROP, for `assertNoneEscaped`: every `ret` loses its operand and the joins only
- *  those operands read go with them (pipeline.ts `dropVoidReturnOperands`, which a STATED void entry
- *  runs after the lift anyway). */
-export function dropVoidReturnOperandsOf(fn: Fn): () => void {
-  return () => {
-    for (const blk of fn.blocks) {
-      for (const op of blk.ops) {
-        if (op.opcode === 'ret') {
-          op.operands = [];
-        }
-      }
-    }
-    pruneDeadParams(fn);
   };
 }

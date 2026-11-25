@@ -54,6 +54,7 @@ import {
 } from '../ir/core';
 import { deletableWhenDead } from '../ir/discipline';
 import { FCMP_TRUTH, NEGATED_FCMP, type Opcode, fcmpOfTruth } from '../ir/opcodes';
+import { dropRetOperands } from '../ir/simplify';
 import { T } from '../ir/types';
 import {
   type FnProto,
@@ -100,7 +101,7 @@ import {
 } from './frame-objects';
 import { type Frontend, type LiftOptions, type OwnDeclaration, ownDeclarationOf } from './frontend';
 import { gasIntLiteral } from './gas-int';
-import { dropVoidReturnOperandsOf, makeHighHalves } from './high-half';
+import { makeHighHalves } from './high-half';
 import {
   type HoistedDispatch,
   type IdiomLeft,
@@ -3900,7 +3901,7 @@ function liftOnce(
   highHalves.assertNoneEscaped(
     name,
     irBlocks,
-    declaresVoidReturn(prototypes[name]) ? dropVoidReturnOperandsOf(ssa.fn) : undefined,
+    declaresVoidReturn(prototypes[name]) ? () => dropRetOperands(ssa.fn) : undefined,
   );
   tableBases.assertNoneEscaped(name, irBlocks);
   // A non-value reaches a use through a join's incoming arguments as well as directly (`nonValues`).
