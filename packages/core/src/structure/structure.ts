@@ -458,8 +458,12 @@ interface JumpRanking {
  *    (`StructureHooks.joinFollows`, pipeline.ts `copiesByDefault`), since a function the copies
  *    would lift with it can be one the join lifts without it (an ido7.1 nest of a loop in a
  *    switch in a case, leaving for an effect-free `return` merge). That join's own ladder asks
- *    it where it never asks the join, and its copies' ladder after a declined join does. */
-const CASE_EXIT_RUNGS = ['flags', 'merge'] as const;
+ *    it where it never asks the join, and its copies' ladder after a declined join does.
+ *  - `siblings`: a case body that reaches two or more closed sibling cases, each copied into it
+ *    (switch-recover.ts `closedSiblingRegions`). Held to `merge`'s ladders, for the same reason: a
+ *    function the copies lift with it can be one the join lifts without it (case 0 of a Thumb table
+ *    whose two paths enter cases 1 and 2, the join ending the switch at case 2's body). */
+const CASE_EXIT_RUNGS = ['flags', 'merge', 'siblings'] as const;
 type CaseExitRung = (typeof CASE_EXIT_RUNGS)[number];
 interface CaseExitRanking {
   /** the rungs this run asks */
@@ -820,7 +824,7 @@ function structureLadder(
     if (
       sfn === null &&
       caseExit.met.has(rung) &&
-      (rung !== 'merge' || ((reading.copies || !reading.asked) && hooks.joinFollows !== true)) &&
+      (rung === 'flags' || ((reading.copies || !reading.asked) && hooks.joinFollows !== true)) &&
       hooks.caseExitFlags !== false
     ) {
       refused = undefined;
@@ -5723,6 +5727,7 @@ function structureRanked(
             hooks.onTailFallerKept,
             (s) => forwardToMerge(s, b, at, siblings),
             onCopied,
+            { asked: caseExit.asked.has('siblings'), onMet: () => caseExit.met.add('siblings') },
           );
         const copied = copies
           ? copyOver(walked, (to) => {

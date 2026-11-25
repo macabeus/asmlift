@@ -106,7 +106,14 @@ export type ArmExit =
   | { kind: 'break'; region?: ReadonlySet<Block>; escapedTo?: ReadonlySet<Block> }
   | { kind: 'fallthrough'; to: Block; breaks: boolean; region: ReadonlySet<Block> }
   | { kind: 'goto'; to: Block; breaks: boolean; region: ReadonlySet<Block> }
-  | { kind: 'unstructurable'; why: string };
+  | {
+      kind: 'unstructurable';
+      why: string;
+      /** A body that reaches two or more siblings and leaves through no block the switch does not
+       *  dominate: the siblings and its own blocks, which `copySharedFallTargets` reads to copy every
+       *  one of them into it (ONE ARM INTO SEVERAL CLOSED SIBLINGS, there). */
+      reaches?: { siblings: ReadonlySet<Block>; region: ReadonlySet<Block> };
+    };
 
 export interface SwitchRecovery {
   /** `mergeAt`, given the tree's case and default blocks, may name the switch's end ahead of the
@@ -377,6 +384,7 @@ export function copySharedFallTargets(
   onFallerKept?: () => void,
   sidewaysEnds?: (s: Block) => boolean,
   onCopied?: (to: Block) => void,
+  severalSiblings?: { asked: boolean; onMet: () => void },
 ): Map<Block, ArmExit> {
   const out = new Map(exitOf);
   for (const { to, movers } of sharedFallTargets(order, dflt, exitOf, faller)) {
@@ -403,7 +411,49 @@ export function copySharedFallTargets(
       );
     }
   }
+  for (const [e, x] of exitOf) {
+    const closed = x.kind === 'unstructurable' ? closedSiblingRegions(x.reaches, exitOf) : null;
+    if (closed === null || severalSiblings === undefined) {
+      continue;
+    }
+    if (!severalSiblings.asked) {
+      severalSiblings.onMet();
+      continue;
+    }
+    out.set(e, { kind: 'break', region: closed });
+  }
   return out;
+}
+
+/** ONE ARM INTO SEVERAL CLOSED SIBLINGS, for `copySharedFallTargets`: the arm's region with every
+ *  sibling's written out again under it, or null. agbcc's cross-jump makes it out of one case whose
+ *  two paths each end the way another case does: `case 0: if (c) { A; h(i, 0); } else { B; h(i, 1); }
+ *  break; case 1: h(i, 0); break; case 2: h(i, 1); break;` keeps one `h(i, 0); break;` and one `h(i,
+ *  1); break;`, and case 0's two paths jump into them (kl2dct sub_0800BF80's two DMA tails). C
+ *  fall-through reaches one arm, so the source's spelling is a copy of each. Held to what the
+ *  one-sibling copy above holds its sibling to, for every sibling: a closed `break` WITH a region,
+ *  so the copy reaches the merge and nothing else. A sibling that reaches siblings of its own is
+ *  not followed, so the copies never nest (followed, every arm of a switch whose arms each reach
+ *  all the others would copy all of them, exponentially). The entrant's own walk stepped into no
+ *  block the switch does not dominate (`reaches` is absent otherwise). Every entrant copies: none
+ *  can keep a fall-through into two arms, so there is no keeper to choose. Asked only where the
+ *  caller hands `severalSiblings` in with `asked` set (the `siblings` rung of structure.ts
+ *  `CASE_EXIT_RUNGS`); unasked, `onMet` notes the arm it would copy. */
+function closedSiblingRegions(
+  reaches: { siblings: ReadonlySet<Block>; region: ReadonlySet<Block> } | undefined,
+  exitOf: ReadonlyMap<Block, ArmExit>,
+): Set<Block> | null {
+  if (reaches === undefined) {
+    return null;
+  }
+  const regions = [...reaches.siblings].map((sib) => {
+    const own = exitOf.get(sib);
+    return own?.kind === 'break' && own.escapedTo === undefined ? own.region : undefined;
+  });
+  if (!regions.every((r) => r !== undefined)) {
+    return null;
+  }
+  return new Set([...reaches.region, ...regions.flatMap((r) => [...r!])]);
 }
 
 /** TWO OR MORE ARMS ENTERING ONE SIBLING'S BODY, put back as one fall-through and `goto`s to the
@@ -1019,6 +1069,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       return {
         kind: 'unstructurable',
         why: `a case body reaches several sibling cases (${names()}) — C fall-through reaches only one, so this needs a goto`,
+        ...(escapedTo.size === 0 ? { reaches: { siblings: into, region: seen } } : {}),
       };
     }
     return {

@@ -16705,6 +16705,51 @@ export const SYNTHETIC: SynthSpec[] = [
       d: { params: 1, returnsVoid: true },
     },
   },
+  // sw_xjsib2 (kl2dct sub_0800BF80): case 7 ends each of its two paths the way case 1 and case 3 do,
+  // and agbcc's cross-jump sends both paths into those bodies. One arm entering two siblings has no
+  // fall-through or case-label goto spelling, so each sibling, a closed `break` arm, is copied into
+  // it (switch-recover.ts `closedSiblingRegions`, the `siblings` rung of structure.ts
+  // `CASE_EXIT_RUNGS`). The other four toolchains keep the calls in place, and are controls.
+  {
+    sym: 'sw_xjsib2',
+    src:
+      'extern u8 gK[], gS[];\n' +
+      'extern s32 gN;\n' +
+      'void h(s32 i, s32 s);\n' +
+      'void g1(s32 x);\n' +
+      'void g2(s32 x);\n' +
+      'void sw_xjsib2(void)\n' +
+      '{\n' +
+      '    s32 i;\n' +
+      '    for (i = 0; i < gN; i++) {\n' +
+      '        switch (gK[i]) {\n' +
+      '        case 1: case 2: h(i, 0); break;\n' +
+      '        case 3: case 5: h(i, 1); break;\n' +
+      '        case 7:\n' +
+      '            if (gS[i] == 3) { g1(i); h(i, 0); }\n' +
+      '            else { g2(i); h(i, 1); }\n' +
+      '            break;\n' +
+      '        case 11: h(i, 2); break;\n' +
+      '        case 12: h(i, 3); break;\n' +
+      '        }\n' +
+      '    }\n' +
+      '}',
+    features: ['dense', 'switch-arms', 'break'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx:
+      'extern u8 gK[], gS[];\n' +
+      'extern s32 gN;\n' +
+      'void h(s32 i, s32 s);\n' +
+      'void g1(s32 x);\n' +
+      'void g2(s32 x);\n' +
+      'void sw_xjsib2(void);',
+    proto: {
+      sw_xjsib2: { returnsVoid: true },
+      h: { params: 2, returnsVoid: true },
+      g1: { params: 1, returnsVoid: true },
+      g2: { params: 1, returnsVoid: true },
+    },
+  },
   {
     sym: 'cmn_store',
     src:

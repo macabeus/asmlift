@@ -513,3 +513,55 @@ describe('the ranking tie-break', () => {
     expect(compareScored(withGoto as unknown as C, copies as unknown as C)).toBeGreaterThan(0);
   });
 });
+
+// ONE ARM INTO SEVERAL CLOSED SIBLINGS (switch-recover.ts `closedSiblingRegions`, the `siblings` rung
+// of structure.ts `CASE_EXIT_RUNGS`): agbcc's cross-jump of `case 0: if (c) { a(); h0(); } else {
+// b(); h1(); } break;` onto `case 1: h0(); break;` and `case 2: h1(); break;` (kl2dct sub_0800BF80).
+// No fall-through and no case-label goto spells an arm entering two cases, so each is copied into it.
+const intoTwo = ({ bb2 = '  br ^bb9()' } = {}) => `fn xs {
+^bb0(%0: s32, %1: s32):
+  switch_br %0, ^bb1(), ^bb2(), ^bb3(), ^bb4(), ^bb9() {cases=[0;1;2;3]}
+^bb1():
+  %r1: s32 = call %0 {target="a"}
+  %z1: s32 = const {value=0}
+  %c1: u32 = icmp_slt %1, %z1
+  cond_br %c1, ^bb2(), ^bb3()
+^bb2():
+  %2: s32 = call %0 {target="h0"}
+${bb2}
+^bb3():
+  %3: s32 = call %0 {target="h1"}
+  br ^bb9()
+^bb4():
+  %4: s32 = call %0 {target="d"}
+  br ^bb9()
+^bb9():
+  ret
+}`;
+
+describe('an arm entering two closed siblings takes a copy of each', () => {
+  test('case 0 holds both bodies once more, and the program is the IR', () => {
+    const { src, agreement, shipped } = lifted(intoTwo());
+    expect(src).toMatch(
+      /case 0:\n\s*a\(a0\);\n\s*if \(a1 >= 0\) \{\n\s*h1\(a0\);\n\s*\} else \{\n\s*h0\(a0\);\n\s*\}\n\s*break;/,
+    );
+    expect(src.match(/h0\(/g)).toHaveLength(2);
+    expect(src.match(/h1\(/g)).toHaveLength(2);
+    judgedAlike(agreement);
+    judgedAlike(shipped);
+  });
+
+  test('a sibling that reaches a sibling of its own is not followed, and the arm declines', () => {
+    const fn = parse(intoTwo({ bb2: '  %c2: u32 = icmp_slt %1, %0\n  cond_br %c2, ^bb3(), ^bb9()' }));
+    verify(fn);
+    recoverTypes(fn);
+    expect(() => structure(fn, {})).toThrow(/a case body reaches several sibling cases/);
+  });
+
+  test('unasked, the arm declines as it did', () => {
+    const fn = parse(intoTwo());
+    verify(fn);
+    recoverTypes(fn);
+    expect(() => structure(fn, {}, { caseExitFlags: false })).toThrow(/a case body reaches several sibling cases/);
+  });
+});
