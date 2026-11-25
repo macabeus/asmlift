@@ -1099,9 +1099,15 @@ export function callDeclarations(
     // A register a call destroyed on every path holds nothing of this function's arguments, so a
     // read of it could add nothing to what the body reads of them, and it is not taken: taken, a
     // callee making two calls that nothing declares would refuse its own lift, and lose its bound.
+    // Nor is a register at or past what the call's own callee's body reads (`bodyWords`, handed to a
+    // body lift one level down: pipeline.ts `bodyReadsIn`): that callee reads none of them, so they
+    // add nothing to what this body reads, and the count stays an upper bound.
     const entryWords =
       unstated && entryReadCalls?.has(callee!) === true
-        ? target.argRegs.reduce((n, r, k) => (ssa.writtenOnEveryPath(r, bi, () => false) ? n : k + 1), 0)
+        ? Math.min(
+            target.argRegs.reduce((n, r, k) => (ssa.writtenOnEveryPath(r, bi, () => false) ? n : k + 1), 0),
+            bodyWords() ?? Infinity,
+          )
         : undefined;
     // A STACK BLOCK THE CALLEE'S BODY LICENSED states the arity outright: arguments past the
     // registers are staged only once every register is one, so the call takes all of them and the

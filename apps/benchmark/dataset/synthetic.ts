@@ -4710,6 +4710,45 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void nine();\nvoid stkbody_none(int *p, int n);',
     proto: { stkbody_none: { returnsVoid: true }, nine: { returnsVoid: true } },
   },
+  // A CALLEE'S BODY IS LIFTED READING ITS OWN CALLEES' BODIES (core pipeline.ts `bodyReadsIn`), one
+  // level further. kl2dct's sub_08037530 calls sub_08037AF8, whose body stages a 9-word call to
+  // EntityCreate: lifted with no body of its own, that call cannot be sized, the body lift fails, and
+  // the caller's guess is left without a bound (the loop counter in r0 then decides nothing).
+  //   stkbody_nest: `mid` stages the five stack words of `nine`, which only `nine`'s body sizes. With
+  //     it, `mid`'s body reads no argument and the call is `mid()`; without, the guess took the
+  //     pointer the loop left in r0 and lifted `v0 = mid(v0)`. Not on mwcc: no stack-argument
+  //     lowering there.
+  //   stkbody_rnest: `mid2` hands its one argument to `one`, a call its body lift takes at every
+  //     register still holding an incoming value (r0-r3), which bounded `mid2` at four words and
+  //     lifted `mid2(*a0, &gv, a2 + 3)`. That call is taken at no more than `one`'s own body reads
+  //     (call-plan.ts `entryReadCalls`), so `mid2` reads one word and the left-over r1 and r2 are
+  //     none of its arguments. Not on mwcc: its synthetic flags inline both callees away.
+  {
+    sym: 'stkbody_nest',
+    src:
+      'extern int gv[];\n' +
+      'extern int gk[];\n' +
+      'void nine(a, b, c, d, e, f, g, h, i) int a, b, c, d, e, f, g, h, i;\n' +
+      '{ gv[0] = a + e; gv[1] = b + f; gv[2] = c + g; gv[3] = d + h; gv[4] = i; }\n' +
+      'void mid() { nine(gk[0], gk[1], gk[2], gk[3], 0, 1, 0, 0x1f, gk[4]); }\n' +
+      'void stkbody_nest(int n) { int i; for (i = 0; i < n; i++) { gv[8 + i] = i; mid(); } }',
+    features: ['multi-arg', 'array'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'extern int gv[];\nextern int gk[];\nvoid nine();\nvoid mid();\nvoid stkbody_nest(int n);',
+    proto: { stkbody_nest: { returnsVoid: true }, nine: { returnsVoid: true }, mid: { returnsVoid: true } },
+  },
+  {
+    sym: 'stkbody_rnest',
+    src:
+      'extern int gv[];\n' +
+      'int one(a) int a; { return gv[a] + 1; }\n' +
+      'void mid2(a) int a; { gv[2] = one(a); }\n' +
+      'void stkbody_rnest(int *p, int b, int c) { gv[5] = c + 3; mid2(p[0]); }',
+    features: ['multi-arg'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'extern int gv[];\nint one();\nvoid mid2();\nvoid stkbody_rnest(int *p, int b, int c);',
+    proto: { stkbody_rnest: { returnsVoid: true }, one: { returns: 'int' }, mid2: { returnsVoid: true } },
+  },
   // A CALLEE BODY'S STAGED HIGH-REGISTER RESTORE READS NO ARGUMENT (frontend/thumb.ts
   // `bodySavedRegs`, `restoreCopies`). agbcc restores r8-sl through `pop {r3, r4, r5}; mov r8, r3; …`,
   // and some path reaches that restore without writing r3 (here `hiw`'s `a >= 8` exit). Lifted as the

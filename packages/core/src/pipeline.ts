@@ -18,6 +18,7 @@ import {
   type CalleeBodies,
   type CalleeBodyBound,
   type CalleeBodyReaders,
+  type CalleeLift,
   calleeBodyReads,
 } from './frontend/callee-body';
 import { FrontendUnsupportedError } from './frontend/errors';
@@ -528,7 +529,7 @@ export function liftStamped(
   const bytes = ownReturn?.register === true ? undefined : ownReturn?.type.size;
   // what each callee whose body is in this input, or handed in, reads of its arguments, lifted from
   // that body as a call to it is first lowered (frontend/callee-body.ts); the callee's own lift reads
-  // no bodies, and, off the same lift, what each one loads of its incoming stack words, whether it
+  // its callees' bodies and no further (`bodyReadsIn`), and, off the same lift, what each one loads of its incoming stack words, whether it
   // returns no struct through a hidden pointer, and whether it reads its first argument register
   const given = liftOptions.calleeBody ?? {};
   const read =
@@ -628,7 +629,7 @@ const readsRead = new WeakMap<
 
 /** Each callee's body readers (frontend/callee-body.ts) as a lift of `name` under `table` reads them: every
  *  callee lifted from the same input, or from its body in `calleeBodies`, under the same table, map
- *  and context, reading no bodies. A body from outside the input is lifted with none of the input's
+ *  and context, reading its own callees' bodies, which read none. A body from outside the input is lifted with none of the input's
  *  side table, which describes the input's own object, and with only the relocations it carries
  *  (`CalleeBody.relocs`). Kept across lifts of the same function under the same caller table,
  *  map, data, context and bodies (`readsRead`). */
@@ -652,11 +653,8 @@ function bodyReadsIn(
   if (hit !== undefined) {
     return hit.reads;
   }
-  const reads = calleeBodyReads(
-    name,
-    asm,
-    target,
-    table,
+  const liftOf =
+    (readersOf: (callee: string) => CalleeBodyReaders): CalleeLift =>
     (callee, calleeTable, entryReadCalls, text, relocs) =>
       liftStamped(
         callee,
@@ -666,17 +664,30 @@ function bodyReadsIn(
         text === asm ? asmData : relocs === undefined ? undefined : relocsOnly(relocs, target),
         symbols,
         contextGlobals,
-        {
-          calleeBody: {
-            bound: () => undefined,
-            stackWords: () => undefined,
-            returnsNoHiddenPointer: () => false,
-            readsFirstArgument: () => false,
-          },
-          entryReadCalls,
-          ...(text === asm ? { asmIncludes } : {}),
-        },
-      ),
+        { calleeBody: readersOf(callee), entryReadCalls, ...(text === asm ? { asmIncludes } : {}) },
+      );
+  // A CALLEE'S BODY IS LIFTED READING ITS OWN CALLEES' BODIES, one level further and no more: a body
+  // that stages stack words for a call nothing declares lifts only where that callee's body sizes
+  // the block, as at the top level, and a call it takes at every incoming register
+  // (`entryReadCalls`) is taken at no more registers than that callee's body reads (call-plan.ts),
+  // which keeps the count an upper bound. The second-level bodies are lifted reading none
+  // (`NO_BODIES`), so the reading ends there; each is read once for every first-level body, and a
+  // first-level body is never asked of itself (`exceptSelf`), as no lift is (callee-body.ts).
+  const deeper = calleeBodyReads(
+    '',
+    asm,
+    target,
+    table,
+    liftOf(() => NO_BODIES),
+    calleeBodies,
+    frontendFor(target),
+  );
+  const reads = calleeBodyReads(
+    name,
+    asm,
+    target,
+    table,
+    liftOf((callee) => exceptSelf(deeper, callee)),
     calleeBodies,
     frontendFor(target),
   );
@@ -685,6 +696,22 @@ function bodyReadsIn(
   read.length = Math.min(read.length, 8);
   return reads;
 }
+
+/** The readers of a lift handed no body: every callee answers nothing. */
+const NO_BODIES: CalleeBodyReaders = {
+  bound: () => undefined,
+  stackWords: () => undefined,
+  returnsNoHiddenPointer: () => false,
+  readsFirstArgument: () => false,
+};
+
+/** `reads` answering nothing of `self`, the function whose body they are handed to. */
+const exceptSelf = (reads: CalleeBodyReaders, self: string): CalleeBodyReaders => ({
+  bound: (c) => (c === self ? undefined : reads.bound(c)),
+  stackWords: (c) => (c === self ? undefined : reads.stackWords(c)),
+  returnsNoHiddenPointer: (c) => c !== self && reads.returnsNoHiddenPointer(c),
+  readsFirstArgument: (c) => c !== self && reads.readsFirstArgument(c),
+});
 
 /** A side table holding a body's own relocations and nothing of the input's object: no section
  *  bytes, so no jump table reads, and no symbols. */

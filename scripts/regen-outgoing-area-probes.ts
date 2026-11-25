@@ -39,6 +39,10 @@
 //     elsewhere in the function, `dtwo` publishes the frame base in a frame wider than one word with a
 //     call after it, and `dfive` moves the temp above a fifth argument staged at [sp,#0].
 //     Read by `packages/core/test/frame-dmafill-probes.test.ts`.
+//   agbcc-nested-body.s — a callee's body is lifted reading its own callees' bodies (core
+//     pipeline.ts `bodyReadsIn`): `mid` stages `nine`'s five stack words, and `mid2` calls `one`,
+//     which reads r0 alone, at a point where r1-r3 still hold `mid2`'s incoming values.
+//     Read by `packages/core/test/callee-body-nested.test.ts`.
 //
 //   ASMLIFT_AGBCC=… npx tsx scripts/regen-outgoing-area-probes.ts
 //
@@ -56,6 +60,7 @@ const PROBES = [
   { source: 'probe-agbcc-entry-stack.c', out: 'agbcc-entry-stack.s', readBy: 'thumb-entry.test.ts' },
   { source: 'probe-agbcc-indexed.c', out: 'agbcc-indexed.s', readBy: 'frame-indexed-probes.test.ts' },
   { source: 'probe-agbcc-dmafill.c', out: 'agbcc-dmafill.s', readBy: 'frame-dmafill-probes.test.ts' },
+  { source: 'probe-agbcc-nested-body.c', out: 'agbcc-nested-body.s', readBy: 'callee-body-nested.test.ts' },
 ];
 
 const flags = TOOLCHAIN_TARGETS.agbcc.canonicalFlags;

@@ -154,7 +154,8 @@ export type CalleeBodyReaders = {
  *  struct return through a hidden pointer (`CalleeReturnsNoHiddenPointer` below) and whether it
  *  reads its first argument register (`CalleeReadsFirstArgument` below), off ONE lift.
  *  `lift` lifts one function of a text (the input, or a body in `external`) under a table, with no
- *  bound of its own: one level of bodies is read, never the callee's callees'. `frontend` is what
+ *  bound of its own; what that lift is handed of its own callees' bodies is the driver's (pipeline.ts
+ *  `bodyReadsIn` hands it one level more, read with none). `frontend` is what
  *  the target frontend says of its own lifts: its entry scan (`Frontend.entryStackWords`) and its
  *  return scan (`Frontend.returnsThroughReturnReg`), asked only of a body that does not lift. */
 export function calleeBodyReads(
