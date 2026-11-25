@@ -133,11 +133,15 @@ describe('CLI (agbcc): a guessed Thumb callee is bounded by its proven body in t
     expect(await run(assembleWith('asmlift-no-such-assembler'), 'rd0')).toEqual(await run(undefined, 'rd0'));
   });
   // fw's body calls rd1, which no declaration lays out: lifted alone, that call is taken at every
-  // incoming register and fw reads four words. Its body is lifted reading rd1's (core pipeline.ts
-  // `bodyReadsIn`), so the CLI reads rd1's body too, and fw reads r0 alone
+  // incoming register and fw reads four words. Its body is lifted reading rd1's (core
+  // frontend/callee-body.ts `calleeBodyReads`), so the CLI reads rd1's body too, and fw reads r0
+  // alone; the note names rd1's file as read under fw's
   test("a body's own callee is read too, and bounds what that body reads", async () => {
     const r = await run(ASSEMBLE, 'fw');
     expect(r.stdout).toContain('return fw(3);');
     expect(r.stderr).toContain('fw (asm/nonmatchings/m/fw.s, at most 1 argument word)');
+    expect(r.stderr).toContain(
+      '1 more body, read under the bodies above, decided what those bodies read: rd1 (asm/nonmatchings/m/rd1.s)',
+    );
   });
 });
