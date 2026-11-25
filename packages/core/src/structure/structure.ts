@@ -4991,6 +4991,8 @@ function structureRanked(
     }
   };
 
+  // a switch's flags, each with what its test after the switch leaves (`aroundSwitch`)
+  type FlagScope = Map<string, 'loop' | 'switch'>;
   // THE SWITCH ARMS being structured, innermost last — one frame per arm, in both regimes, so a
   // `break;` can be checked against what C binds it to. A C `break` leaves the innermost enclosing
   // loop OR switch, so a switch-scoped one is only spelled where this arm's frame is the innermost
@@ -5006,9 +5008,11 @@ function structureRanked(
     loop: LoopFrame | null;
     region: ReadonlySet<Block> | null;
     fallsTo: Block | null;
-    /** the flags of the outward two-level exits handed out through this arm's switch
-     *  (`handedThroughSwitch`) */
-    flags: Set<string> | null;
+    /** the flags tested right after this arm's switch (`aroundSwitch`), each with what its test's
+     *  `break;` leaves: the loop, for an outward two-level exit handed out through the switch
+     *  (`handedThroughSwitch`) or a case body's exit flag, or the next switch out, for an exit to an
+     *  enclosing switch's merge (`switchMergeExit`) */
+    flags: FlagScope | null;
   };
   const switchFrames: SwitchFrame[] = [];
   // every label a case-label `goto` (l3/ast.ts) names in this function, so no two arms share one
@@ -5021,9 +5025,9 @@ function structureRanked(
   // reaches that test too. One scope per switch being emitted, opened by `withSwitchFlags` around
   // its arms (Regime A from `handedThroughSwitch`, Regime B at the jump table); each arm's frame
   // holds its switch's.
-  const switchFlagScopes: Set<string>[] = [];
-  const withSwitchFlags = <R>(run: () => R): [R, ReadonlySet<string>] => {
-    const flags = new Set<string>();
+  const switchFlagScopes: FlagScope[] = [];
+  const withSwitchFlags = <R>(run: () => R): [R, ReadonlyMap<string, 'loop' | 'switch'>] => {
+    const flags: FlagScope = new Map();
     switchFlagScopes.push(flags);
     try {
       return [run(), flags];
@@ -5045,12 +5049,10 @@ function structureRanked(
       [{ k: 'break', ...(ofSwitch ? { ofSwitch: true } : {}) }],
       [],
     );
-  // A flag of an exit to an enclosing switch's merge (`switchMergeFlag`) leaves the next switch out
-  // after each switch it is handed through; every other flag leaves the loop.
-  const aroundSwitch = (flags: ReadonlySet<string>, sw: Stmt): Stmt[] => [
-    ...[...flags].map((name): Stmt => ({ k: 'assign', name, value: { k: 'const', value: 0 } })),
+  const aroundSwitch = (flags: ReadonlyMap<string, 'loop' | 'switch'>, sw: Stmt): Stmt[] => [
+    ...[...flags.keys()].map((name): Stmt => ({ k: 'assign', name, value: { k: 'const', value: 0 } })),
     sw,
-    ...[...flags].map((name) => breakOnFlag(name, switchMergeFlagNames.has(name))),
+    ...[...flags].map(([name, leaves]) => breakOnFlag(name, leaves === 'switch')),
   ];
   // THE ONE RULE THAT BINDS A `break;` TO A SWITCH ARM: does a `break;` written here reach `b`? It
   // does where `b` is the merge of the innermost arm with a region and no loop was entered since
@@ -5124,7 +5126,7 @@ function structureRanked(
       return [{ k: 'return' }];
     }
     const flag = switchMergeFlag(b);
-    between.forEach((f) => f.flags!.add(flag));
+    between.forEach((f) => f.flags!.set(flag, 'switch'));
     return [
       { k: 'assign', name: flag, value: { k: 'const', value: 1 } },
       { k: 'break', ofSwitch: true },
@@ -5155,7 +5157,7 @@ function structureRanked(
       return undefined;
     }
     const flag = second ? twoLevelFlag(lc.header) : caseExitFlag(lc.header);
-    frame.flags!.add(flag);
+    frame.flags!.set(flag, 'loop');
     return [
       { k: 'assign', name: flag, value: { k: 'const', value: 1 } },
       { k: 'break', ofSwitch: true },
@@ -6767,7 +6769,7 @@ function structureRanked(
           ),
         );
         if (caseFlag !== undefined) {
-          caseFrame!.flags!.add(caseFlag);
+          caseFrame!.flags!.set(caseFlag, 'loop');
         }
         out.push(...argAssignsFor(b, stayEdge), ...structureRegion(stayB, stop));
         return out;
@@ -8372,7 +8374,7 @@ function structureRanked(
     }
     if (second.outward === true) {
       const flag = twoLevelFlag(fl.header);
-      through[0]?.flags!.add(flag);
+      through[0]?.flags!.set(flag, 'loop');
       return [
         { k: 'assign', name: flag, value: { k: 'const', value: 0 } },
         loop,
@@ -8423,37 +8425,21 @@ function structureRanked(
   // so the switch is followed by its test too and no second flag is needed (as the outward exit
   // handed through a switch, `emitForeverExit`).
   const caseExitFlags = new Map<Block, string>();
-  const caseExitFlag = (header: Block): string => {
-    let name = caseExitFlags.get(header);
-    if (name === undefined) {
-      name = `v${fresh++}`;
-      varType.set(name, T.s(32));
-      caseExitFlags.set(header, name);
-    }
-    return name;
-  };
   // The flag of an exit to the merge `b` of an enclosing switch (`switchMergeExit`): one per merge.
   const switchMergeFlags = new Map<Block, string>();
-  const switchMergeFlagNames = new Set<string>();
-  const switchMergeFlag = (b: Block): string => {
-    let name = switchMergeFlags.get(b);
+  // a flag's `s32` local, one per key of `names`, named on first use
+  const flagOf = (names: Map<Block, string>, key: Block): string => {
+    let name = names.get(key);
     if (name === undefined) {
       name = `v${fresh++}`;
       varType.set(name, T.s(32));
-      switchMergeFlags.set(b, name);
-      switchMergeFlagNames.add(name);
+      names.set(key, name);
     }
     return name;
   };
-  const twoLevelFlag = (header: Block): string => {
-    let name = twoLevelFlags.get(header);
-    if (name === undefined) {
-      name = `v${fresh++}`;
-      varType.set(name, T.s(32));
-      twoLevelFlags.set(header, name);
-    }
-    return name;
-  };
+  const caseExitFlag = (header: Block): string => flagOf(caseExitFlags, header);
+  const switchMergeFlag = (b: Block): string => flagOf(switchMergeFlags, b);
+  const twoLevelFlag = (header: Block): string => flagOf(twoLevelFlags, header);
 
   // The latch back-edge substitution (do-while) — subFor over the latch's back-edge args.
   const latchSub = (dw: DoWhileInfo): Map<Value, string> =>
