@@ -18055,9 +18055,11 @@ export const SYNTHETIC: SynthSpec[] = [
   },
   //      dw_outerlatch_arms (kl2dct sub_080349AC's script loop): a do-while over a script pointer
   //      whose switch breaks to the code after the loop, and whose cases 8 and 9 leave for the outer
-  //      latch reading the pointer. Those arms are reached from the break's exit only round the
-  //      outer loop and back through the inner header, which binds the pointer afresh, so the break
-  //      rule's exit region stops at the loop (structure.ts `exitRegionOf`). Only agbcc and IDO:
+  //      latch, case 8 reading a count case 1 rewrites ahead of agbcc's never-taken `cont` latch.
+  //      Those arms are reached from the latch's exit only round the outer loop and back through the
+  //      inner header, which binds the count afresh, so the break rule's exit region stops at the
+  //      loop (structure.ts `exitRegionOf`); walked past the header, it refuses that latch and agbcc
+  //      declines. Only agbcc and IDO:
   //      the other three decline in their frontends first (the GCC 2.7.2 pair's `jr v0` dispatch,
   //      mwcc's `lis` high half reaching a merge), and IDO declines on its case body reaching
   //      several sibling cases.
@@ -18070,20 +18072,21 @@ export const SYNTHETIC: SynthSpec[] = [
       'extern struct E *gE;\n' +
       'void dw_outerlatch_arms(s32 n, s32 q, s32 r, s32 s)\n' +
       '{\n' +
-      '    s32 i, cont, a, b, c, d, e;\n' +
+      '    s32 i, cont, a, b, c, d, e, m;\n' +
       '    a = q; b = r; c = s; d = n * 3; e = q + r;\n' +
       '    for (i = 0; i < n; i++) {\n' +
       '        u8 *p = gE[i].p;\n' +
       '        cont = 1;\n' +
+      '        m = 0;\n' +
       '        do {\n' +
       '            switch (*p) {\n' +
-      '            case 1: g(a); p += 1; break;\n' +
+      '            case 1: g(a); p += 1; m++; break;\n' +
       '            case 2: g(b); p += 2; break;\n' +
       '            case 3: g(p[1] + c); p += 3; break;\n' +
       '            case 4: if (p[1]) { p += 2; break; } goto out;\n' +
       '            case 5: g(d); goto out;\n' +
       '            case 6: goto out;\n' +
-      '            case 8: gE[i].st = p[1]; goto next;\n' +
+      '            case 8: gE[i].st = m; goto next;\n' +
       '            case 9: g(p[2]); goto next;\n' +
       '            case 7: g(e); p += 1; break;\n' +
       '            default: p += 1; break;\n' +
