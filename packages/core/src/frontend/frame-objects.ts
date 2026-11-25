@@ -494,7 +494,7 @@ function auditFrame({
   const model = chooseFrameModel({ oneObject, uses, merges: flow.merges, windows, returnsWithoutHiddenPointer, fail });
   // A CAPTURE BELOW THE LOCALS (`captureBelowLocalsRebases`) is no object of its own: only the one
   // object holds it, rebased (`keepAsOneObject`), so the per-object model refuses it — and so does
-  // the audit, wherever the capture may reach a word beneath the locals other than by an index.
+  // the audit, wherever `belowRebaseRefusal` finds it may reach a word C names beneath the locals.
   const below = new Set([...objects.keys()].filter((off) => off < owned.from));
   for (const off of below) {
     const why = belowRebaseRefusal(off, {
@@ -1187,8 +1187,8 @@ function belowLocalArea(off: number, owned: FrameRange): string {
  *    from a capture beneath them, which is how a copy of a by-value struct into the O32 outgoing
  *    area starts (kmc's `addiu a3,sp,16`), and never for one stepped down (kmc fills the `s.c`
  *    above down a pointer from 24, whose last trip stores 20).
- *  What is left is a read at a runtime index, whose reach and width the one object's rules judge
- *  like any other. Each refusal names its clause. */
+ *  What is left is an access at a runtime index or through a pointer stepped up from it, whose
+ *  reach and width the one object's rules judge like any other. Each refusal names its clause. */
 function belowRebaseRefusal(
   off: number,
   {

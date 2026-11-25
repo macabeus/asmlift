@@ -5381,8 +5381,8 @@ function heldFrameWalk(
 // `add rD, rN, #0`. Every other write of the register ends it (`mayWriteReg`, which over-answers),
 // a call ends what it clobbers (`clobbers`; r4-r7 are callee-saved), and any write of sp ends
 // everything. So every address the register can hold is at or above its base, and a load through
-// it at displacement d >= 0 reads from base + d up — the round-1 hazard, a pointer formed BELOW its
-// array (`a - 1`), is a capture whose own offset is that lower word, which this reports as the base.
+// it at displacement d >= 0 reads from base + d up. A pointer formed BELOW its array (`a - 1`) is
+// a capture whose own offset is that lower word, which this reports as the base.
 //
 // Only a load through a register that has been STEPPED is reported: one through an unmoved capture
 // is the slot model's and `heldFrameWalk`'s, which read its exact offset.

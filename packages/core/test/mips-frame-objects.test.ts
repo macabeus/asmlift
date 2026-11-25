@@ -265,7 +265,7 @@ describe('a capture below the local area is the object above it, moved down', ()
   });
 
   // A read at a constant displacement there puts a word beneath the locals in the C's hands, so the
-  // capture refuses as before. Handed to a callee, it is `a - 1` like an indexed base: beneath IDO's
+  // capture refuses. Handed to a callee, it is `a - 1` like an indexed base: beneath IDO's
   // locals is the `ra` save, which no C name owns.
   test('…handed on as `a - 1`, and only where it reads nothing beneath at a constant', () => {
     const below = /the captured address at \[sp,#28\) is below the reserved local area, which starts at \[sp,#32\)/;
@@ -286,7 +286,7 @@ describe('a capture below the local area is the object above it, moved down', ()
     // read at a constant displacement, the `ra` word itself
     const fixed = edit(['2c:\taddu\ta3,sp,t9', '2c:\taddiu\ta3,sp,28'], ['38:\tlw\ta3,28(a3)', '38:\tlw\ta3,0(a3)']);
     expect(lift(fixed, FIVE_RELOCS, MIPS_IDO, FIVE_PROTOS)).toThrow(below);
-    // without the target's word for it, the old refusal
+    // a target without `captureBelowLocalsRebases` refuses any capture below its locals
     const NO_REBASE = {
       ...MIPS_IDO,
       compilerBehaviors: { ...MIPS_IDO.compilerBehaviors, captureBelowLocalsRebases: undefined },
