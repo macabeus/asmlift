@@ -446,14 +446,18 @@ interface JumpRanking {
  *  `structure` makes after every run without it declined and one met such an exit, so it turns a
  *  decline into a lift and never one lift into another: where the code from the exit on can be
  *  copied into the arm, or a last-resort rung reads the loop, that spelling is published already.
- *  The exits to an enclosing switch's merge are not asked in the join reading's ladder where the
- *  copies' ladder runs after it (`mergeExits`, `structureWithinBudget`): a function the join reading
+ *  The exits to an enclosing switch's merge are asked one level later still (`mergeExits`), once the
+ *  runs asking the case-exit flags alone declined: those runs can lift through a later rung where an
+ *  earlier one met a merge exit, and asking both at once would publish the earlier rung's lift in
+ *  its place (an mwcc nest of switches in a loop). Nor are they asked in the join reading's ladder
+ *  where the copies' ladder runs after it (`structureWithinBudget`): a function the join reading
  *  would lift with the flag can be one the copies lift without it, published so already (two of
  *  case-goto.test.ts's and join-past-returns.test.ts's fixtures). */
 interface CaseExitRanking {
   readonly asked: boolean;
   wanted: boolean;
-  /** whether `switchMergeExit` is asked too, in a run that asks */
+  /** whether `switchMergeExit` is asked too, in a run that asks; a run that does not ask it sets
+   *  `wanted` where it meets one */
   readonly mergeExits?: boolean;
 }
 
@@ -802,13 +806,19 @@ function structureLadder(
     return sfn;
   };
   let sfn = jumpRanked();
-  // the case bodies' exit flags and the exits to an enclosing switch's merge, asked once every run
-  // without them declined and one met an exit they spell; those runs read every switch at least as
-  // far, so where they decline too, theirs is the refusal that stands
+  // the case bodies' exit flags, asked once every run without them declined and one met an exit
+  // they spell, and then the exits to an enclosing switch's merge too, once the runs asking the
+  // flags alone declined and one met such a merge; those runs read every switch at least as far, so
+  // where they decline too, theirs is the refusal that stands
   if (sfn === null && caseExit.wanted && hooks.caseExitFlags !== false) {
     refused = undefined;
-    caseExit = { asked: true, wanted: false, mergeExits: reading.copies || !reading.asked };
+    caseExit = { asked: true, wanted: false, mergeExits: false };
     sfn = jumpRanked();
+    if (sfn === null && caseExit.wanted && (reading.copies || !reading.asked)) {
+      refused = undefined;
+      caseExit = { asked: true, wanted: false, mergeExits: true };
+      sfn = jumpRanked();
+    }
   }
   if (sfn !== null) {
     return sfn;
@@ -5087,7 +5097,7 @@ function structureRanked(
     if (!bareRet && !flagged) {
       return undefined;
     }
-    caseExit.wanted ||= !caseExit.asked;
+    caseExit.wanted ||= caseExit.mergeExits !== true;
     if (caseExit.mergeExits !== true) {
       return undefined;
     }

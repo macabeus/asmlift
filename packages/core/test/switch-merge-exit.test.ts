@@ -10,14 +10,17 @@
 // against its own IR by the trace oracle (`irAgreement`), as `structure()` returns it and as it
 // ships after `readabilityRewrites`. Both spellings are asked only once every run without them
 // declined (structure.ts `CaseExitRanking`), and each fixture declines without them.
+import { readFileSync } from 'node:fs';
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
+import { parseAsmData } from '../src/frontend/asmdata';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
-import { readabilityRewrites } from '../src/pipeline';
+import { decompile, readabilityRewrites } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
+import { TOOLCHAIN_TARGETS } from '../src/target';
 import { irAgreement, irTraceOf } from './helpers';
 
 const SEEDS = Array.from({ length: 2000 }, (_, i) => i + 1);
@@ -203,3 +206,23 @@ test('CONTROL: an exit from a loop nested in the arm to a merge that runs code d
   recoverTypes(fn);
   expect(() => structure(fn, {})).toThrow(/from inside a nested loop/);
 });
+
+/** A generated mwcc_242_81 (-O4,p) function, `corpus/mwcc242-swmergerank.*`, its objdump text and
+ *  `-s -r -t` dump: `for (i = 0; i < c; i++) { switch ((a + i) & 7) { case 1: k(1); switch (b & 7)
+ *  { … goto out; … } k(10); continue; case 19: k(11); if (c & 1) { switch (gA[b & 15]) { case 10:
+ *  k(12); return gOut; … case 73: k(15); goto shared; default: k(16); goto out; } k(17); } k(18);
+ *  goto out; case 46: shared: … default: k(25); goto shared; … case 64: k(33); break; default:
+ *  k(34); break; } k(77); out: k(100); } return gOut + i;`. The runs asking the case-exit flags
+ *  alone lift it, through a later rung than one that met a nested-switch merge exit, and that lift
+ *  stays the published one: asked in the same runs, the merge exit let the earlier rung lift it as
+ *  `while (i < c) { switch (a + i & 7) …`. */
+test('the merge exits are asked only once the runs asking the case-exit flags alone declined', () => {
+  const corpus = (f: string) => readFileSync(new URL(`corpus/${f}`, import.meta.url), 'utf8');
+  const dump = corpus('mwcc242-swmergerank.txt');
+  const { source } = decompile('f', corpus('mwcc242-swmergerank.asm'), TOOLCHAIN_TARGETS.mwcc_242_81.description, {
+    prototypes: { f: { params: 3 }, k: { params: 1, returnsVoid: true } },
+    asmData: parseAsmData(dump, dump, dump, true),
+  });
+  expect(source).toMatch(/while \(1\) \{\n\s*if \(v0 >= a2\) return gOut \+ v0;/);
+  expect(source).not.toContain('switch (a0 + ');
+}, 60_000);
