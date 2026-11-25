@@ -744,6 +744,8 @@ export interface StructureAnalysis {
   preUpdateHomes: Set<Op>;
   /** cached forward reachability (successors-transitive, excluding the start block itself) */
   reachFrom: (b: Block) => Set<Block>;
+  /** the blocks `from` reaches without passing through `avoid` (`makeReach`) */
+  reachAvoiding: (from: Block, avoid: Block) => Set<Block>;
   /** where a value's expression ultimately renders — the anchored consumer it inlines into,
    *  transitively; null = several places / unresolvable (callers treat conservatively) */
   emitPos: (op: Op) => { blk: Block; idx: number } | null;
@@ -2673,6 +2675,7 @@ function analysisStages(
 ): {
   liveIn: Map<Block, Set<Value>>;
   reachFrom: (b: Block) => Set<Block>;
+  reachAvoiding: (from: Block, avoid: Block) => Set<Block>;
   state: MaterializeState;
   rules: MaterializeRules;
 } {
@@ -2709,11 +2712,11 @@ function analysisStages(
     memWriteBetween,
     copyInterdependent,
   };
-  return { liveIn, reachFrom, state, rules };
+  return { liveIn, reachFrom, reachAvoiding, state, rules };
 }
 
 export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {}): StructureAnalysis {
-  const { liveIn, reachFrom, state, rules } = analysisStages(fn, returnsVoid, opts);
+  const { liveIn, reachFrom, reachAvoiding, state, rules } = analysisStages(fn, returnsVoid, opts);
   const { materialize, preUpdateHomes } = state;
   const { uses, render, loops } = rules;
   // Decide in REVERSE program order so a consumer's own materialization is settled before any
@@ -2769,6 +2772,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     materialize,
     preUpdateHomes,
     reachFrom,
+    reachAvoiding,
     emitPos: render.emitPos,
     memWriteBetween: rules.memWriteBetween,
   };

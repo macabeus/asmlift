@@ -1092,20 +1092,30 @@ function structureRanked(
   };
 
   // ── analysis phase (structure/analysis.ts): use registry, liveness, materialization ──
-  const { useSitesOf, opIndex, opBlock, liveIn, materialize, preUpdateHomes, reachFrom, emitPos, memWriteBetween } =
-    analyze(fn, returnsVoid, {
-      defs,
-      dom,
-      rereadGlobals,
-      materializeJoinFeeds,
-      homeSharedAddresses,
-      homeLoopExprs,
-      homeDerivedReads,
-      homeMergeFeeds,
-      homeEscapingExtensions,
-      readsStayWhereWritten,
-      contractsFloatProducts,
-    });
+  const {
+    useSitesOf,
+    opIndex,
+    opBlock,
+    liveIn,
+    materialize,
+    preUpdateHomes,
+    reachFrom,
+    reachAvoiding,
+    emitPos,
+    memWriteBetween,
+  } = analyze(fn, returnsVoid, {
+    defs,
+    dom,
+    rereadGlobals,
+    materializeJoinFeeds,
+    homeSharedAddresses,
+    homeLoopExprs,
+    homeDerivedReads,
+    homeMergeFeeds,
+    homeEscapingExtensions,
+    readsStayWhereWritten,
+    contractsFloatProducts,
+  });
 
   // THE FOLLOW OF A DIVERGENT `if`, over the paths that do not return early. Post-dominance gives
   // such an `if` no join — its arms reach two different `ret`s, and EXIT is the only block on every
@@ -5229,19 +5239,10 @@ function structureRanked(
   // defined again on the way (it is defined in the body, which the header dominates), so nothing
   // there reads a name this iteration rewrote. Walked past the header, the region took in the arms
   // of a switch that leave the loop from inside it (sub_080349AC's `bl` arms to the outer latch),
-  // which read the re-bound pointer, and refused a break they never see.
-  const exitRegionOf = (frame: LoopFrame, exit: Block): Set<Block> => {
-    const region = new Set<Block>();
-    for (const stack = [exit]; stack.length > 0;) {
-      const x = stack.pop()!;
-      if (x === frame.header || frame.body.has(x) || region.has(x)) {
-        continue;
-      }
-      region.add(x);
-      stack.push(...successorsOf(x));
-    }
-    return region;
-  };
+  // which read the re-bound pointer, and refused a break they never see. The walk stops at the
+  // header only: on a reducible CFG every other body block lies past it.
+  const exitRegionOf = (frame: LoopFrame, exit: Block): Set<Block> =>
+    new Set([exit, ...reachAvoiding(exit, frame.header)].filter((x) => !frame.body.has(x)));
 
   // THE BREAK RULE, for a `break` from block `from` out of `frame`'s body wherever the edge sits. A
   // `break` lands after the loop, where the header→exit copies render and then the exit region, raw.
