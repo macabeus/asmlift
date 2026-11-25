@@ -21512,13 +21512,11 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'extern u32 gA, gB, gC, gD;\nvoid use(u32 x, s32 i);\nvoid stkidx_bm3(s32 i);',
     proto: { stkidx_bm3: { params: ['s32'], returnsVoid: true }, use: { params: ['u32', 's32'], returnsVoid: true } },
   },
-  //  39h. stkidx_prew / stkidx_hc3 — a pointer stepped UP from a base below the locals, and the
-  //      control a store there guards. stkidx_prew's `*++p` from `a - 1` is kmc's `addiu a0,sp,12 /
-  //      … / addiu a0,a0,4 / sw v0,0(a0)`: every store lands in `a`, so the base is `a`'s moved down.
-  //      stkidx_hc3 declares `four` with a fifth word its call does not pass, which gcc's area sizes
-  //      by, so `s.c` straddles the area's start and its loop stores `s.c[0]` beneath it, at a
-  //      runtime index off the base below (gcc2.7.2) or down a pointer stepped from inside (kmc):
-  //      the rebase would put that element outside every object, so both decline.
+  //  39h. stkidx_prew — a pointer stepped UP from a base below the locals. `*++p` from `a - 1` is
+  //      kmc's `addiu a0,sp,12 / … / addiu a0,a0,4 / sw v0,0(a0)`: every store lands in `a`, so the
+  //      base is `a`'s moved down. The control a store beneath the locals guards needs a callee
+  //      declared with more words than its call passes, which no row may declare
+  //      (authored-facts.test.ts), so mips-frame-objects.test.ts pins it.
   {
     sym: 'stkidx_prew',
     src:
@@ -21533,36 +21531,10 @@ export const SYNTHETIC: SynthSpec[] = [
       '        *++p = gA + k;\n' +
       '    use(a[0] + a[1], a[2]);\n' +
       '}',
-    features: ['variable-index', 'pointer'],
+    features: ['array', 'pointer'],
     toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
     ctx: 'extern u32 gA;\nvoid use(u32 x, s32 i);\nvoid stkidx_prew(void);',
     proto: { stkidx_prew: { returnsVoid: true }, use: { params: ['u32', 's32'], returnsVoid: true } },
-  },
-  {
-    sym: 'stkidx_hc3',
-    src:
-      'extern u32 gA, gB;\n' +
-      'void use1(u32 x);\n' +
-      'void four();\n' +
-      'struct HC3 { s32 h; u32 c[3]; };\n' +
-      'void stkidx_hc3(s32 i)\n' +
-      '{\n' +
-      '    struct HC3 s;\n' +
-      '    s32 k;\n' +
-      '    s.h = gA;\n' +
-      '    for (k = 0; k < 3; k++)\n' +
-      '        s.c[k] = gB + k;\n' +
-      '    four(1, 2, 3, 4);\n' +
-      '    use1(s.c[i] + s.h);\n' +
-      '}',
-    features: ['variable-index', 'struct', 'multi-arg'],
-    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
-    ctx: 'extern u32 gA, gB;\nvoid use1(u32 x);\nvoid four();\nstruct HC3 { s32 h; u32 c[3]; };\nvoid stkidx_hc3(s32 i);',
-    proto: {
-      stkidx_hc3: { params: ['s32'], returnsVoid: true },
-      use1: { params: ['u32'], returnsVoid: true },
-      four: { params: ['s32', 's32', 's32', 's32', 's32'], returnsVoid: true },
-    },
   },
   //  39b. stkidx_below — the CONTROL of item 39's bound, a soundness pin that declines. `u32 *p = a
   //      - 1` (the 1-based table idiom) with `u32 a[3]` at [sp,#4] bases `p[i]` at [sp,#0], beneath the
