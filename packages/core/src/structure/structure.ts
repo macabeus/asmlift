@@ -1050,12 +1050,14 @@ function structureRanked(
     stepSecondCounters
   ) {
     // The observation hooks are this setting's, not the default's: dropped for that run, which also
-    // leaves it answerable from `memo`.
+    // leaves it answerable from `memo`. So is `joinFollows`, which says what the caller does after
+    // THIS structuring, not the default's.
     assertDefaultAccepts(
       fn,
       opts,
       {
         ...hooks,
+        joinFollows: undefined,
         onTailFallerKept: undefined,
         onCaseCopied: undefined,
         onForOffered: undefined,

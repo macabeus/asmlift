@@ -179,6 +179,16 @@ describe('DefaultAcceptsMemo', () => {
     expect(refusal(fn, { materializeJoinFeeds: true }, memo, hooks)).toBe(first);
   });
 
+  test("still answers the copies' run pipeline.ts copiesByDefault makes before its join", () => {
+    // `joinFollows` says what the caller does after this structuring, not the default's; carried
+    // into the guard, it ran the reset on every candidate (sw_hitexit:agbcc's fan, 4x)
+    const fn = fnOf(IRREDUCIBLE);
+    const memo = new DefaultAcceptsMemo(fn);
+    const hooks: StructureHooks = { joinFollows: true, onJoinReadsAsCopies: () => {} };
+    const first = refusal(fn, { copyReturnTails: true }, memo, hooks);
+    expect(refusal(fn, { copyReturnTails: true, coalesceMergeNames: true }, memo, hooks)).toBe(first);
+  });
+
   test('answers an accepted reset once it has structured it', () => {
     const fn = fnOf(VOLATILE_READ);
     const memo = new DefaultAcceptsMemo(fn);
