@@ -3407,8 +3407,18 @@ function recoverJumpTable(
 // switch (`readThumbText`), which switches on the scrutinee as the dispatch's first instruction read
 // it (`lowerTerminator`). PRE inserts `reg = expr` and nothing more, so the instructions accepted are
 // the ones `mayWriteReg` knows write their first operand — the data-processing ops and the single
-// loads — less the two that read the carry; anything else refuses:
-//   - a store, a call, a transfer, a flag READ (`adc`/`sbc`), or any other mnemonic;
+// loads — less the two that read the carry, and one store. Where reload gives PRE's pseudo a stack
+// home, its `reg = expr` becomes `rT = expr; str rT, [sp, #k]`: past eight values live across
+// the dispatch, agbcc -O2 spills them so (kleod's matching EntityCreate keeps four in registers, and
+// one more line puts `str r1, [sp, #0x2c]` in its dispatch; kl2dct's EntityCreate stores five). So
+// a word store of a register to a frame word, `str rS, [sp]` or `str rS, [sp, #k]`, is admitted,
+// and lowered in the kept block as the store any other block makes to that word: the frame's own
+// reading (its slots, its outgoing-argument blocks) judges it as it does every other. Anything
+// else refuses:
+//   - a store but that one: a byte or halfword store, a store through any base but sp or with a
+//     register offset (`frameHomeStoreRefusal`), and a store of a register the idiom wrote, which
+//     would store the value from before the dispatch (below);
+//   - a call, a transfer, a flag READ (`adc`/`sbc`), or any other mnemonic;
 //   - a write to the loaded target (it is what `mov pc` jumps through), or to sp/pc/lr. A write to
 //     the scrutinee is admitted: the switch does not read it after the extras, and the case blocks
 //     read what the extras left there on the hardware too. lr is refused as the register a case's
@@ -3430,8 +3440,15 @@ function dispatchExtraRefusal(
   for (const ins of extras) {
     const mn = ins.mnemonic;
     const say = `'${mn} ${ins.ops.join(', ')}'`;
+    if (mn === 'str') {
+      const refusal = frameHomeStoreRefusal(ins, say, stale);
+      if (refusal !== null) {
+        return refusal;
+      }
+      continue;
+    }
     if (!(SINGLE_LOAD.test(mn) || WRITES_OPERAND_0.test(mn)) || READS_CARRY.test(mn) || ins.ops.length < 2) {
-      return `${say} is not a register computation or a load`;
+      return `${say} is not a register computation, a load or a store to a frame word`;
     }
     const dest = ins.ops[0];
     if ([targetReg, 'sp', 'r13', 'pc', 'r15', 'lr', 'r14'].includes(dest)) {
@@ -3443,6 +3460,24 @@ function dispatchExtraRefusal(
       return `${say} reads '${read}', which the unlifted dispatch idiom wrote`;
     }
     stale.delete(dest);
+  }
+  return null;
+}
+
+/** Why a dispatch's `str` is not the stack-home store of a PRE value ({@link dispatchExtraRefusal}),
+ *  or null where it is: a word store of a register no unlifted idiom write left stale (nor sp, pc
+ *  or lr) to `[sp]` or `[sp, #k]`. */
+function frameHomeStoreRefusal(ins: Instr, say: string, stale: ReadonlySet<string>): string | null {
+  const [src, at] = ins.ops;
+  const { base, regOff } = ins.ops.length === 2 && at !== undefined ? parseAddr(at) : { base: '', regOff: '' };
+  if (!isSpReg(base) || regOff !== undefined) {
+    return `${say} is not a register computation, a load or a store to a frame word`;
+  }
+  if (stale.has(src)) {
+    return `${say} reads '${src}', which the unlifted dispatch idiom wrote`;
+  }
+  if (isSpReg(src) || ['pc', 'r15', 'lr', 'r14'].includes(src)) {
+    return `${say} is not a register computation, a load or a store to a frame word`;
   }
   return null;
 }

@@ -14526,6 +14526,62 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'extern s32 gOut;\nvoid jt_pre_midg(s32 x, s32 *p, s32 c);',
     proto: { jt_pre_midg: { returnsVoid: true } },
   },
+  // A PRE VALUE'S STACK HOME IN THE DISPATCH (EntityCreate). jt_pre_midg's shape with eight more
+  // switches on x - 50, x - 63, …: nine values now live across the first table's dispatch, and agbcc
+  // -O2 keeps eight in registers and gives the ninth a stack home, so PRE's insertion before the
+  // tablejump (gcse.c `insert_insn_end_bb`) reads `rT = x - 141; str rT, [sp]` there. thumb.ts
+  // `dispatchExtraRefusal` admits that word store to a frame word, lowered in the kept dispatch as
+  // the store any block makes, and agbcc lifts where it declined "'str r1, [sp]' is not a register
+  // computation or a load". kl2dct's EntityCreate stores five such values ([sp,#0x40..0x50]). The
+  // other toolchains spell the tables their own way (jt_pre_midg's note), so their rows pin the
+  // same source there.
+  {
+    sym: 'jt_pre_spill',
+    src:
+      'extern s32 gOut[12];\nvoid jt_pre_spill(s32 x, s32 *p, s32 c)\n{\n    if (c) {\n' +
+      '        gOut[0] = x - 37;\n        gOut[1] = x - 50;\n        gOut[2] = x - 63;\n' +
+      '        gOut[3] = x - 76;\n        gOut[4] = x - 89;\n        gOut[5] = x - 102;\n' +
+      '        gOut[6] = x - 115;\n        gOut[7] = x - 128;\n        gOut[8] = x - 141;\n    } else {\n' +
+      '        switch (x) {\n        case 1: p[0] = 1; break;\n        case 2: p[1] = 2; break;\n' +
+      '        case 3: p[2] = 3; break;\n        case 4: break;\n        case 5: p[4] = 5; break;\n' +
+      '        case 6: p[5] = 6; break;\n        case 7: p[6] = 7; break;\n' +
+      '        case 8: p[7] = 8; break;\n        default: p[8] = 9; break;\n        }\n    }\n' +
+      '    switch (x) {\n    case 37: p[10] = 1; break;\n    case 38: p[11] = 2; break;\n' +
+      '    case 39: p[12] = 3; break;\n    case 40: p[13] = 4; break;\n    case 41: p[14] = 5; break;\n' +
+      '    case 42: p[15] = 6; break;\n    case 43: p[16] = 7; break;\n    case 44: p[17] = 8; break;\n' +
+      '    }\n    switch (x) {\n    case 50: p[18] = 1; break;\n    case 51: p[19] = 2; break;\n' +
+      '    case 52: p[20] = 3; break;\n    case 53: p[21] = 4; break;\n    case 54: p[22] = 5; break;\n' +
+      '    case 55: p[23] = 6; break;\n    case 56: p[24] = 7; break;\n    case 57: p[25] = 8; break;\n' +
+      '    }\n    switch (x) {\n    case 63: p[26] = 1; break;\n    case 64: p[27] = 2; break;\n' +
+      '    case 65: p[28] = 3; break;\n    case 66: p[29] = 4; break;\n    case 67: p[30] = 5; break;\n' +
+      '    case 68: p[31] = 6; break;\n    case 69: p[32] = 7; break;\n    case 70: p[33] = 8; break;\n' +
+      '    }\n    switch (x) {\n    case 76: p[34] = 1; break;\n    case 77: p[35] = 2; break;\n' +
+      '    case 78: p[36] = 3; break;\n    case 79: p[37] = 4; break;\n    case 80: p[38] = 5; break;\n' +
+      '    case 81: p[39] = 6; break;\n    case 82: p[40] = 7; break;\n    case 83: p[41] = 8; break;\n' +
+      '    }\n    switch (x) {\n    case 89: p[42] = 1; break;\n    case 90: p[43] = 2; break;\n' +
+      '    case 91: p[44] = 3; break;\n    case 92: p[45] = 4; break;\n    case 93: p[46] = 5; break;\n' +
+      '    case 94: p[47] = 6; break;\n    case 95: p[48] = 7; break;\n    case 96: p[49] = 8; break;\n' +
+      '    }\n    switch (x) {\n    case 102: p[50] = 1; break;\n    case 103: p[51] = 2; break;\n' +
+      '    case 104: p[52] = 3; break;\n    case 105: p[53] = 4; break;\n' +
+      '    case 106: p[54] = 5; break;\n    case 107: p[55] = 6; break;\n' +
+      '    case 108: p[56] = 7; break;\n    case 109: p[57] = 8; break;\n    }\n    switch (x) {\n' +
+      '    case 115: p[58] = 1; break;\n    case 116: p[59] = 2; break;\n' +
+      '    case 117: p[60] = 3; break;\n    case 118: p[61] = 4; break;\n' +
+      '    case 119: p[62] = 5; break;\n    case 120: p[63] = 6; break;\n' +
+      '    case 121: p[64] = 7; break;\n    case 122: p[65] = 8; break;\n    }\n    switch (x) {\n' +
+      '    case 128: p[66] = 1; break;\n    case 129: p[67] = 2; break;\n' +
+      '    case 130: p[68] = 3; break;\n    case 131: p[69] = 4; break;\n' +
+      '    case 132: p[70] = 5; break;\n    case 133: p[71] = 6; break;\n' +
+      '    case 134: p[72] = 7; break;\n    case 135: p[73] = 8; break;\n    }\n    switch (x) {\n' +
+      '    case 141: p[74] = 1; break;\n    case 142: p[75] = 2; break;\n' +
+      '    case 143: p[76] = 3; break;\n    case 144: p[77] = 4; break;\n' +
+      '    case 145: p[78] = 5; break;\n    case 146: p[79] = 6; break;\n' +
+      '    case 147: p[80] = 7; break;\n    case 148: p[81] = 8; break;\n    }\n}',
+    features: ['dense', 'branch'],
+    toolchains: ['agbcc', 'mwcc_242_81', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'extern s32 gOut[12];\nvoid jt_pre_spill(s32 x, s32 *p, s32 c);',
+    proto: { jt_pre_spill: { returnsVoid: true } },
+  },
   // A TABLE BEHIND ANOTHER FUNCTION'S TABLE. IDO, KMC and gcc 2.7.2 form each base in its dispatch
   // block, both halves against the `.rodata` section symbol with addend 0, so the second table's
   // offset lives only in the load's displacement: `lui at,0x0 ; lw rV,24(at)`. mwcc_242_81 gives each
