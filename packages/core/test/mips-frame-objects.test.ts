@@ -264,9 +264,10 @@ describe('a capture below the local area is the object above it, moved down', ()
     expect(out).toContain('five(1, 2, 3, ((s32 *)((u32)sp32 + -4))[a0], v1);');
   });
 
-  // Each of these could put a word beneath the locals in the C's hands, so the capture refuses as
-  // before: handed to a callee, or read at a constant displacement there.
-  test('…only where it escapes nowhere and reads nothing beneath at a constant', () => {
+  // A read at a constant displacement there puts a word beneath the locals in the C's hands, so the
+  // capture refuses as before. Handed to a callee, it is `a - 1` like an indexed base: beneath IDO's
+  // locals is the `ra` save, which no C name owns.
+  test('…handed on as `a - 1`, and only where it reads nothing beneath at a constant', () => {
     const below = /the captured address at \[sp,#28\) is below the reserved local area, which starts at \[sp,#32\)/;
     const edit = (...pairs: [string, string][]) => FIVE_IDO.map((l) => pairs.find(([at]) => at === l)?.[1] ?? l);
     // handed to a callee
@@ -281,7 +282,7 @@ describe('a capture below the local area is the object above it, moved down', ()
       '1c:\tjr\tra',
       '20:\taddiu\tsp,sp,40',
     ];
-    expect(lift(escaped, [[0x10, 'R_MIPS_26', 'k']], MIPS_IDO, FIVE_PROTOS)).toThrow(below);
+    expect(src(escaped, [[0x10, 'R_MIPS_26', 'k']], MIPS_IDO, FIVE_PROTOS)).toContain('k((u32)sp32 + -4);');
     // read at a constant displacement, the `ra` word itself
     const fixed = edit(['2c:\taddu\ta3,sp,t9', '2c:\taddiu\ta3,sp,28'], ['38:\tlw\ta3,28(a3)', '38:\tlw\ta3,0(a3)']);
     expect(lift(fixed, FIVE_RELOCS, MIPS_IDO, FIVE_PROTOS)).toThrow(below);
@@ -448,9 +449,166 @@ describe('a capture below the local area is the object above it, moved down', ()
   test('…and not where a store at a runtime index through it may land in words a declaration left out', () => {
     const rs = relocsAt(0x10, 0x24, 0x58, 0x70);
     expect(lift(QS4_GCC, rs, MIPS_GCC, HC3_PROTOS(5))).toThrow(
-      /\[sp,#20\) is below the reserved local area, which starts at \[sp,#24\), .*a store through it at a runtime index may land in the words from \[sp,#20\) to the locals/,
+      /\[sp,#20\) is below the reserved local area, which starts at \[sp,#24\), .*a store at a runtime index may land in the words from \[sp,#20\) to the locals/,
     );
     expect(src(QS4_GCC, rs, MIPS_GCC, HC3_PROTOS(4))).toContain('u8 sp16[16];');
+  });
+
+  // `struct HC3 s; u32 *p; s.h = gA; p = &s.c[1]; p[gI] = gB; p[gJ] = gC; four(1, 2, 3, 4);
+  // use1(s.c[i] + s.h);` at gcc2.7.2 -O1: the stores go through `p`'s base at 24, the area's start
+  // under a five-word `four`, and their index reaches `s.c[0]` at 20 as surely as one through the
+  // read's base at 20 does.
+  test('…nor where that store goes through a capture inside the locals', () => {
+    const QT1 = [
+      '0:\taddiu\tsp,sp,-40',
+      '4:\tsw\tra,36(sp)',
+      '8:\tsw\ts0,32(sp)',
+      'c:\tmove\ts0,a0',
+      '10:\tlui\tv0,0x0',
+      '14:\tlw\tv0,0(v0)',
+      '18:\tsw\tv0,16(sp)',
+      '1c:\taddiu\ta0,sp,24',
+      '20:\tlui\tv0,0x0',
+      '24:\tlw\tv0,0(v0)',
+      '28:\tsll\tv0,v0,0x2',
+      '2c:\taddu\tv0,v0,a0',
+      '30:\tlui\tv1,0x0',
+      '34:\tlw\tv1,0(v1)',
+      '38:\tsw\tv1,0(v0)',
+      '3c:\tlui\tv0,0x0',
+      '40:\tlw\tv0,0(v0)',
+      '44:\tsll\tv0,v0,0x2',
+      '48:\taddu\tv0,v0,a0',
+      '4c:\tlui\tv1,0x0',
+      '50:\tlw\tv1,0(v1)',
+      '54:\tsw\tv1,0(v0)',
+      '58:\tli\ta0,1',
+      '5c:\tli\ta1,2',
+      '60:\tli\ta2,3',
+      '64:\tjal\t0 <f>',
+      '68:\tli\ta3,4',
+      '6c:\tsll\ts0,s0,0x2',
+      '70:\taddu\tv0,sp,s0',
+      '74:\tlw\tv0,20(v0)',
+      '78:\tlw\ta0,16(sp)',
+      '7c:\tjal\t0 <f>',
+      '80:\taddu\ta0,v0,a0',
+      '84:\tlw\tra,36(sp)',
+      '88:\tlw\ts0,32(sp)',
+      '8c:\tjr\tra',
+      '90:\taddiu\tsp,sp,40',
+    ];
+    const rs: [number, string, string][] = [
+      ...(
+        [
+          [0x10, 'gA'],
+          [0x20, 'gI'],
+          [0x30, 'gB'],
+          [0x3c, 'gJ'],
+          [0x4c, 'gC'],
+        ] as const
+      ).flatMap(([at, g]): [number, string, string][] => [
+        [at, 'R_MIPS_HI16', g],
+        [at + 4, 'R_MIPS_LO16', g],
+      ]),
+      [0x64, 'R_MIPS_26', 'four'],
+      [0x7c, 'R_MIPS_26', 'use1'],
+    ];
+    expect(lift(QT1, rs, MIPS_GCC, HC3_PROTOS(5))).toThrow(
+      /\[sp,#20\) is below the reserved local area, which starts at \[sp,#24\), .*a store at a runtime index may land in the words from \[sp,#20\) to the locals/,
+    );
+    expect(src(QT1, rs, MIPS_GCC, HC3_PROTOS(4))).toContain('u8 sp16[16];');
+  });
+
+  // `void f(s32 i){ u32 a[2]; u32 *p = a - 1; a[0] = gA; a[1] = gB; use1(p[i]); usep(p); }` at
+  // gcc2.7.2 -O1: the base at 12 is handed to `usep` as well as read through, beneath an area no
+  // declaration moved, so what `usep` receives is `a - 1` like the read's base.
+  test('…while one handed on beneath an area no declaration moved is the object above', () => {
+    const QH2 = [
+      '0:\taddiu\tsp,sp,-32',
+      '4:\tsw\tra,28(sp)',
+      '8:\tsw\ts0,24(sp)',
+      'c:\taddiu\ts0,sp,12',
+      '10:\tlui\tv0,0x0',
+      '14:\tlw\tv0,0(v0)',
+      '18:\tsw\tv0,16(sp)',
+      '1c:\tlui\tv0,0x0',
+      '20:\tlw\tv0,0(v0)',
+      '24:\tsw\tv0,20(sp)',
+      '28:\tsll\ta0,a0,0x2',
+      '2c:\taddu\ta0,a0,s0',
+      '30:\tjal\t0 <f>',
+      '34:\tlw\ta0,0(a0)',
+      '38:\tjal\t0 <f>',
+      '3c:\tmove\ta0,s0',
+      '40:\tlw\tra,28(sp)',
+      '44:\tlw\ts0,24(sp)',
+      '48:\tjr\tra',
+      '4c:\taddiu\tsp,sp,32',
+    ];
+    const rs: [number, string, string][] = [
+      [0x10, 'R_MIPS_HI16', 'gA'],
+      [0x14, 'R_MIPS_LO16', 'gA'],
+      [0x1c, 'R_MIPS_HI16', 'gB'],
+      [0x20, 'R_MIPS_LO16', 'gB'],
+      [0x30, 'R_MIPS_26', 'use1'],
+      [0x38, 'R_MIPS_26', 'usep'],
+    ];
+    const protos: Prototypes = {
+      f: { params: ['s32'], returnsVoid: true },
+      use1: { params: ['u32'], returnsVoid: true },
+      usep: { params: ['u32 *'], returnsVoid: true },
+    };
+    const out = src(QH2, rs, MIPS_GCC, protos);
+    expect(out).toContain('u8 sp16[8];');
+    expect(out).toContain('usep((u32)sp16 + -4);');
+  });
+
+  // `struct HC3 s; s.h = gA; fill(s.c); four(1, 2, 3, 4); use1(s.h + s.c[i]);` at gcc2.7.2 -O1:
+  // `fill` is handed `s.c` at 20, in the word a five-word `four` leaves out of the area, so what it
+  // writes there is `s.c[0]` and not the word beneath an 8-byte object.
+  test('…nor where it is handed on into words a declaration left out', () => {
+    const QE1 = [
+      '0:\taddiu\tsp,sp,-40',
+      '4:\tsw\tra,36(sp)',
+      '8:\tsw\ts0,32(sp)',
+      'c:\tmove\ts0,a0',
+      '10:\tlui\tv0,0x0',
+      '14:\tlw\tv0,0(v0)',
+      '18:\tsw\tv0,16(sp)',
+      '1c:\tjal\t0 <f>',
+      '20:\taddiu\ta0,sp,20',
+      '24:\tli\ta0,1',
+      '28:\tli\ta1,2',
+      '2c:\tli\ta2,3',
+      '30:\tjal\t0 <f>',
+      '34:\tli\ta3,4',
+      '38:\tsll\ts0,s0,0x2',
+      '3c:\taddu\tv0,sp,s0',
+      '40:\tlw\tv1,16(sp)',
+      '44:\tlw\ta0,20(v0)',
+      '48:\tjal\t0 <f>',
+      '4c:\taddu\ta0,v1,a0',
+      '50:\tlw\tra,36(sp)',
+      '54:\tlw\ts0,32(sp)',
+      '58:\tjr\tra',
+      '5c:\taddiu\tsp,sp,40',
+    ];
+    const rs: [number, string, string][] = [
+      [0x10, 'R_MIPS_HI16', 'gA'],
+      [0x14, 'R_MIPS_LO16', 'gA'],
+      [0x1c, 'R_MIPS_26', 'fill'],
+      [0x30, 'R_MIPS_26', 'four'],
+      [0x48, 'R_MIPS_26', 'use1'],
+    ];
+    const protos = (params: number): Prototypes => ({
+      ...HC3_PROTOS(params),
+      fill: { params: ['u32 *'], returnsVoid: true },
+    });
+    expect(lift(QE1, rs, MIPS_GCC, protos(5))).toThrow(
+      /\[sp,#20\) is below the reserved local area, which starts at \[sp,#24\), .*it is handed on, where what receives it may reach the words from \[sp,#20\) to the locals/,
+    );
+    expect(src(QE1, rs, MIPS_GCC, protos(4))).toContain('u8 sp16[16];');
   });
 
   // `void f(s32 i){ u32 a[2]; a[0] = gA; a[1] = gB; a[i - 3] = gC; use1(a[1]); }` at gcc2.7.2

@@ -1164,8 +1164,11 @@ function belowLocalArea(off: number, owned: FrameRange): string {
  *  above it (`captureBelowLocalsRebases`), or null where it is. The words beneath the locals are no
  *  C name's, so the capture is that object's address moved down only where nothing it reaches
  *  could be one of those words in the C:
- *  - it escapes nowhere (a callee, memory, a by-value read or a return temp would be handed the
- *    outgoing words);
+ *  - it escapes nowhere where the area leaves words out on declarations alone (gcc's
+ *    `declaredWordsFrom`): what receives it may reach a local a callee declared with more stack
+ *    words than its call passes pushed beneath the area (`fill(s.c)` with `s.c` at 20 under a
+ *    five-word `four(1, 2, 3, 4)`). Elsewhere nothing C names lives beneath the locals, and handing
+ *    the base on is the same pointer arithmetic as indexing it;
  *  - no access through it at a constant displacement lands beneath the locals (a copy into the
  *    outgoing area is exactly that);
  *  - no slot between it and the locals is stored to directly. Such a word is a staged stack
@@ -1173,11 +1176,12 @@ function belowLocalArea(off: number, owned: FrameRange): string {
  *    declared with more stack words than its call passes (gcc's `above-outgoing-area` sizes the
  *    outgoing block by the declarations), and either way the index's reach is no longer the one
  *    object's;
- *  - no store through it at a runtime index may land in the words the area leaves out on those
- *    declarations (`declaredWordsFrom`): `struct { s32 h; u32 c[3]; } s` at 16 under a five-word
- *    `four(1, 2, 3, 4)` puts gcc's area at 24, and the loop filling `s.c[k]` writes `s.c[0]` at 20
- *    through the base at 20. Elsewhere the words beneath the locals hold no local, and a store
- *    there is one the C's own index puts outside its array;
+ *  - no store at a runtime index, through it or through any other capture, may land in the words
+ *    the area leaves out on those declarations: `struct { s32 h; u32 c[3]; } s` at 16 under a
+ *    five-word `four(1, 2, 3, 4)` puts gcc's area at 24, and the loop filling `s.c[k]` writes
+ *    `s.c[0]` at 20 through the base at 20 — or through `p = &s.c[1]` at 24 as `p[k]` from -1, and
+ *    gcc folds `s.c[j + 1]`'s `+ 1` into a base at 24 too. Elsewhere the words beneath the locals
+ *    hold no local, and a store there is one the C's own index puts outside its array;
  *  - every access through a pointer stepped through the frame, from any capture, lands inside the
  *    locals where the pointer is lowest (`AddressFlow.floor`): on its first trip for one stepped up
  *    from a capture beneath them, which is how a copy of a by-value struct into the O32 outgoing
@@ -1220,8 +1224,14 @@ function belowRebaseRefusal(
     uses.filledFrom.has(off) ||
     uses.byValueReads.has(off) ||
     uses.returnTemps.has(off);
-  if (handedOver) {
-    return why('it is handed on, where what receives it may reach the words beneath the locals');
+  // the words beneath the locals a misdeclared callee may have pushed a local into
+  const misplaced = declaredWordsFrom === undefined ? 0 : owned.from - Math.max(off, declaredWordsFrom);
+  if (handedOver && misplaced > 0) {
+    return why(
+      `it is handed on, where what receives it may reach the words from [sp,#${owned.from - misplaced}) to the locals, ` +
+        'which the area leaves out on the stack words its calls are declared with — a local, where a callee is ' +
+        'declared with more stack words than its call passes',
+    );
   }
   const fixed = uses.fixed.find((f) => f.at < owned.from);
   if (fixed !== undefined) {
@@ -1234,19 +1244,16 @@ function belowRebaseRefusal(
         'its index may reach, or a local the area misses because a callee is declared with more stack words than its call passes',
     );
   }
-  // the words beneath the locals a misdeclared callee may have pushed a local into
-  const misplaced = declaredWordsFrom === undefined ? 0 : owned.from - Math.max(off, declaredWordsFrom);
-  for (const [op, { off: from, index }] of uses.accessOps) {
+  for (const [op, { index }] of uses.accessOps) {
     if (
       misplaced > 0 &&
       op.opcode === 'store' &&
-      from === off &&
       index !== undefined &&
       !flow.stepped.has(op.operands[0]) &&
       mayTouch(index.reach, owned.from - misplaced, misplaced)
     ) {
       return why(
-        `a store through it at a runtime index may land in the words from [sp,#${owned.from - misplaced}) to the ` +
+        `a store at a runtime index may land in the words from [sp,#${owned.from - misplaced}) to the ` +
           'locals, which the area leaves out on the stack words its calls are declared with — a local, where a ' +
           'callee is declared with more stack words than its call passes',
       );
