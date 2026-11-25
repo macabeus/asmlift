@@ -155,7 +155,14 @@ import { type StrideDerived, strideDerivedParams } from '../raise/unpre';
 import type { SymbolInfo } from '../symbols';
 import { analyze, shortCircuitGuardedValues } from './analysis';
 import { ARITH_TO_BIN, CMP_TO_BIN, COMMUTATIVE_BIN, FCMP_TO_BIN, FLOAT_TO_BIN } from './arith-ops';
-import { exprVars, mkIf, recognizeForLoops, spellUpdateInCond, stampOrderedBases } from './ast-rewrites';
+import {
+  dropSpentFlagTests,
+  exprVars,
+  mkIf,
+  recognizeForLoops,
+  spellUpdateInCond,
+  stampOrderedBases,
+} from './ast-rewrites';
 import { makeBitfieldSpelling } from './bitfields';
 import {
   CARRIER_NAME_GATES,
@@ -5081,9 +5088,11 @@ function structureRanked(
   // `break;` there would bind to the inner switch: `f = 1; break;`, with `f = 0;` ahead of each
   // switch between and a switch-scoped `if (f != 0) break;` right after it (`aroundSwitch`), so the
   // last one leaves the switch `b` ends (agbcc, IDO and GCC 2.7.2 lay sw_gotocase_inner's inner
-  // `goto shared;` out this way). Taken only where no loop was entered since that switch's arm began
-  // (each test's `break;` binds to the next switch out) and every switch between has its own flag
-  // scope. A merge that is a bare `ret` is `return;` instead, from inside a nested loop as well:
+  // `goto shared;` out this way). A test the arm's own leaving follows at once is dropped with the
+  // flag once the body is built (`dropSpentFlagTests`): there the inner `break;` alone reaches the
+  // merge, as in every published inhabitant. Taken only where no loop was entered since that
+  // switch's arm began (each test's `break;` binds to the next switch out) and every switch between
+  // has its own flag scope. A merge that is a bare `ret` is `return;` instead, from inside a nested loop as well:
   // mwcc's sw_xjret_end leaves its inner switch and loop for the outer switch's merge, the epilogue.
   // Both are asked only in the reruns made once every run without them declined
   // (`CaseExitRanking`), so a published lift never moves.
@@ -8848,7 +8857,10 @@ function structureRanked(
     return out;
   };
 
-  const body = stampOrderedBases(recognizeForLoops(structureRegion(entry, null)), orderLicensedGlobals);
+  const body = stampOrderedBases(
+    recognizeForLoops(dropSpentFlagTests(structureRegion(entry, null), new Set(switchMergeFlags.values()))),
+    orderLicensedGlobals,
+  );
   // THE OBLIGATION `anchorConstCopies` CANNOT DISCHARGE ON ITS OWN, checked now that the render is
   // complete. Anchoring is two edits that must both land: `suppressedArgs` DELETES a write from its
   // edge, and `anchoredAt` owes it back at the const's def site. Its refusal conditions establish

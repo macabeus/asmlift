@@ -4,7 +4,8 @@
 // reaches the outer switch's merge from inside the inner one, where C binds a `break;` to the inner
 // switch. structure.ts `switchMergeExit` writes `f = 1; break;` there, `f = 0;` ahead of the inner
 // switch and a SWITCH-scoped `if (f != 0) break;` right after it, so the rest of the outer arm is
-// skipped. A merge that is a bare `ret` is `return;` instead, with no flag, from inside a loop nested
+// skipped; where nothing is left of the arm to skip, the test and the flag are dropped
+// (`dropSpentFlagTests`). A merge that is a bare `ret` is `return;` instead, with no flag, from inside a loop nested
 // in the arm as well; an exit from inside such a loop to a merge that runs code still declines,
 // since a test after that loop would leave the loop and not the switch. Each fixture is judged
 // against its own IR by the trace oracle (`irAgreement`), as `structure()` returns it and as it
@@ -17,8 +18,10 @@ import { cBackend } from '../src/backend/c';
 import { parseAsmData } from '../src/frontend/asmdata';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
+import type { Stmt } from '../src/l3/ast';
 import { decompile, readabilityRewrites } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
+import { dropSpentFlagTests } from '../src/structure/ast-rewrites';
 import { structure } from '../src/structure/structure';
 import { TOOLCHAIN_TARGETS } from '../src/target';
 import { irAgreement, irTraceOf } from './helpers';
@@ -173,20 +176,57 @@ const loopInArm = (tail: 'return' | 'k(m); return') =>
 ${tail === 'return' ? '  ret' : '  %k: s32 = call %m {target="k"}\n  ret'}
 }`;
 
-test("an arm of a nested switch reaches the outer switch's merge through a switch-scoped flag", () => {
+test("an arm of a nested switch reaches the outer switch's merge, its flag dropped where the arm leaves anyway", () => {
+  // the flag's test after the inner switch is followed by the outer arm's own `break;`, so both of
+  // its paths leave the outer switch and the inner `break;` alone reaches the merge
+  // (ast-rewrites.ts `dropSpentFlagTests`)
   const { src, agreement, shipped } = judged(GOTOCASE_INNER);
-  const set = /mark\(1\);\n\s*k\(v\d+\);\n\s*(v\d+) = 1;\n\s*break;/.exec(src);
-  expect(set).not.toBeNull();
-  const flag = set![1];
-  expect(src.match(/ = 1;\n\s*break;/g)).toHaveLength(1);
-  expect(src).toMatch(new RegExp(`${flag} = 0;\\n\\s*switch \\(`));
-  // the test after the inner switch leaves the outer one, which the loop's `break;` then follows
-  expect(src).toMatch(new RegExp(`}\\n\\s*if \\(${flag} != 0\\) break;\\n\\s*break;`));
-  expect(src).toMatch(new RegExp(`s32 ${flag};`));
+  expect(src).toMatch(/mark\(1\);\n\s*k\(v\d+\);\n\s*break;\n\s*}\n\s*continue;\n\s*case 2:/);
+  expect(src).not.toMatch(/ = 1;\n\s*break;/);
+  expect(src).not.toMatch(/!= 0\) break;/);
   expect(src).not.toContain('goto');
   alike(agreement);
   alike(shipped);
   expect(ran(GOTOCASE_INNER, 'out')).toBeGreaterThan(SEEDS.length / 4);
+});
+
+test('a switch-merge flag whose test is followed by other code is kept, with its stores', () => {
+  const flag = 'v9';
+  const test = (): Stmt => ({
+    k: 'if',
+    cond: { k: 'bin', op: '!=', l: { k: 'var', name: flag }, r: { k: 'const', value: 0 } },
+    then: [{ k: 'break', ofSwitch: true }],
+    else: [],
+  });
+  const call = (target: string): Stmt => ({
+    k: 'exprstmt',
+    value: { k: 'call', fn: target, args: [] },
+  });
+  const inner: Stmt = {
+    k: 'switch',
+    scrutinee: { k: 'var', name: 'a0' },
+    cases: [{ values: [0], body: [{ k: 'assign', name: flag, value: { k: 'const', value: 1 } }], fallsThrough: false }],
+  };
+  const outer = (after: Stmt[]): Stmt[] => [
+    {
+      k: 'switch',
+      scrutinee: { k: 'var', name: 'a1' },
+      cases: [
+        {
+          values: [0],
+          body: [{ k: 'assign', name: flag, value: { k: 'const', value: 0 } }, inner, test(), ...after],
+          fallsThrough: false,
+        },
+      ],
+    },
+  ];
+  const kept = outer([call('z')]);
+  expect(dropSpentFlagTests(kept, new Set([flag]))).toEqual(kept);
+  // spent at the closed arm's end and before the same `break;` alike: test and stores go
+  for (const after of [[], [{ k: 'break', ofSwitch: true } as Stmt]]) {
+    const out = JSON.stringify(dropSpentFlagTests(outer(after), new Set([flag])));
+    expect(out).not.toContain(flag);
+  }
 });
 
 test('a merge that is a bare return is `return;` from a loop nested in the arm, with no flag', () => {
