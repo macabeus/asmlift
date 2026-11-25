@@ -266,3 +266,24 @@ test('the merge exits are asked only once the runs asking the case-exit flags al
   expect(source).toMatch(/while \(1\) \{\n\s*if \(v0 >= a2\) return gOut \+ v0;/);
   expect(source).not.toContain('switch (a0 + ');
 }, 60_000);
+
+/** A generated ido7.1 (-O2) function, `corpus/ido71-swmergecopies.*`, its objdump text and
+ *  `-s -r -t` dump: `s32 i = c & 3; switch (a) { case 3: k(1); k(2); break; case 4: k(3); switch
+ *  (b & 3) { case 0: k(4); for (j = 0; j < 3; j++) { k(5); if (gA[(b + j) & 15] > 4) { k(6); goto
+ *  out; } } break; case 1: k(7); break; } k(8); goto out; case 7: k(9); k(10); break; default:
+ *  k(11); break; } out: return gA[i & 15] + b;`. The default without `joinPastReturnsByDefault`
+ *  structures the copies first and the join after them (pipeline.ts `copiesByDefault`). The copies
+ *  decline without the merge rung, and the join lifts without it, keeping the inner switch; the
+ *  copies with that rung would lift too, as an if-chain whose arm `break`s after `k(8)`, and be
+ *  published in the join's place. So the copies' run there does not ask it
+ *  (`StructureHooks.joinFollows`). */
+test("the merge exits are not asked in the copies' run where the join is structured after it", () => {
+  const corpus = (f: string) => readFileSync(new URL(`corpus/${f}`, import.meta.url), 'utf8');
+  const dump = corpus('ido71-swmergecopies.txt');
+  const { source } = decompile('f', corpus('ido71-swmergecopies.asm'), TOOLCHAIN_TARGETS['ido7.1'].description, {
+    prototypes: { f: { params: ['s32', 's32', 's32'], returns: 's32' }, k: { params: 1, returnsVoid: true } },
+    asmData: parseAsmData(dump, dump, dump, true),
+  });
+  expect(source).toContain('switch (a1 & 3) {');
+  expect(source).toMatch(/k\(8\);\n\s*return \(\(s32 \*\)&gA\)\[a2 & 3\] \+ a1;/);
+}, 60_000);

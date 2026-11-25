@@ -1509,6 +1509,7 @@ function copiesByDefault(
       { ...structOpts, copyReturnTails: true },
       {
         ...hooks,
+        joinFollows: true,
         onJoinReadsAsCopies: () => {
           joinIsCopies = true;
           hooks?.onJoinReadsAsCopies?.();

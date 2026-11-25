@@ -451,9 +451,14 @@ interface JumpRanking {
  *  - `merge`: an exit to an enclosing switch's merge, `break;` or the merge's own `return`
  *    (`switchMergeExit`). It comes after `flags` because those runs can lift through a later
  *    ladder rung where an earlier one met a merge exit, and asking both at once would publish the
- *    earlier rung's lift in its place (an mwcc nest of switches in a loop). Nor is it asked in the
- *    join reading's ladder where the copies' ladder runs after it (`structureWithinBudget`): a
- *    function the join reading would lift with it can be one the copies lift without it. */
+ *    earlier rung's lift in its place (an mwcc nest of switches in a loop). Nor is it asked in a
+ *    ladder another reading follows: the join's where the copies' ladder runs after it
+ *    (`structureWithinBudget`), since a function the join reading would lift with it can be one
+ *    the copies lift without it, and the copies' where the join is structured after them
+ *    (`StructureHooks.joinFollows`, pipeline.ts `copiesByDefault`), since a function the copies
+ *    would lift with it can be one the join lifts without it (an ido7.1 nest of a loop in a
+ *    switch in a case, leaving for an effect-free `return` merge). That join's own ladder asks
+ *    it where it never asks the join, and its copies' ladder after a declined join does. */
 const CASE_EXIT_RUNGS = ['flags', 'merge'] as const;
 type CaseExitRung = (typeof CASE_EXIT_RUNGS)[number];
 interface CaseExitRanking {
@@ -815,7 +820,7 @@ function structureLadder(
     if (
       sfn === null &&
       caseExit.met.has(rung) &&
-      (rung !== 'merge' || reading.copies || !reading.asked) &&
+      (rung !== 'merge' || ((reading.copies || !reading.asked) && hooks.joinFollows !== true)) &&
       hooks.caseExitFlags !== false
     ) {
       refused = undefined;
