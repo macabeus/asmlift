@@ -30,9 +30,12 @@
 // A BODY IS LIFTED READING ITS OWN CALLEES' BODIES, at every depth (`calleeBodyReads`): a body that
 // stages stack words for a call nothing declares lifts only where that callee's body sizes the
 // block, and the call chain to that callee may be any number of wrappers long. Each body is read
-// once per set of readers, and a body still being lifted (the function being lifted at the top,
-// or any body below it on the way down: a cycle) is read as a body that does not lift, by the
-// frontend's scans (`unliftedReads`), never by a lift of itself.
+// once per set of readers (a body on a call cycle twice, below). The function being lifted at the top is read as a body that does not
+// lift, by the frontend's scans (`unliftedReads`), never by a lift of itself. Bodies on a call
+// cycle below it (a strongly connected component of the bodies read) are each lifted reading the
+// others, and itself, the same way: a lift of one reading another member's lift would read it
+// before that answer exists, so what it says would hang on which member a call asked first, and the
+// answer must be the callee's alone.
 //
 // A RETURN READS THE RETURN REGISTER. Where the target returns in its first argument register (ARM
 // r0, PowerPC r3), a return that no path wrote that register for hands back the caller's first
@@ -46,9 +49,10 @@
 // register PAIR (r0:r1, r3:r4) that nothing declares is counted for its first register only.
 //
 // It answers nothing where:
-//   - the callee is the function being lifted, or a body still being lifted on the way down to it
-//     (its own declaration is a different question), save what a body that does not lift answers:
-//     the incoming stack words its own entry loads, which size a call to itself (`unliftedReads`);
+//   - the callee is the function being lifted, or a body on the same call cycle as the one being
+//     lifted (its own declaration is a different question), save what a body that does not lift
+//     answers: the incoming stack words its own entry loads, which size a call to itself
+//     (`unliftedReads`);
 //   - the text the body is read from (the input, or a body handed in) defines no label of that
 //     name: a `name:` line, an objdump `<name>:` header or a `glabel name` (the Thumb frontend lifts
 //     a text with no such label whole, as one function, so a lift alone does not say the callee is
@@ -179,8 +183,10 @@ export type CalleeBodyReads = CalleeBodyReaders & {
  *  reads its first argument register (`CalleeReadsFirstArgument` below), off ONE lift.
  *  `lift` lifts one function of a text (the input, or a body in `external`) under a table, with no
  *  bound of its own, handed these same readers for its own callees, so a body is read at whatever
- *  depth a call first asks it and once only. `self` and every body whose lift is under way are
- *  answered as a body that does not lift (`unliftedReads`), so a cycle ends. `frontend` is what
+ *  depth a call first asks it and once only. `self` answers as a body that does not lift
+ *  (`unliftedReads`), and so does each body of a strongly connected component of more than one body
+ *  to the lift of a body of that component, which is lifted again once the component closes: a
+ *  cycle ends, and no answer depends on the order the calls ask in. `frontend` is what
  *  the target frontend says of its own lifts: its entry scan (`Frontend.entryStackWords`) and its
  *  return scan (`Frontend.returnsThroughReturnReg`), asked only of a body that does not lift. */
 export function calleeBodyReads(
@@ -193,25 +199,70 @@ export function calleeBodyReads(
   frontend?: Pick<Frontend, 'entryStackWords' | 'returnsThroughReturnReg'>,
 ): CalleeBodyReads {
   const memo = new Map<string, BodyReads>();
-  const lifting = new Set<string>([self]);
   const under = new Map<string, Set<string>>();
+  const unlifted = (callee: string): BodyReads =>
+    bodyReads(callee, asm, target, prototypes, undefined, external, frontend);
+  // Tarjan's strongly connected components over the bodies read (`self` is no node: it is always
+  // read unlifted): each body's visit index and low link, the bodies whose lift is under way
+  // (innermost last), and the bodies visited whose component is still open
+  const index = new Map<string, number>();
+  const low = new Map<string, number>();
+  const lifting: string[] = [];
+  const open: string[] = [];
+  const onOpen = new Set<string>();
+  // each body of a closed component of more than one body, by component
+  const componentOf = new Map<string, number>();
   const read = (callee: string): BodyReads => {
-    if (lifting.has(callee)) {
-      return bodyReads(callee, asm, target, prototypes, undefined, external, frontend);
+    const reader = lifting.at(-1);
+    if (
+      callee === self ||
+      (reader !== undefined && componentOf.has(callee) && componentOf.get(callee) === componentOf.get(reader))
+    ) {
+      return unlifted(callee);
     }
-    if (!memo.has(callee)) {
-      lifting.add(callee);
-      try {
-        const asked = new Set<string>();
-        under.set(callee, asked);
-        const bodyLift: BodyLift = (c, table, entryReadCalls, text, relocs) =>
-          lift(c, table, entryReadCalls, text, relocs, recording(asked));
-        memo.set(callee, bodyReads(callee, asm, target, prototypes, bodyLift, external, frontend));
-      } finally {
-        lifting.delete(callee);
+    const link = (to: number): void => {
+      if (reader !== undefined) {
+        low.set(reader, Math.min(low.get(reader)!, to));
+      }
+    };
+    if (index.has(callee)) {
+      if (onOpen.has(callee)) {
+        link(index.get(callee)!);
+      }
+      // a body whose lift is under way has no answer yet; its component's answer replaces this one
+      return memo.get(callee) ?? unlifted(callee);
+    }
+    index.set(callee, index.size);
+    low.set(callee, index.get(callee)!);
+    open.push(callee);
+    onOpen.add(callee);
+    readLifted(callee);
+    link(low.get(callee)!);
+    if (low.get(callee) === index.get(callee)) {
+      const component = open.splice(open.lastIndexOf(callee));
+      component.forEach((c) => onOpen.delete(c));
+      // bodies that call each other: each lift above read another member before that one's answer
+      // existed, so what it says hangs on which member was asked first. Each is lifted again reading
+      // every member, itself included, as a body that does not lift, and every other body by its
+      // settled answer, which no member's answer changes.
+      if (component.length > 1) {
+        component.forEach((c) => componentOf.set(c, index.get(callee)!));
+        component.forEach(readLifted);
       }
     }
     return memo.get(callee)!;
+  };
+  const readLifted = (callee: string): void => {
+    lifting.push(callee);
+    try {
+      const asked = new Set<string>();
+      under.set(callee, asked);
+      const bodyLift: BodyLift = (c, table, entryReadCalls, text, relocs) =>
+        lift(c, table, entryReadCalls, text, relocs, recording(asked));
+      memo.set(callee, bodyReads(callee, asm, target, prototypes, bodyLift, external, frontend));
+    } finally {
+      lifting.pop();
+    }
   };
   // the readers a body's lift is handed, noting each callee whose body answered it something
   const recording = (asked: Set<string> | undefined): CalleeBodyReaders => {
@@ -318,8 +369,9 @@ type BodyLift = (
 ) => Fn;
 
 /** What `callee`'s body answers, read off the input or a body handed in. `lift` undefined reads it as
- *  a body that does not lift (`unliftedReads`): the function being lifted, or a body still being
- *  lifted on the way down to it, whose lift would be the one under way. */
+ *  a body that does not lift (`unliftedReads`): the function being lifted, whose lift would be the
+ *  one under way, or, to the lift of a body on a call cycle, a body of that cycle
+ *  (`calleeBodyReads`). */
 function bodyReads(
   callee: string,
   asm: string,
@@ -362,8 +414,8 @@ function bodyReads(
 
 /** WHAT A BODY ANSWERS WITHOUT ITS LIFT: the incoming stack words its straight-line entry loads, and
  *  whether the frontend's scan finds a return through the return register, and no bound. Asked of a
- *  body that does not lift, and of one whose lift is under way: a CALL TO ITSELF is sized so, by the
- *  frontend's scan (`Frontend.entryStackWords`) and never by a lift of itself, which would be the
+ *  body that does not lift, of the function being lifted, and of a body of the same call cycle as
+ *  the body being lifted: a CALL TO ITSELF is sized so, by the frontend's scan (`Frontend.entryStackWords`) and never by a lift of itself, which would be the
  *  lift being made. A scan of the entry's stack loads sees no register read, so where the ABI can
  *  skip an argument register (`evenWordAlignedArgs`) it cannot say the registers are all arguments,
  *  and says nothing. */

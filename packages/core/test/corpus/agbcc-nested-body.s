@@ -298,3 +298,92 @@ stkbody_cyc:
 	.word	gv
 .Lfe12:
 	.size	 stkbody_cyc,.Lfe12-stkbody_cyc
+	.align	2, 0
+	.globl	cyoa
+	.type	 cyoa,function
+	.thumb_func
+cyoa:
+	push	{lr}
+	cmp	r0, #0
+	beq	.L49	@cond_branch
+	bl	cyob
+.L49:
+	pop	{r0}
+	bx	r0
+.Lfe13:
+	.size	 cyoa,.Lfe13-cyoa
+	.align	2, 0
+	.globl	cyob
+	.type	 cyob,function
+	.thumb_func
+cyob:
+	push	{lr}
+	ldr	r1, .L51
+	str	r0, [r1]
+	sub	r0, r0, #0x1
+	mov	r1, #0x0
+	mov	r2, #0x0
+	mov	r3, #0x0
+	bl	cyoa
+	pop	{r0}
+	bx	r0
+.L52:
+	.align	2, 0
+.L51:
+	.word	gv
+.Lfe14:
+	.size	 cyob,.Lfe14-cyob
+	.align	2, 0
+	.globl	cyord1
+	.type	 cyord1,function
+	.thumb_func
+cyord1:
+	push	{r4, lr}
+	add	r4, r0, #0
+	ldr	r1, .L54
+	mov	r0, #0x5
+	str	r0, [r1]
+	add	r0, r4, #0
+	bl	cyoa
+	ldr	r1, .L54+0x4
+	mov	r0, #0x6
+	str	r0, [r1]
+	add	r0, r4, #0
+	bl	cyob
+	pop	{r4}
+	pop	{r0}
+	bx	r0
+.L55:
+	.align	2, 0
+.L54:
+	.word	gh
+	.word	gw
+.Lfe15:
+	.size	 cyord1,.Lfe15-cyord1
+	.align	2, 0
+	.globl	cyord2
+	.type	 cyord2,function
+	.thumb_func
+cyord2:
+	push	{r4, lr}
+	add	r4, r0, #0
+	ldr	r1, .L57
+	mov	r0, #0x5
+	str	r0, [r1]
+	add	r0, r4, #0
+	bl	cyob
+	ldr	r1, .L57+0x4
+	mov	r0, #0x6
+	str	r0, [r1]
+	add	r0, r4, #0
+	bl	cyoa
+	pop	{r4}
+	pop	{r0}
+	bx	r0
+.L58:
+	.align	2, 0
+.L57:
+	.word	gh
+	.word	gw
+.Lfe16:
+	.size	 cyord2,.Lfe16-cyord2

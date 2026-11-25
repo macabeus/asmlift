@@ -3,7 +3,8 @@
  * argument to `one`, which reads r0 alone. `stkbody_self` stages its own five stack words for a call
  * to itself, which only its own entry's loads size. `top` wraps `mid` once more, so `stkbody_deep`'s
  * bound rests on bodies three levels down; `cyca` and `cycb` call each other, a cycle the reading
- * must end. */
+ * must end. `cyoa` and `cyob` call each other too, and `cyord1` and `cyord2` ask them in opposite
+ * orders: what each body says must not depend on which was asked first. */
 extern int gv[];
 extern int gk[];
 void nine(a, b, c, d, e, f, g, h, i) int a, b, c, d, e, f, g, h, i;
@@ -24,3 +25,9 @@ void cycb();
 void cyca(n) int n; { if (n > 0) cycb(n - 1); }
 void cycb(n) int n; { gv[6] = n; cyca(n); }
 void stkbody_cyc(int *p, int b) { gv[7] = b; cyca(p[0]); }
+extern int gh, gw;
+void cyob();
+void cyoa(a, b, c, d) int a, b, c, d; { if (a) cyob(a, b, c, d); }
+void cyob(a) int a; { gv[0] = a; cyoa(a - 1, 0, 0, 0); }
+void cyord1(int x) { gh = 5; cyoa(x); gw = 6; cyob(x); }
+void cyord2(int x) { gh = 5; cyob(x); gw = 6; cyoa(x); }

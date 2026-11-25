@@ -721,7 +721,8 @@ function bodyReadsIn(
   // nothing declares lifts only where that callee's body sizes the block, as at the top level, and a
   // call it takes at every incoming register (`entryReadCalls`) is taken at no more registers than
   // that callee's body reads (call-plan.ts), which keeps the count an upper bound. Each body is read
-  // once, and a body whose lift is under way, this function's included, is read by its entry scan.
+  // once; this function's own body, and to a body on a call cycle every body of that cycle, is read
+  // by its entry scan.
   const lift: CalleeLift = (callee, calleeTable, entryReadCalls, text, relocs, readers) =>
     liftStamped(
       callee,

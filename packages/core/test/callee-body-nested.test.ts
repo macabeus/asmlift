@@ -33,6 +33,8 @@ const lift = (name: string, text: string) =>
       top: { returnsVoid: true },
       cyca: { returnsVoid: true },
       cycb: { returnsVoid: true },
+      cyoa: { returnsVoid: true },
+      cyob: { returnsVoid: true },
     },
   });
 
@@ -79,6 +81,18 @@ describe('the reading goes as deep as the calls do', () => {
     expect(lift('stkbody_cyc', fn('cyca') + fn('cycb') + fn('stkbody_cyc')).source).toBe(
       lift('stkbody_cyc', fn('stkbody_cyc')).source,
     );
+  });
+
+  // `cyoa` hands `cyob` r0-r3, and `cyob` zeroes r1-r3 before it calls `cyoa`. Read in a cycle, a
+  // lift of either reads the other before that one's lift is done, so `cyoa`'s bound was one where
+  // `cyord1` asked it first and four where `cyord2` asked `cyob` first. Each is lifted again reading
+  // the other as a body that does not lift, and the callee alone decides: `cyoa` four, `cyob` one.
+  test('bodies that call each other say the same whichever is asked first', () => {
+    const both = fn('cyoa') + fn('cyob');
+    const first = lift('cyord1', both + fn('cyord1')).source;
+    const second = lift('cyord2', both + fn('cyord2')).source;
+    expect(first).toMatch(/\n {4}cyoa\(a0, &gh\);\n[^]*\n {4}cyob\(a0\);\n/);
+    expect(second).toMatch(/\n {4}cyob\(a0\);\n[^]*\n {4}cyoa\(a0, &gw\);\n/);
   });
 });
 
