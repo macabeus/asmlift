@@ -1,9 +1,8 @@
 // asmlift structurer — L3 tree builders and post-passes the emitters call: the empty-then
 // peephole (`mkIf`), a loop update spelled inside its test (`spellUpdateInCond`), the variable
 // walk and substitution the copies read (`exprVars`, `substVar`), the `while` → `for`
-// re-bracketing over the finished body (`recognizeForLoops`), the order-licence stamp on `index`
-// bases (`stampOrderedBases`), and the flag tests the next statement makes redundant
-// (`dropSpentFlagTests`). Functions of the tree alone, no structurer state.
+// re-bracketing over the finished body (`recognizeForLoops`), and the order-licence stamp on
+// `index` bases (`stampOrderedBases`). Functions of the tree alone, no structurer state.
 import {
   Expr,
   Stmt,
@@ -11,11 +10,8 @@ import {
   keepsHelperRel,
   mapExprChildren,
   mapStmtExprs,
-  mapStmtLists,
   mentionedName,
   negateCond,
-  stmtChildren,
-  stmtExprs,
 } from '../l3/ast';
 import { forHeaderOf } from '../l3/forheader';
 
@@ -127,64 +123,6 @@ export function recognizeForLoops(stmts: Stmt[]): Stmt[] {
   }
   return out;
 }
-// A FLAG TEST THE NEXT STATEMENT MAKES REDUNDANT: `if (f != 0) break;` where the path past it takes
-// the same jump, the next statement's or, at the end of a closed switch arm, the arm's own `break;`.
-// structure.ts writes it where a flag set in a nested switch for an enclosing switch's merge
-// (`switchMergeExit`) is tested after a switch its arm then leaves anyway (agbcc, IDO and GCC
-// 2.7.2's sw_gotocase_inner). The test of a name in `flags` is dropped there; where no test of a
-// flag is left, its stores (constants) go too, so nothing declares it.
-export function dropSpentFlagTests(body: Stmt[], flags: ReadonlySet<string>): Stmt[] {
-  const leavesArm: Stmt = { k: 'break', ofSwitch: true };
-  const sameJump = (a: Stmt, b: Stmt | undefined): boolean =>
-    (a.k === 'continue' && b?.k === 'continue') ||
-    (a.k === 'break' && b?.k === 'break' && a.ofSwitch === b.ofSwitch && a.label === b.label);
-  const spent = (s: Stmt, next: Stmt | undefined): boolean =>
-    s.k === 'if' &&
-    s.else.length === 0 &&
-    s.then.length === 1 &&
-    sameJump(s.then[0], next) &&
-    s.cond.k === 'bin' &&
-    s.cond.op === '!=' &&
-    s.cond.l.k === 'var' &&
-    flags.has(s.cond.l.name) &&
-    s.cond.r.k === 'const' &&
-    s.cond.r.value === 0;
-  // `end`: the jump falling off the list's end takes, where it is one
-  const dropTests = (list: Stmt[], end: Stmt | undefined): Stmt[] =>
-    list
-      .filter((s, i) => !spent(s, list[i + 1] ?? end))
-      .map((s, i, kept): Stmt => {
-        if (s.k === 'if') {
-          const next = kept[i + 1] ?? end;
-          return { ...s, then: dropTests(s.then, next), else: dropTests(s.else, next) };
-        }
-        if (s.k === 'switch') {
-          return {
-            ...s,
-            cases: s.cases.map((c) => ({ ...c, body: dropTests(c.body, c.fallsThrough ? undefined : leavesArm) })),
-            ...(s.default ? { default: dropTests(s.default, leavesArm) } : {}),
-          };
-        }
-        return mapStmtLists(s, (l) => dropTests(l, undefined));
-      });
-  const tested = dropTests(body, undefined);
-  const read = new Set<string>();
-  const reads = (list: readonly Stmt[]): void => {
-    for (const s of list) {
-      stmtExprs(s).forEach((e) => exprVars(e, read));
-      reads(stmtChildren(s));
-    }
-  };
-  reads(tested);
-  const unread = new Set([...flags].filter((f) => !read.has(f)));
-  if (unread.size === 0) {
-    return tested;
-  }
-  const dropStores = (list: Stmt[]): Stmt[] =>
-    list.filter((s) => s.k !== 'assign' || !unread.has(s.name)).map((s) => mapStmtLists(s, dropStores));
-  return dropStores(tested);
-}
-
 // Read-set / rewrite walkers over the FULL Expr union — a walker that misses a node kind (e.g.
 // call/index/field reads) sequentializes a copy keyed by an array index in the wrong order.
 export function exprVars(e: Expr, acc: Set<string> = new Set()): Set<string> {

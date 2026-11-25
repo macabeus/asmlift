@@ -155,14 +155,7 @@ import { type StrideDerived, strideDerivedParams } from '../raise/unpre';
 import type { SymbolInfo } from '../symbols';
 import { analyze, shortCircuitGuardedValues } from './analysis';
 import { ARITH_TO_BIN, CMP_TO_BIN, COMMUTATIVE_BIN, FCMP_TO_BIN, FLOAT_TO_BIN } from './arith-ops';
-import {
-  dropSpentFlagTests,
-  exprVars,
-  mkIf,
-  recognizeForLoops,
-  spellUpdateInCond,
-  stampOrderedBases,
-} from './ast-rewrites';
+import { exprVars, mkIf, recognizeForLoops, spellUpdateInCond, stampOrderedBases } from './ast-rewrites';
 import { makeBitfieldSpelling } from './bitfields';
 import {
   CARRIER_NAME_GATES,
@@ -448,7 +441,7 @@ interface JumpRanking {
 }
 
 /** Whether a case body's exit out of its loop past the switch's end is spelled with the exit flag
- *  (`caseExitBreak`), and an exit to an enclosing switch's merge with its flag or `return;`
+ *  (`caseExitBreak`), and an exit to an enclosing switch's merge with `break;` or `return;`
  *  (`switchMergeExit`), and whether a structuring without them met one. Asked only in the runs
  *  `structure` makes after every run without it declined and one met such an exit, so it turns a
  *  decline into a lift and never one lift into another: where the code from the exit on can be
@@ -4991,8 +4984,6 @@ function structureRanked(
     }
   };
 
-  // a switch's flags, each with what its test after the switch leaves (`aroundSwitch`)
-  type FlagScope = Map<string, 'loop' | 'switch'>;
   // THE SWITCH ARMS being structured, innermost last — one frame per arm, in both regimes, so a
   // `break;` can be checked against what C binds it to. A C `break` leaves the innermost enclosing
   // loop OR switch, so a switch-scoped one is only spelled where this arm's frame is the innermost
@@ -5008,11 +4999,10 @@ function structureRanked(
     loop: LoopFrame | null;
     region: ReadonlySet<Block> | null;
     fallsTo: Block | null;
-    /** the flags tested right after this arm's switch (`aroundSwitch`), each with what its test's
-     *  `break;` leaves: the loop, for an outward two-level exit handed out through the switch
-     *  (`handedThroughSwitch`) or a case body's exit flag, or the next switch out, for an exit to an
-     *  enclosing switch's merge (`switchMergeExit`) */
-    flags: FlagScope | null;
+    /** the flags tested right after this arm's switch (`aroundSwitch`), whose `break;` leaves the
+     *  loop: an outward two-level exit handed out through the switch (`handedThroughSwitch`) or a
+     *  case body's exit flag */
+    flags: Set<string> | null;
   };
   const switchFrames: SwitchFrame[] = [];
   // every label a case-label `goto` (l3/ast.ts) names in this function, so no two arms share one
@@ -5025,9 +5015,9 @@ function structureRanked(
   // reaches that test too. One scope per switch being emitted, opened by `withSwitchFlags` around
   // its arms (Regime A from `handedThroughSwitch`, Regime B at the jump table); each arm's frame
   // holds its switch's.
-  const switchFlagScopes: FlagScope[] = [];
-  const withSwitchFlags = <R>(run: () => R): [R, ReadonlyMap<string, 'loop' | 'switch'>] => {
-    const flags: FlagScope = new Map();
+  const switchFlagScopes: Set<string>[] = [];
+  const withSwitchFlags = <R>(run: () => R): [R, ReadonlySet<string>] => {
+    const flags = new Set<string>();
     switchFlagScopes.push(flags);
     try {
       return [run(), flags];
@@ -5049,10 +5039,10 @@ function structureRanked(
       [{ k: 'break', ...(ofSwitch ? { ofSwitch: true } : {}) }],
       [],
     );
-  const aroundSwitch = (flags: ReadonlyMap<string, 'loop' | 'switch'>, sw: Stmt): Stmt[] => [
-    ...[...flags.keys()].map((name): Stmt => ({ k: 'assign', name, value: { k: 'const', value: 0 } })),
+  const aroundSwitch = (flags: ReadonlySet<string>, sw: Stmt): Stmt[] => [
+    ...[...flags].map((name): Stmt => ({ k: 'assign', name, value: { k: 'const', value: 0 } })),
     sw,
-    ...[...flags].map(([name, leaves]) => breakOnFlag(name, leaves === 'switch')),
+    ...[...flags].map((name) => breakOnFlag(name, false)),
   ];
   // THE ONE RULE THAT BINDS A `break;` TO A SWITCH ARM: does a `break;` written here reach `b`? It
   // does where `b` is the merge of the innermost arm with a region and no loop was entered since
@@ -5097,40 +5087,30 @@ function structureRanked(
     return [{ k: 'break', ofSwitch: true }];
   };
   // AN EXIT TO AN ENCLOSING SWITCH'S MERGE FROM A SWITCH NESTED IN ONE OF ITS ARMS, which the
-  // `break;` there would bind to the inner switch: `f = 1; break;`, with `f = 0;` ahead of each
-  // switch between and a switch-scoped `if (f != 0) break;` right after it (`aroundSwitch`), so the
-  // last one leaves the switch `b` ends (agbcc, IDO and GCC 2.7.2 lay sw_gotocase_inner's inner
-  // `goto shared;` out this way). A test the arm's own leaving follows at once is dropped with the
-  // flag once the body is built (`dropSpentFlagTests`): there the inner `break;` alone reaches the
-  // merge, as in every published inhabitant. Taken only where no loop was entered since that
-  // switch's arm began (each test's `break;` binds to the next switch out) and every switch between
-  // has its own flag scope. A merge that is a bare `ret` is `return;` instead, from inside a nested loop as well:
-  // mwcc's sw_xjret_end leaves its inner switch and loop for the outer switch's merge, the epilogue.
-  // Both are asked only in the reruns made once every run without them declined
-  // (`CaseExitRanking`), so a published lift never moves.
+  // `break;` there binds to the inner switch. Where every switch between ends at that merge too, as
+  // a falling-free arm with no loop entered since the enclosing arm began, the inner `break;`
+  // reaches it: nothing of the arms between is written after their switch, so each one's end is
+  // the merge (agbcc, IDO and GCC 2.7.2 lay sw_gotocase_inner's inner `goto shared;` out this way).
+  // A switch between with a merge of its own, code the exit would have to skip, declines: no
+  // compiled function has one yet. A merge that is a bare `ret` is `return;` instead, from inside a
+  // nested loop or switch as well: mwcc's sw_xjret_end leaves its inner switch and loop for the
+  // outer switch's merge, the epilogue. Both are asked only in the reruns made once every run
+  // without them declined (`CaseExitRanking`), so a published lift never moves.
   const switchMergeExit = (b: Block, i: number): Stmt[] | undefined => {
     const bareRet = b.params.length === 0 && b.ops.length === 1 && isRet(b) && b.ops[0].operands.length === 0;
     const between = switchFrames.slice(i + 1);
-    const flagged =
+    const shared =
       between.length > 0 &&
-      [switchFrames[i], ...between].every((f) => f.loop === loopCtx && f.flags !== null) &&
-      new Set([switchFrames[i], ...between].map((f) => f.flags)).size === between.length + 1;
-    if (!bareRet && !flagged) {
+      switchFrames[i].loop === loopCtx &&
+      between.every((f) => f.merge === b && f.fallsTo === null && f.loop === loopCtx);
+    if (!bareRet && !shared) {
       return undefined;
     }
     caseExit.wanted ||= caseExit.mergeExits !== true;
     if (caseExit.mergeExits !== true) {
       return undefined;
     }
-    if (bareRet) {
-      return [{ k: 'return' }];
-    }
-    const flag = switchMergeFlag(b);
-    between.forEach((f) => f.flags!.set(flag, 'switch'));
-    return [
-      { k: 'assign', name: flag, value: { k: 'const', value: 1 } },
-      { k: 'break', ofSwitch: true },
-    ];
+    return bareRet ? [{ k: 'return' }] : [{ k: 'break', ofSwitch: true }];
   };
   // A CASE BODY'S JUMP OUT OF THE LOOP ITS SWITCH SITS IN, past the switch's end (the merge is
   // `switchBreakAt`'s): `f = 1; break;`, and the flag goes to the switch's scope, whose
@@ -5157,7 +5137,7 @@ function structureRanked(
       return undefined;
     }
     const flag = second ? twoLevelFlag(lc.header) : caseExitFlag(lc.header);
-    frame.flags!.set(flag, 'loop');
+    frame.flags!.add(flag);
     return [
       { k: 'assign', name: flag, value: { k: 'const', value: 1 } },
       { k: 'break', ofSwitch: true },
@@ -6769,7 +6749,7 @@ function structureRanked(
           ),
         );
         if (caseFlag !== undefined) {
-          caseFrame!.flags!.set(caseFlag, 'loop');
+          caseFrame!.flags!.add(caseFlag);
         }
         out.push(...argAssignsFor(b, stayEdge), ...structureRegion(stayB, stop));
         return out;
@@ -8374,7 +8354,7 @@ function structureRanked(
     }
     if (second.outward === true) {
       const flag = twoLevelFlag(fl.header);
-      through[0]?.flags!.set(flag, 'loop');
+      through[0]?.flags!.add(flag);
       return [
         { k: 'assign', name: flag, value: { k: 'const', value: 0 } },
         loop,
@@ -8425,8 +8405,6 @@ function structureRanked(
   // so the switch is followed by its test too and no second flag is needed (as the outward exit
   // handed through a switch, `emitForeverExit`).
   const caseExitFlags = new Map<Block, string>();
-  // The flag of an exit to the merge `b` of an enclosing switch (`switchMergeExit`): one per merge.
-  const switchMergeFlags = new Map<Block, string>();
   // a flag's `s32` local, one per key of `names`, named on first use
   const flagOf = (names: Map<Block, string>, key: Block): string => {
     let name = names.get(key);
@@ -8438,7 +8416,6 @@ function structureRanked(
     return name;
   };
   const caseExitFlag = (header: Block): string => flagOf(caseExitFlags, header);
-  const switchMergeFlag = (b: Block): string => flagOf(switchMergeFlags, b);
   const twoLevelFlag = (header: Block): string => flagOf(twoLevelFlags, header);
 
   // The latch back-edge substitution (do-while) — subFor over the latch's back-edge args.
@@ -8844,10 +8821,7 @@ function structureRanked(
     return out;
   };
 
-  const body = stampOrderedBases(
-    recognizeForLoops(dropSpentFlagTests(structureRegion(entry, null), new Set(switchMergeFlags.values()))),
-    orderLicensedGlobals,
-  );
+  const body = stampOrderedBases(recognizeForLoops(structureRegion(entry, null)), orderLicensedGlobals);
   // THE OBLIGATION `anchorConstCopies` CANNOT DISCHARGE ON ITS OWN, checked now that the render is
   // complete. Anchoring is two edits that must both land: `suppressedArgs` DELETES a write from its
   // edge, and `anchoredAt` owes it back at the const's def site. Its refusal conditions establish
@@ -8925,7 +8899,6 @@ function structureRanked(
       ...[...varType.keys()].filter((n) => /^t\d+$/.test(n)),
       ...twoLevelFlags.values(),
       ...caseExitFlags.values(),
-      ...switchMergeFlags.values(),
     ]),
   ].filter((n) => /^[vt]\d+$/.test(n) && !globalNames.has(n));
   // THE FRAME COORDINATES OF EACH DECLARED LOCAL (ir/core.ts `SlotHomes`, stamped by the SSA
