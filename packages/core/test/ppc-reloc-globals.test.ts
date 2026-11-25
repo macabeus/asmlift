@@ -318,3 +318,37 @@ test('an `@ha` that reaches its `@l` only through a JOIN refuses, and the refusa
     '  18:\tblr\n';
   expect(() => dis('dia', diamond)).toThrow(/through a merge or a loop header/);
 });
+
+// A HALF ONLY A STATED VOID RETURN READS IS NO ESCAPE (frontend/high-half.ts `assertNoneEscaped`).
+// mwcc leaves a loop's `lis r3,gA@ha` live in r3 into the epilogue, and SSA hands it to the `ret`
+// through the join: under a declaration that returns nothing, that operand is dropped, and the join
+// with it. Anything else reading the join still refuses.
+const voidMergeAsm = (tail: string) =>
+  '   0:\tmr      r5,r3\n' +
+  '   4:\tb       18 <vm+0x18>\n' +
+  '   8:\tlis     r3,0\n\t\t\ta: R_PPC_ADDR16_HA\tgVal\n' +
+  '   c:\taddi    r7,r3,0\n\t\t\te: R_PPC_ADDR16_LO\tgVal\n' +
+  '  10:\tstw     r5,0(r7)\n' +
+  '  14:\taddi    r5,r5,1\n' +
+  '  18:\tcmpw    r5,r4\n' +
+  '  1c:\tblt     8 <vm+0x8>\n' +
+  tail;
+const vm = (tail: string, returnsVoid: boolean) =>
+  decompile('vm', `0 <vm>:\n${voidMergeAsm(tail)}`, PPC_MWCC, {
+    prototypes: { vm: { params: 4, ...(returnsVoid ? { returnsVoid: true } : { returns: 's32' }) } },
+  }).source;
+
+test('a high half only a stated void return reads is dropped with that return', () => {
+  const src = vm('  20:\tblr\n', true);
+  expect(src).toMatch(/void vm\(/);
+  expect(src).toContain('gVal');
+  expect(src).not.toMatch(/return [^;]/);
+});
+
+test('the same half refuses where the return carries a value', () => {
+  expect(() => vm('  20:\tblr\n', false)).toThrow(/high half of 'gVal'.*reaches a merge/s);
+});
+
+test('the same half refuses under a void return when another op reads the join', () => {
+  expect(() => vm('  20:\tstw     r3,0(r6)\n  24:\tblr\n', true)).toThrow(/high half of 'gVal'.*reaches a merge/s);
+});

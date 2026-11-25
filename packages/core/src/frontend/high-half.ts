@@ -24,7 +24,8 @@
 // (`(hi_imm << 16) + (s16)lo_imm`), so the MIPS fold computes the high half's contribution itself.
 // Either way `addend` is "the part of the address this producer contributed", and the consumer adds
 // its own.
-import type { Block, Value } from '../ir/core';
+import type { Block, Fn, Value } from '../ir/core';
+import { pruneDeadParams } from '../ir/simplify';
 import type { FrontendRefusal } from './errors';
 
 /** A pending high half: what it names, what it contributed, and the instruction that produced it,
@@ -100,8 +101,16 @@ export interface HighHalves {
    *  it. SSA builds a block parameter's incoming arguments with reads of its own: at a merge of a
    *  path that holds a half and a path that does not, the read returns the PARAMETER — an ordinary
    *  value — while the placeholder is appended to the predecessor's successor arguments. So the
-   *  finished function is checked once: a placeholder anywhere in the IR refuses. */
-  assertNoneEscaped(name: string, blocks: Block[]): void;
+   *  finished function is checked once: a placeholder anywhere in the IR refuses.
+   *
+   *  A HALF ONLY A VOID RETURN READS IS NO ESCAPE. A function whose stated declaration returns
+   *  nothing can end with a half still in the return register (mwcc's `lis r3,gA@ha` for a loop's
+   *  `gA[i]`, live round the loop into the epilogue), and SSA hands it to the `ret` through the
+   *  post-loop join. pipeline.ts `dropVoidReturnOperands` drops that operand and the joins only it
+   *  read, the same reading jump-table.ts `refuseStaleIdiomReads` gives a stale dispatch register.
+   *  `dropVoidReturn` is that drop, done here and only where a half would otherwise refuse: the
+   *  check runs again after it, so a half any other op reads, or a join one feeds, still refuses. */
+  assertNoneEscaped(name: string, blocks: Block[], dropVoidReturn?: () => void): void;
 }
 
 export function makeHighHalves(d: HighHalfDialect): HighHalves {
@@ -173,27 +182,48 @@ export function makeHighHalves(d: HighHalfDialect): HighHalves {
         );
       }
     },
-    assertNoneEscaped(name, blocks) {
-      const escaped = (v: Value): void => {
-        const hi = halves.get(v)?.info;
-        if (hi) {
-          d.fail(
-            `cannot lift '${name}': the high half of '${hi.sym}' (the '${hi.mnemonic}' at ` +
-              `0x${hi.addr.toString(16)}) reaches a merge with values that are not it — what the register ` +
-              `holds there is not a value this frontend can write down`,
-          );
-        }
-      };
-      for (const b of blocks) {
-        b.params.forEach(escaped);
-        for (const op of b.ops) {
-          op.operands.forEach(escaped);
-          op.results.forEach(escaped);
-          for (const s of op.successors) {
-            s.args.forEach(escaped);
+    assertNoneEscaped(name, blocks, dropVoidReturn) {
+      const firstEscaped = (): HighHalfInfo | undefined => {
+        for (const b of blocks) {
+          const values = [
+            ...b.params,
+            ...b.ops.flatMap((op) => [...op.operands, ...op.results, ...op.successors.flatMap((s) => s.args)]),
+          ];
+          const hi = values.map((v) => halves.get(v)?.info).find((h) => h !== undefined);
+          if (hi) {
+            return hi;
           }
         }
+        return undefined;
+      };
+      let hi = firstEscaped();
+      if (hi && dropVoidReturn) {
+        dropVoidReturn();
+        hi = firstEscaped();
+      }
+      if (hi) {
+        d.fail(
+          `cannot lift '${name}': the high half of '${hi.sym}' (the '${hi.mnemonic}' at ` +
+            `0x${hi.addr.toString(16)}) reaches a merge with values that are not it — what the register ` +
+            `holds there is not a value this frontend can write down`,
+        );
       }
     },
+  };
+}
+
+/** THE VOID RETURN'S DROP, for `assertNoneEscaped`: every `ret` loses its operand and the joins only
+ *  those operands read go with them (pipeline.ts `dropVoidReturnOperands`, which a STATED void entry
+ *  runs after the lift anyway). */
+export function dropVoidReturnOperandsOf(fn: Fn): () => void {
+  return () => {
+    for (const blk of fn.blocks) {
+      for (const op of blk.ops) {
+        if (op.opcode === 'ret') {
+          op.operands = [];
+        }
+      }
+    }
+    pruneDeadParams(fn);
   };
 }

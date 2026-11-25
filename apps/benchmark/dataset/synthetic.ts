@@ -18146,7 +18146,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //      is the only spelling of the source. sw_gotocase_inner is the control: the goto leaves an
   //      arm of a switch nested in case 1 for a case of the outer switch, which the narrow goto
   //      may never spell (a goto names a case of the switch it sits in), so the row must decline or
-  //      lift goto-free.
+  //      lift goto-free. Its mwcc cell compiles to a comparison tree that leaves the second loop's
+  //      `lis r3,gA@ha` in r3 into the epilogue, a half only the void return reads
+  //      (frontend/high-half.ts `assertNoneEscaped`).
   {
     sym: 'sw_gotocase3',
     src:
@@ -18266,7 +18268,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '        k(gA[i]);\n' +
       '}',
     features: ['branch', 'switch-arms'],
-    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
     ctx:
       'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
       'extern struct E gE[];\n' +
@@ -18282,9 +18284,11 @@ export const SYNTHETIC: SynthSpec[] = [
   //      count case 1 rewrites ahead of the latch. Those arms are reached from the latch's exit only
   //      round the outer loop and back through the inner header, which binds the count afresh, so
   //      the break rule's exit region stops at the loop (structure.ts `exitRegionOf`); walked past
-  //      the header, it refuses that latch and agbcc declines. Only agbcc and IDO: the other three
-  //      decline in their frontends first (the GCC 2.7.2 pair's `jr v0` dispatch, mwcc's `lis` high
-  //      half reaching a merge), and IDO declines on its case body reaching several sibling cases.
+  //      the header, it refuses that latch and agbcc declines. mwcc leaves the loop's `lis` half in
+  //      r3 into the epilogue, read only by the void return (frontend/high-half.ts
+  //      `assertNoneEscaped`). Not the GCC 2.7.2 pair, which decline in the frontend on the `jr v0`
+  //      dispatch. IDO heads the do-while with the jump-table dispatch itself, its exits leaving from
+  //      the switch, which no loop reading takes.
   {
     sym: 'dw_outerlatch_arms',
     src:
@@ -18321,7 +18325,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '    }\n' +
       '}',
     features: ['branch', 'switch-arms', 'break'],
-    toolchains: ['agbcc', 'ido7.1'],
+    toolchains: ['agbcc', 'ido7.1', 'mwcc_242_81'],
     ctx:
       'extern void g(s32 x);\n' +
       'extern void h(s32 i, s32 x, s32 y, s32 z);\n' +

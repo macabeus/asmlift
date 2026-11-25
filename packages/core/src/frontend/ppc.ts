@@ -100,7 +100,7 @@ import {
 } from './frame-objects';
 import { type Frontend, type LiftOptions, type OwnDeclaration, ownDeclarationOf } from './frontend';
 import { gasIntLiteral } from './gas-int';
-import { makeHighHalves } from './high-half';
+import { dropVoidReturnOperandsOf, makeHighHalves } from './high-half';
 import {
   type HoistedDispatch,
   type IdiomLeft,
@@ -3894,7 +3894,14 @@ function liftOnce(
         'and nothing reads, which is the other word of a 64-bit return (r3:r4); returning r3 alone would drop it',
     );
   }
-  highHalves.assertNoneEscaped(name, irBlocks);
+  // A half only a STATED void return reads is dropped with that operand (`assertNoneEscaped`); the
+  // context's own `void` alone leaves the lifted `ret` reading the register (pipeline.ts drops it
+  // only for a stated entry), so it does not drop it here either.
+  highHalves.assertNoneEscaped(
+    name,
+    irBlocks,
+    declaresVoidReturn(prototypes[name]) ? dropVoidReturnOperandsOf(ssa.fn) : undefined,
+  );
   tableBases.assertNoneEscaped(name, irBlocks);
   // A non-value reaches a use through a join's incoming arguments as well as directly (`nonValues`).
   assertNoNonValueEscaped(irBlocks);
