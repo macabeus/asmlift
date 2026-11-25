@@ -18286,9 +18286,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //      the break rule's exit region stops at the loop (structure.ts `exitRegionOf`); walked past
   //      the header, it refuses that latch and agbcc declines. mwcc leaves the loop's `lis` half in
   //      r3 into the epilogue, read only by the void return (frontend/high-half.ts
-  //      `assertNoneEscaped`). Not the GCC 2.7.2 pair, which decline in the frontend on the `jr v0`
-  //      dispatch. IDO heads the do-while with the jump-table dispatch itself, its exits leaving from
-  //      the switch, which no loop reading takes.
+  //      `assertNoneEscaped`), and the GCC 2.7.2 pair forms the table base in the dispatch's own
+  //      block, `lui;addiu` (frontend/mips.ts `formedTable`). IDO heads the do-while with the
+  //      jump-table dispatch itself, its exits leaving from the switch, which no loop reading takes.
   {
     sym: 'dw_outerlatch_arms',
     src:
@@ -18325,7 +18325,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '    }\n' +
       '}',
     features: ['branch', 'switch-arms', 'break'],
-    toolchains: ['agbcc', 'ido7.1', 'mwcc_242_81'],
+    toolchains: ['agbcc', 'ido7.1', 'mwcc_242_81', 'gcc2.7.2', 'gcc2.7.2kmc'],
     ctx:
       'extern void g(s32 x);\n' +
       'extern void h(s32 i, s32 x, s32 y, s32 z);\n' +
