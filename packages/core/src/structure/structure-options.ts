@@ -500,9 +500,10 @@ export interface StructureHooks {
   breakTailGates?: readonly Gate<BreakTailCycle>[];
   /** `emitForever`'s two-level exit rule (`TWO_LEVEL_REGION_GATES`), ablatable the same way. */
   twoLevelRegionGates?: readonly Gate<TwoLevelRegion>[];
-  /** false never asks a case body's exit flag, an exit to an enclosing switch's merge, nor the copies
-   *  of several closed siblings into one case body (structure.ts `CASE_EXIT_RUNGS`), so that exit
-   *  stays refused: for a test whose fixture is held at that refusal to reach another rule. */
+  /** false never asks a case body's exit flag, an exit to an enclosing switch's merge, the copies of
+   *  several closed siblings into one case body (structure.ts `CASE_EXIT_RUNGS`), nor a loop's arms
+   *  owning one tail head (`HeadsRanking`), so that exit stays refused: for a test whose fixture is
+   *  held at that refusal to reach another rule. */
   caseExitFlags?: boolean;
   /** true where the caller structures the join after this run and publishes it where this run
    *  declines (pipeline.ts `copiesByDefault`): the `merge` rung (structure.ts `CASE_EXIT_RUNGS`) is

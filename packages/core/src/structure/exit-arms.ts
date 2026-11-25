@@ -359,8 +359,8 @@ export function earlyReturnArm(
   const armOfBody = onlyFromBody(preds, body, exit);
   const armsOnly = (bb: Block) =>
     bb !== to && bb !== exit && armOfBody(bb) && offExitPath(bb) && !reachFrom(bb).has(bb);
-  // THE ARM'S OWN HEAD, ENTERED BY SEVERAL ARMS ONLY, at the rung of last resort (`armHead`, the
-  // `heads` rung of structure.ts `CASE_EXIT_RUNGS`). agbcc cross-jumps the `m(36); g(..); return;`
+  // THE ARM'S OWN HEAD, ENTERED BY SEVERAL ARMS ONLY, at the rung of last resort (`armHead`,
+  // structure.ts `HeadsRanking`). agbcc cross-jumps the `m(36); g(..); return;`
   // three arms of a loop end with into one block, which reaches the function's shared return, so no
   // single exit is a `break` target for both it and the loop's other exit, and neither `while (1)`
   // nor the bottom test reads the loop (kl2dct sub_080222AC). Owned by every arm entering it, as a

@@ -16709,9 +16709,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // same `m(36); g(gC[i], gD[i], 2, n); return;`, which agbcc cross-jumps into one block, and that
   // block into the `g(..., 2, n); return;` sibling cases end in. No exit is a `break` target for both
   // it and the loop's bottom test, so neither `while (1)` nor the do-while reads the loop, until every
-  // arm entering the block owns it (exit-arms.ts `earlyReturnArm`, THE ARM'S OWN HEAD) at the `heads`
-  // rung of structure.ts `CASE_EXIT_RUNGS`. The other four toolchains keep the arms apart, and are
-  // controls.
+  // arm entering the block owns it (exit-arms.ts `earlyReturnArm`, THE ARM'S OWN HEAD), asked last
+  // (structure.ts `HeadsRanking`). The other four toolchains keep the arms apart, and are controls.
   {
     sym: 'dw_xjret_arms',
     src:
