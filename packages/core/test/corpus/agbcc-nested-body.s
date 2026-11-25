@@ -201,3 +201,100 @@ stkbody_self:
 	.word	gv
 .Lfe7:
 	.size	 stkbody_self,.Lfe7-stkbody_self
+	.align	2, 0
+	.globl	top
+	.type	 top,function
+	.thumb_func
+top:
+	push	{lr}
+	ldr	r1, .L30
+	mov	r0, #0x3
+	str	r0, [r1, #0x50]
+	bl	mid
+	pop	{r0}
+	bx	r0
+.L31:
+	.align	2, 0
+.L30:
+	.word	gv
+.Lfe8:
+	.size	 top,.Lfe8-top
+	.align	2, 0
+	.globl	stkbody_deep
+	.type	 stkbody_deep,function
+	.thumb_func
+stkbody_deep:
+	push	{r4, r5, r6, lr}
+	add	r5, r0, #0
+	mov	r4, #0x0
+	cmp	r4, r5
+	bge	.L34	@cond_branch
+	ldr	r0, .L38
+	add	r6, r0, #0
+	add	r6, r6, #0x20
+.L36:
+	stmia	r6!, {r4}
+	bl	top
+	add	r4, r4, #0x1
+	cmp	r4, r5
+	blt	.L36	@cond_branch
+.L34:
+	pop	{r4, r5, r6}
+	pop	{r0}
+	bx	r0
+.L39:
+	.align	2, 0
+.L38:
+	.word	gv
+.Lfe9:
+	.size	 stkbody_deep,.Lfe9-stkbody_deep
+	.align	2, 0
+	.globl	cyca
+	.type	 cyca,function
+	.thumb_func
+cyca:
+	push	{lr}
+	cmp	r0, #0
+	ble	.L41	@cond_branch
+	sub	r0, r0, #0x1
+	bl	cycb
+.L41:
+	pop	{r0}
+	bx	r0
+.Lfe10:
+	.size	 cyca,.Lfe10-cyca
+	.align	2, 0
+	.globl	cycb
+	.type	 cycb,function
+	.thumb_func
+cycb:
+	push	{lr}
+	ldr	r1, .L43
+	str	r0, [r1, #0x18]
+	bl	cyca
+	pop	{r0}
+	bx	r0
+.L44:
+	.align	2, 0
+.L43:
+	.word	gv
+.Lfe11:
+	.size	 cycb,.Lfe11-cycb
+	.align	2, 0
+	.globl	stkbody_cyc
+	.type	 stkbody_cyc,function
+	.thumb_func
+stkbody_cyc:
+	push	{lr}
+	ldr	r2, .L46
+	str	r1, [r2, #0x1c]
+	ldr	r0, [r0]
+	bl	cyca
+	pop	{r0}
+	bx	r0
+.L47:
+	.align	2, 0
+.L46:
+	.word	gv
+.Lfe12:
+	.size	 stkbody_cyc,.Lfe12-stkbody_cyc

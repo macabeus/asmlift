@@ -1,13 +1,14 @@
-// A CALLEE'S BODY IS LIFTED READING ITS OWN CALLEES' BODIES, one level further (pipeline.ts
-// `bodyReadsIn`).
+// A CALLEE'S BODY IS LIFTED READING ITS OWN CALLEES' BODIES, at every depth (frontend/callee-body.ts
+// `calleeBodyReads`, pipeline.ts `bodyReadsIn`).
 //
 // A call nothing declares is bounded by its callee's body (frontend/callee-body.ts), and that body
 // is a lift too: a call inside it that stages stack words lifts only where ITS callee's body sizes
 // the block, and a call it takes at every incoming register reads no more than its callee's body
 // does. kl2dct's sub_08037530 calls sub_08037AF8, whose 9-word call to EntityCreate left its body
 // unlifted and the caller's guess unbounded. A call to the function itself is sized by the stack
-// words its own entry loads (callee-body.ts `bodyReads`): kl2dct's EntityCreate calls itself with
-// nine words. The shapes are agbcc's own output
+// words its own entry loads (callee-body.ts `unliftedReads`): kl2dct's EntityCreate calls itself with
+// nine words. A body whose lift is under way, met again further down (a cycle), is read the same way,
+// so the reading ends. The shapes are agbcc's own output
 // (corpus/agbcc-nested-body.s, scripts/regen-outgoing-area-probes.ts).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -25,7 +26,14 @@ const fn = (name: string): string => {
 };
 const lift = (name: string, text: string) =>
   decompile(name, text, ARMV4T_AGBCC, {
-    prototypes: { nine: { returnsVoid: true }, mid: { returnsVoid: true }, mid2: { returnsVoid: true } },
+    prototypes: {
+      nine: { returnsVoid: true },
+      mid: { returnsVoid: true },
+      mid2: { returnsVoid: true },
+      top: { returnsVoid: true },
+      cyca: { returnsVoid: true },
+      cycb: { returnsVoid: true },
+    },
   });
 
 describe("a body's own staged call is sized by its callee's body", () => {
@@ -42,6 +50,34 @@ describe("a body's own staged call is sized by its callee's body", () => {
   test('the whole probe as one input: the same answer', () => {
     expect(lift('stkbody_nest', asm).source).toBe(
       lift('stkbody_nest', fn('nine') + fn('mid') + fn('stkbody_nest')).source,
+    );
+  });
+});
+
+describe('the reading goes as deep as the calls do', () => {
+  test("`top` wraps `mid` once more: `nine`'s body, three levels down, still sizes the chain", () => {
+    const r = lift('stkbody_deep', fn('nine') + fn('mid') + fn('top') + fn('stkbody_deep'));
+    expect(r.source).toMatch(/\n {12}top\(\);\n/);
+  });
+
+  test("without `nine`'s body, `top`'s bound is unproven and the guess takes r0 (control)", () => {
+    const r = lift('stkbody_deep', fn('mid') + fn('top') + fn('stkbody_deep'));
+    expect(r.source).toMatch(/v0 = top\(v0\);/);
+  });
+
+  test('a body handed in that decided only a body above it is named as read below', () => {
+    const r = decompile('stkbody_nest', fn('stkbody_nest'), ARMV4T_AGBCC, {
+      prototypes: { nine: { returnsVoid: true }, mid: { returnsVoid: true } },
+      calleeBodies: { mid: { kind: 'listing', text: fn('mid') }, nine: { kind: 'listing', text: fn('nine') } },
+    });
+    expect(r.source).toMatch(/\n {12}mid\(\);\n/);
+    expect(Object.keys(r.calleeBodiesAsked)).toEqual(['mid']);
+    expect(r.calleeBodiesBelow).toEqual(['nine']);
+  });
+
+  test('a cycle ends, and proves no more than no bodies at all', () => {
+    expect(lift('stkbody_cyc', fn('cyca') + fn('cycb') + fn('stkbody_cyc')).source).toBe(
+      lift('stkbody_cyc', fn('stkbody_cyc')).source,
     );
   });
 });
