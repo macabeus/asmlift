@@ -1017,7 +1017,7 @@ const TARGET_IS_THE_ENCLOSING_HEADER = `fn outerheader {
  *  one when it misses (agbcc -O2's layout of `switch (probe(j)) { case 0: if (a(j) == x) goto
  *  next; case 1: b(j); }`). `break` there leaves only the switch, so the hit sets the two-level
  *  flag, and that flag's test after the switch leaves the loop. Asked only once every run without
- *  that flag declined (structure.ts `CaseExitRanking`), where the
+ *  that flag declined (structure.ts `CASE_EXIT_RUNGS`), where the
  *  two-level refusal and the one for a case body that leaves its switch for a loop exit past the
  *  switch's end each decline it. */
 const SECOND_EXIT_FROM_A_CASE_BODY = `fn casebody {

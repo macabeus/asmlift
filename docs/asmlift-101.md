@@ -283,9 +283,9 @@ shapes real compilers emit (if/else **diamonds** — a branch splits, the arms r
 `clamp0` — natural loops, two regimes of `switch` —
 comparison trees and jump tables), and for anything else it _declines_ rather than emitting
 `goto` — because for byte-matching, emitting the compiler's canonical shape is the whole game,
-and a `goto` is almost never that shape. It spells two such exits without a `goto`, each with a flag.
-The first is a search loop's exit past the code after it (`for (j…) { if (hit) goto next; } k(i);
-next:;`): a flag set before a `break` and tested after the loop (`TwoLevelExit` in
+and a `goto` is almost never that shape. It spells three such exits without a `goto`, the first
+two with a flag. The first is a search loop's exit past the code after it (`for (j…) { if (hit)
+goto next; } k(i); next:;`): a flag set before a `break` and tested after the loop (`TwoLevelExit` in
 `structure/loop-shapes.ts`). That lift is exact but not byte-matching — the `synthetic:brk2lvl`
 rows' own `goto` source is what reproduces their bytes, on all five toolchains. The second is a case
 body's exit out of the loop its switch sits in, past the code after the switch (`do { switch (t) {
@@ -294,12 +294,25 @@ the switch: `f = 1; break;` in the arm, `f = 0;` ahead of the switch and `if (f 
 after it (`caseExitBreak` in `structure.ts`). A two-level exit taken from a case body sets its own
 two-level flag there instead, tested after the switch as well as after the loop, so it needs no
 second flag. This flag is asked only in a rerun of the whole function once every run without it has
-declined and one met such an exit (`CaseExitRanking` in `structure.ts`): it reruns the whole goto
+declined and one met such an exit (`CASE_EXIT_RUNGS` in `structure.ts`): it reruns the whole goto
 ladder below (`JumpRanking`) only after that ladder, its gotos included, declined, so it turns a
 decline into a lift and never changes a published lift. It is not byte-matching either: on
 agbcc the flag's test survives (`cmp rF, #0`), so the `synthetic:sw_caseexit_goto` rows lift on all
 five toolchains and match on none; a ranked `goto` respell of that exit, as `/case-end-goto` is for
-`synthetic:sw_hitexit` below, is the matching follow-up. The structurer lives in
+`synthetic:sw_hitexit` below, is the matching follow-up. The third is an exit from a switch nested
+in a case body to the enclosing switch's merge (`case 1: switch (u) { case 1: goto shared; … }`),
+where the arm's `break;` would leave only the inner switch. Where the inner switch ends at that
+merge too and its arm leaves sideways, the inner arm's `break;` reaches the inner switch's end,
+which is the merge, and structuring goes on there inside the outer arm, which writes its own
+`break;` after the inner switch (`switchMergeExit` in `structure.ts`; `synthetic:sw_gotocase_inner`
+on agbcc, IDO and both GCC 2.7.2). An inner switch with code of its own after it, which the exit
+must skip, gets no such `break;`; a reading that copies that code into the inner switch's other
+arms ends the inner switch at the merge again, and lifts it. A merge that is a `ret` with no effect
+is that `return` instead, from inside a nested loop or switch alike (`synthetic:sw_xjret_end` on
+mwcc, and `synthetic:sw_xjret_val`'s `return gOut;` on all five toolchains). Both are the next rung of the same reruns (`CASE_EXIT_RUNGS`),
+asked once every run before it declined and the last one met such an exit: straight after the
+first run where no case exit was met, otherwise after the runs asking the case-exit flag alone,
+so they too only turn a decline into a lift. The structurer lives in
 [`packages/core/src/structure/`](../packages/core/src/structure) — the most intricate code in the
 project, because destroying SSA (assigning merge values back to named C variables without
 changing meaning) is where several audit rounds found the subtlest bugs.
