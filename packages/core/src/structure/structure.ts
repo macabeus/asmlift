@@ -225,7 +225,13 @@ import { unspelledEpilogues } from './retspell';
 import { isRet, joinPastReturnsAsked, joinsPastReturns, leftOutOf, sharedRetsOf } from './return-joins';
 import { StructureError } from './structure-error';
 import { type StructureHooks, type StructureOptions, calledOnly } from './structure-options';
-import { type ArmExit, copySharedFallTargets, jumpSharedFallTargets, makeSwitchRecovery } from './switch-recover';
+import {
+  type ArmExit,
+  copyClosedSiblings,
+  copySharedFallTargets,
+  jumpSharedFallTargets,
+  makeSwitchRecovery,
+} from './switch-recover';
 
 // The public names that live in the modules above, re-exported so callers keep importing them here.
 export { StructureError } from './structure-error';
@@ -5723,23 +5729,30 @@ function structureRanked(
         // the rest (`default:` siblings), so the two settings differ exactly where `onCaseCopied`
         // fires.
         const copiedInto = new Set<Block>();
+        const severalSiblings = { asked: caseExit.asked.has('siblings'), onMet: () => caseExit.met.add('siblings') };
         const copyOver = (from: ReadonlyMap<Block, ArmExit>, onCopied?: (to: Block) => void) =>
-          copySharedFallTargets(
-            preChain,
-            dflt,
+          copyClosedSiblings(
             from,
-            !copyEveryTailEntrant,
-            hooks.onTailFallerKept,
-            (s) => forwardToMerge(s, b, at, siblings),
-            onCopied,
-            { asked: caseExit.asked.has('siblings'), onMet: () => caseExit.met.add('siblings') },
+            severalSiblings,
+            copySharedFallTargets(
+              preChain,
+              dflt,
+              from,
+              !copyEveryTailEntrant,
+              hooks.onTailFallerKept,
+              (s) => forwardToMerge(s, b, at, siblings),
+              onCopied,
+            ),
           );
+        // An arm into several closed siblings takes their copies at every merge, the `stop` reading's
+        // included: the copies of a default-block sibling it reaches write the code after the switch
+        // into that arm alone, which otherwise declines (`copyClosedSiblings`).
         const copied = copies
           ? copyOver(walked, (to) => {
               copiedInto.add(to);
               hooks.onCaseCopied?.();
             })
-          : walked;
+          : copyClosedSiblings(walked, severalSiblings);
         const exits =
           copiedInto.size > 0 && jumpToSharedCases && spellSwitchFallthrough
             ? copyOver(jumpSharedFallTargets(preChain, dflt, walked, copiedInto))

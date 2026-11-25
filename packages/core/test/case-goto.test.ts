@@ -18,10 +18,11 @@ import { parse } from '../src/ir/parse';
 import { T } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
 import { type SFn, type Stmt, type SwitchCase, caseGotoViolation, reachesEnd } from '../src/l3/ast';
-import { readabilityRewrites } from '../src/pipeline';
+import { decompile, readabilityRewrites } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
 import { compareScored, gotoCount } from '../src/rank';
 import { structure as structureJoined } from '../src/structure/structure';
+import { ARMV4T_AGBCC } from '../src/target';
 import { irAgreement, testCopies, withCopies } from './helpers';
 
 // The tests declared `testCopies` pin the recovery the return-tail copies reach (`/ret-copy`,
@@ -563,5 +564,88 @@ describe('an arm entering two closed siblings takes a copy of each', () => {
     verify(fn);
     recoverTypes(fn);
     expect(() => structure(fn, {}, { caseExitFlags: false })).toThrow(/a case body reaches several sibling cases/);
+  });
+});
+
+// …AND AT A SWITCH WITH NO MERGE (`copyClosedSiblings`, at the `stop` reading): every case returns on
+// its own, so the switch has no end a `break` reaches, and agbcc's cross-jump sends cases 3 to 6 into
+// the `return 1;` and `return 2;` of cases 1 and 2 (`synthetic:sw_retsib`, pokeemerald's
+// GetNewBerryIdByDifficulty). The row's agbcc listing (`-O2 -mthumb-interwork`).
+const AGBCC_SW_RETSIB = `sw_retsib:
+	push	{r4, lr}
+	lsl	r0, r0, #0x18
+	lsr	r0, r0, #0x18
+	lsl	r1, r1, #0x18
+	lsr	r1, r1, #0x18
+	ldr	r2, .L26
+	ldr	r2, [r2]
+	add	r2, r2, r1
+	ldrb	r4, [r2]
+	mov	r1, #0x7
+	bl	__umodsi3
+	lsl	r0, r0, #0x18
+	lsr	r0, r0, #0x18
+	cmp	r0, #0x6
+	bhi	.L24	@cond_branch
+	lsl	r0, r0, #0x2
+	ldr	r1, .L26+0x4
+	add	r0, r0, r1
+	ldr	r0, [r0]
+	mov	pc, r0
+.L27:
+	.align	2, 0
+.L26:
+	.word	gP
+	.word	.L22
+	.align	2, 0
+	.align	2, 0
+.L22:
+	.word	.L24
+	.word	.L25
+	.word	.L20
+	.word	.L8
+	.word	.L11
+	.word	.L14
+	.word	.L17
+.L8:
+	cmp	r4, #0
+	beq	.L25	@cond_branch
+	b	.L24
+.L11:
+	cmp	r4, #0
+	beq	.L20	@cond_branch
+	b	.L24
+.L14:
+	cmp	r4, #0x2
+	beq	.L25	@cond_branch
+	b	.L20
+.L17:
+	cmp	r4, #0
+	bne	.L18	@cond_branch
+.L25:
+	mov	r0, #0x1
+	b	.L23
+.L18:
+	cmp	r4, #0x1
+	beq	.L20	@cond_branch
+.L24:
+	mov	r0, #0x0
+	b	.L23
+.L20:
+	mov	r0, #0x2
+.L23:
+	pop	{r4}
+	pop	{r1}
+	bx	r1`;
+const retsibOpts = { prototypes: { sw_retsib: { params: ['u8', 'u8'], returns: 'u8' } } };
+
+describe('an arm entering two returning siblings of a switch with no merge takes a copy of each', () => {
+  test('agbcc: every case returns its own constant, the arms entering two with a copy of each', () => {
+    const src = decompile('sw_retsib', AGBCC_SW_RETSIB, ARMV4T_AGBCC, retsibOpts).source;
+    expect(src).not.toMatch(/goto|ASMLIFT_ERROR/);
+    expect(src).toMatch(/case 1:\n\s*return 1;/);
+    expect(src).toMatch(/case 2:\n\s*return 2;/);
+    expect(src.match(/return 1;/g)).toHaveLength(4);
+    expect(src.match(/return 2;/g)).toHaveLength(4);
   });
 });

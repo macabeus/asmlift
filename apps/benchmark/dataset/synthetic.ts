@@ -16812,6 +16812,34 @@ export const SYNTHETIC: SynthSpec[] = [
       g2: { params: 1, returnsVoid: true },
     },
   },
+  // sw_retsib (pokeemerald GetNewBerryIdByDifficulty): every case returns on its own, so the switch
+  // has no merge, and agbcc's cross-jump sends cases 3 to 6 into the `return 1;` and `return 2;` of
+  // cases 1 and 2. Each arm entering two of them takes a copy of each at the `stop` reading
+  // (switch-recover.ts `copyClosedSiblings`). The other toolchains keep the returns apart, and are
+  // controls.
+  {
+    sym: 'sw_retsib',
+    src:
+      'extern u8 *gP;\n' +
+      'u8 sw_retsib(u8 d, u8 c)\n' +
+      '{\n' +
+      '    u8 x = gP[c];\n' +
+      '    switch (d % 7) {\n' +
+      '    default: return 0;\n' +
+      '    case 0: return 0;\n' +
+      '    case 1: return 1;\n' +
+      '    case 2: return 2;\n' +
+      '    case 3: if (x == 0) return 1; else return 0;\n' +
+      '    case 4: if (x == 0) return 2; else return 0;\n' +
+      '    case 5: if (x == 2) return 1; else return 2;\n' +
+      '    case 6: if (x == 0) return 1; else if (x == 1) return 2; else return 0;\n' +
+      '    }\n' +
+      '}',
+    features: ['dense', 'switch-arms'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx: 'extern u8 *gP;\nu8 sw_retsib(u8 d, u8 c);',
+    proto: { sw_retsib: { params: ['u8', 'u8'], returns: 'u8' } },
+  },
   {
     sym: 'cmn_store',
     src:

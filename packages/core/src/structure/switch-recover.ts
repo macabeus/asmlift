@@ -110,7 +110,7 @@ export type ArmExit =
       kind: 'unstructurable';
       why: string;
       /** A body that reaches two or more siblings and leaves through no block the switch does not
-       *  dominate: the siblings and its own blocks, which `copySharedFallTargets` reads to copy every
+       *  dominate: the siblings and its own blocks, which `copyClosedSiblings` reads to copy every
        *  one of them into it (ONE ARM INTO SEVERAL CLOSED SIBLINGS, there). */
       reaches?: { siblings: ReadonlySet<Block>; region: ReadonlySet<Block> };
     };
@@ -384,7 +384,6 @@ export function copySharedFallTargets(
   onFallerKept?: () => void,
   sidewaysEnds?: (s: Block) => boolean,
   onCopied?: (to: Block) => void,
-  severalSiblings?: { asked: boolean; onMet: () => void },
 ): Map<Block, ArmExit> {
   const out = new Map(exitOf);
   for (const { to, movers } of sharedFallTargets(order, dflt, exitOf, faller)) {
@@ -411,9 +410,20 @@ export function copySharedFallTargets(
       );
     }
   }
+  return out;
+}
+
+/** The arms of `exitOf` that reach several closed siblings, each given every one of them as copies
+ *  (`closedSiblingRegions`), written over `out`: asked, or else only noted (`onMet`). It reads the
+ *  arms as walked, so it runs beside `copySharedFallTargets` or alone, at any merge a reading names. */
+export function copyClosedSiblings(
+  exitOf: ReadonlyMap<Block, ArmExit>,
+  severalSiblings: { asked: boolean; onMet: () => void },
+  out: Map<Block, ArmExit> = new Map(exitOf),
+): Map<Block, ArmExit> {
   for (const [e, x] of exitOf) {
     const closed = x.kind === 'unstructurable' ? closedSiblingRegions(x.reaches, exitOf) : null;
-    if (closed === null || severalSiblings === undefined) {
+    if (closed === null) {
       continue;
     }
     if (!severalSiblings.asked) {
@@ -425,7 +435,7 @@ export function copySharedFallTargets(
   return out;
 }
 
-/** ONE ARM INTO SEVERAL CLOSED SIBLINGS, for `copySharedFallTargets`: the arm's region with every
+/** ONE ARM INTO SEVERAL CLOSED SIBLINGS, for `copyClosedSiblings`: the arm's region with every
  *  sibling's written out again under it, or null. agbcc's cross-jump makes it out of one case whose
  *  two paths each end the way another case does: `case 0: if (c) { A; h(i, 0); } else { B; h(i, 1); }
  *  break; case 1: h(i, 0); break; case 2: h(i, 1); break;` keeps one `h(i, 0); break;` and one `h(i,
@@ -438,7 +448,9 @@ export function copySharedFallTargets(
  *  block the switch does not dominate (`reaches` is absent otherwise). Every entrant copies: none
  *  can keep a fall-through into two arms, so there is no keeper to choose. Asked only where the
  *  caller hands `severalSiblings` in with `asked` set (the `siblings` rung of structure.ts
- *  `CASE_EXIT_RUNGS`); unasked, `onMet` notes the arm it would copy. */
+ *  `CASE_EXIT_RUNGS`); unasked, `onMet` notes the arm it would copy. A sibling the copy writes can
+ *  be the code after a switch with no merge (the `stop` reading's default block): then only the arm
+ *  entering it holds it twice. */
 function closedSiblingRegions(
   reaches: { siblings: ReadonlySet<Block>; region: ReadonlySet<Block> } | undefined,
   exitOf: ReadonlyMap<Block, ArmExit>,
