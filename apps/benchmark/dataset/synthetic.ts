@@ -21536,6 +21536,66 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'extern u32 gA;\nvoid use(u32 x, s32 i);\nvoid stkidx_prew(void);',
     proto: { stkidx_prew: { returnsVoid: true }, use: { params: ['u32', 's32'], returnsVoid: true } },
   },
+  //  39i. stkidx_hand / stkidx_fivew — a base below the locals handed on, and a store through one
+  //      beside a call that takes a stack word. `usep(p)` for `p = a - 1` passes the base the read
+  //      `p[i]` goes through: beneath the locals nothing C names lives, so what `usep` gets is `a`'s
+  //      address moved down (agbcc forms it as `mov r5,sp / sub r5,#4` and declines on its own
+  //      outgoing-word check). Only gcc's area start rests on declarations (`declaredWordsFrom`), and
+  //      a callee declared with more stack words than its call passes leaves a local in the words
+  //      between, which no row may declare (authored-facts.test.ts), so mips-frame-objects.test.ts
+  //      pins that refusal. stkidx_fivew is its cost, the control: `a[i - 1] = gD` beside a
+  //      correctly declared five-word `five` is the same bytes as a store into a local the
+  //      declaration displaced, so gcc2.7.2 and kmc decline it where IDO and mwcc lift it.
+  {
+    sym: 'stkidx_hand',
+    src:
+      'extern u32 gA, gB;\n' +
+      'void use1(u32 x);\n' +
+      'void usep(u32 *p);\n' +
+      'void stkidx_hand(s32 i)\n' +
+      '{\n' +
+      '    u32 a[2];\n' +
+      '    u32 *p = a - 1;\n' +
+      '    a[0] = gA;\n' +
+      '    a[1] = gB;\n' +
+      '    usep(p);\n' +
+      '    use1(p[i]);\n' +
+      '}',
+    features: ['variable-index', 'pointer'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'extern u32 gA, gB;\nvoid use1(u32 x);\nvoid usep(u32 *p);\nvoid stkidx_hand(s32 i);',
+    proto: {
+      stkidx_hand: { params: ['s32'], returnsVoid: true },
+      use1: { params: ['u32'], returnsVoid: true },
+      usep: { params: ['u32 *'], returnsVoid: true },
+    },
+  },
+  {
+    sym: 'stkidx_fivew',
+    src:
+      'extern u32 gA, gB, gC, gD;\n' +
+      'void use1(u32 x);\n' +
+      'void five(s32 a, s32 b, s32 c, s32 d, s32 e);\n' +
+      'void stkidx_fivew(s32 i)\n' +
+      '{\n' +
+      '    u32 a[2];\n' +
+      '    a[0] = gA;\n' +
+      '    a[1] = gB;\n' +
+      '    five(1, 2, 3, 4, gC);\n' +
+      '    a[i - 1] = gD;\n' +
+      '    use1(a[0] + a[1]);\n' +
+      '}',
+    features: ['variable-index', 'multi-arg'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx:
+      'extern u32 gA, gB, gC, gD;\nvoid use1(u32 x);\nvoid five(s32 a, s32 b, s32 c, s32 d, s32 e);\n' +
+      'void stkidx_fivew(s32 i);',
+    proto: {
+      stkidx_fivew: { params: ['s32'], returnsVoid: true },
+      use1: { params: ['u32'], returnsVoid: true },
+      five: { params: ['s32', 's32', 's32', 's32', 's32'], returnsVoid: true },
+    },
+  },
   //  39b. stkidx_below — the CONTROL of item 39's bound, a soundness pin that declines. `u32 *p = a
   //      - 1` (the 1-based table idiom) with `u32 a[3]` at [sp,#4] bases `p[i]` at [sp,#0], beneath the
   //      array, and a K&R call takes a fifth argument staged there after the read. The read's base
