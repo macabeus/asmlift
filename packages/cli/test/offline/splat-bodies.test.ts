@@ -9,7 +9,7 @@
 // rd0 reads no argument (a `bl helper` and a `.4byte gp` pool word, both relocated), and rd1 reads r0.
 // sel dispatches through a jump table, and selstale's file is sel with the table's second word one
 // instruction past the case the linked table enters. stale's file moves 2 into r0 where the linked
-// code moves 1. wk's file marks it `.weak`. wrongbl's
+// code moves 1. fw calls rd1 and reads nothing else. wk's file marks it `.weak`. wrongbl's
 // file calls helper2 where the linked code calls helper. dup is included by two units. asmlift's
 // assembly is faked by obj/<name>.o (splat-bodies-fake.ts; test/matching checks it against GNU as).
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -131,5 +131,13 @@ describe('CLI (agbcc): a guessed Thumb callee is bounded by its proven body in t
   });
   test('a host with no assembler keeps today\u2019s output', async () => {
     expect(await run(assembleWith('asmlift-no-such-assembler'), 'rd0')).toEqual(await run(undefined, 'rd0'));
+  });
+  // fw's body calls rd1, which no declaration lays out: lifted alone, that call is taken at every
+  // incoming register and fw reads four words. Its body is lifted reading rd1's (core pipeline.ts
+  // `bodyReadsIn`), so the CLI reads rd1's body too, and fw reads r0 alone
+  test("a body's own callee is read too, and bounds what that body reads", async () => {
+    const r = await run(ASSEMBLE, 'fw');
+    expect(r.stdout).toContain('return fw(3);');
+    expect(r.stderr).toContain('fw (asm/nonmatchings/m/fw.s, at most 1 argument word)');
   });
 });

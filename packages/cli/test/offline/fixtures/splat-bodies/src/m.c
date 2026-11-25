@@ -5,3 +5,4 @@ INCLUDE_ASM("asm/nonmatchings/m", stale);
 INCLUDE_ASM("asm/nonmatchings/m", wk);
 INCLUDE_ASM("asm/nonmatchings/m", wrongbl);
 INCLUDE_ASM("asm/nonmatchings/m", dup);
+INCLUDE_ASM("asm/nonmatchings/m", fw);

@@ -34,12 +34,12 @@ const isBody = async (assemble: BodyAssemble, linked: ElfImage, text: string, ca
 };
 
 describe('the real assembly reads each fixture as its fake does', () => {
-  test('splat-bodies: rd0, rd1 and sel are their linked code; the others are not', async () => {
+  test('splat-bodies: rd0, rd1, fw and sel are their linked code; the others are not', async () => {
     const dir = join(OFFLINE, 'splat-bodies');
     const linked = readElfImage(readFileSync(join(dir, 'linked.elf')))!;
     const text = (n: string) => readFileSync(join(dir, 'asm/nonmatchings/m', `${n}.s`), 'latin1');
     const got: Record<string, [boolean, boolean]> = {};
-    for (const n of ['rd0', 'rd1', 'sel', 'stale', 'wk', 'wrongbl']) {
+    for (const n of ['rd0', 'rd1', 'fw', 'sel', 'stale', 'wk', 'wrongbl']) {
       got[n] = [
         await isBody(GAS, linked, text(n), n),
         await isBody(fakeAssembly(join(dir, 'obj')), linked, text(n), n),
@@ -48,6 +48,7 @@ describe('the real assembly reads each fixture as its fake does', () => {
     expect(got).toEqual({
       rd0: [true, true],
       rd1: [true, true],
+      fw: [true, true],
       sel: [true, true],
       stale: [false, false],
       wk: [false, false],
