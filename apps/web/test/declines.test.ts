@@ -967,24 +967,15 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // agbcc's `uninitfirst` and `spilldead` lift, as a frame word read before any store and as
   // locals above the lowest loaded word.
   //
-  // THE OUTGOING PAIR IS THE FRAME-OBJECT AUDIT naming what lies below the local area: a capture
-  // there is "an outgoing stack argument word or a saved register", so the marker also carries
-  // `outgoing-stack-args`' phrase, and the decided cause, an address-taken local, wins. Three are
-  // `upd_lcopy` on the three CodeWarrior builds, whose struct copy into a local steps a base
-  // captured a word below the object (`addi r5,r1,4; … stwu r0,8(r5)`); five are an indexed read's
-  // base folded below its array: `stkidx_five` on ido7.1, gcc2.7.2kmc, gcc2.7.2 and mwcc 2.4.2, and
-  // `stkidx_below` on mwcc 2.4.2.
-  //
   // THE THUMB OUTGOING PAIR is the stack-argument licence's refusal inside the Thumb sp-as-data throw:
   // "stack pointer used as data — … it may be an outgoing stack argument …", and the named cause wins.
   // Five markers are agbcc controls of an undeclared call nothing sizes: `stkbody_more` (the
   // body loads fewer words than are staged), `stkbody_none` (no body), and the indexed-read
   // controls `stkidx_below`, `stkidx_byval` and `stkidx_fpspill`, whose read clears no staged word.
-  // Two are agbcc's `stkwalk_up` and `stkwalk_call`, whose `ldmia r5!` through a stepped frame
-  // pointer is no read of [sp,#0] to the licence.
+  // Two are agbcc's `stkwalk_kr`, whose K&R call after the walk stages a word beneath the array the
+  // walk reads, and `stkidx_hand`, whose base below the array is handed on beside a staged word.
   const OVERLAPS: [chain: string, markers: number][] = [
     ['indirect-call > branch-form', 10],
-    ['address-taken-local > outgoing-stack-args', 8],
     ['outgoing-stack-args > stack-frames', 7],
     ['address-taken-local > stack-frames', 5],
   ];
