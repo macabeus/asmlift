@@ -16705,6 +16705,68 @@ export const SYNTHETIC: SynthSpec[] = [
       d: { params: 1, returnsVoid: true },
     },
   },
+  // dw_xjret_arms (kl2dct sub_080222AC): a do-while in a case whose three early-return arms end in the
+  // same `m(36); g(gC[i], gD[i], 2, n); return;`, which agbcc cross-jumps into one block, and that
+  // block into the `g(..., 2, n); return;` sibling cases end in. No exit is a `break` target for both
+  // it and the loop's bottom test, so neither `while (1)` nor the do-while reads the loop, until every
+  // arm entering the block owns it (exit-arms.ts `earlyReturnArm`, THE ARM'S OWN HEAD) at the `heads`
+  // rung of structure.ts `CASE_EXIT_RUNGS`. The other four toolchains keep the arms apart, and are
+  // controls.
+  {
+    sym: 'dw_xjret_arms',
+    src:
+      'extern s32 gX, gN;\n' +
+      'extern u8 gT[];\n' +
+      'extern s16 gU[];\n' +
+      'extern u16 gC[], gD[];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      'void g(s32 a, s32 b, s32 c, s32 d);\n' +
+      'void dw_xjret_arms(s32 n)\n' +
+      '{\n' +
+      '    s32 i;\n' +
+      '    switch (gX) {\n' +
+      '    case 1: k(1); g(gC[0], gD[0], 2, n); return;\n' +
+      '    case 2: k(2); g(gC[1], gD[1], 2, n); return;\n' +
+      '    case 3:\n' +
+      '        i = 0;\n' +
+      '        do {\n' +
+      '            if (gT[i] == 1) {\n' +
+      '                if (gU[i] > 3) { m(36); g(gC[i], gD[i], 2, n); return; }\n' +
+      '            } else if (gT[i] == 2) {\n' +
+      '                if (gU[i] < -3) { m(36); g(gC[i], gD[i], 2, n); return; }\n' +
+      '            } else if (gT[i] == 5) {\n' +
+      '                if (gU[i] == 0) { m(36); g(gC[i], gD[i], 2, n); return; }\n' +
+      '            }\n' +
+      '            k(i);\n' +
+      '            i++;\n' +
+      '        } while (i < gN);\n' +
+      '        k(99);\n' +
+      '        break;\n' +
+      '    case 4: k(4); break;\n' +
+      '    case 5: k(5); g(gC[5], gD[5], 2, n); return;\n' +
+      '    case 6: k(6); break;\n' +
+      '    }\n' +
+      '    k(100);\n' +
+      '}',
+    features: ['dense', 'switch-arms', 'break'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx:
+      'extern s32 gX, gN;\n' +
+      'extern u8 gT[];\n' +
+      'extern s16 gU[];\n' +
+      'extern u16 gC[], gD[];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      'void g(s32 a, s32 b, s32 c, s32 d);\n' +
+      'void dw_xjret_arms(s32 n);',
+    proto: {
+      dw_xjret_arms: { params: 1, returnsVoid: true },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      g: { params: 4, returnsVoid: true },
+    },
+  },
   // sw_xjsib2 (kl2dct sub_0800BF80): case 7 ends each of its two paths the way case 1 and case 3 do,
   // and agbcc's cross-jump sends both paths into those bodies. One arm entering two siblings has no
   // fall-through or case-label goto spelling, so each sibling, a closed `break` arm, is copied into

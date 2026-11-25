@@ -462,8 +462,12 @@ interface JumpRanking {
  *  - `siblings`: a case body that reaches two or more closed sibling cases, each copied into it
  *    (switch-recover.ts `closedSiblingRegions`). Held to `merge`'s ladders, for the same reason: a
  *    function the copies lift with it can be one the join lifts without it (case 0 of a Thumb table
- *    whose two paths enter cases 1 and 2, the join ending the switch at case 2's body). */
-const CASE_EXIT_RUNGS = ['flags', 'merge', 'siblings'] as const;
+ *    whose two paths enter cases 1 and 2, the join ending the switch at case 2's body).
+ *  - `heads`: a loop's early-return arms entering one tail with an effect, its head owned by every
+ *    one of them (exit-arms.ts `earlyReturnArm`, THE ARM'S OWN HEAD). Last, and held to `merge`'s
+ *    ladders: each arm writes the tail again, and under the copies the loop holding them can be
+ *    written once per path the cascade ahead of it copies. */
+const CASE_EXIT_RUNGS = ['flags', 'merge', 'siblings', 'heads'] as const;
 type CaseExitRung = (typeof CASE_EXIT_RUNGS)[number];
 interface CaseExitRanking {
   /** the rungs this run asks */
@@ -1758,6 +1762,7 @@ function structureRanked(
             hooks.exitTailGates,
             bypass,
             hooks.bypassTailGates,
+            { asked: caseExit.asked.has('heads'), onMet: () => caseExit.met.add('heads') },
           )
         : null;
     return { region, owned };

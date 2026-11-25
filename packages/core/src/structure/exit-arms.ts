@@ -346,6 +346,7 @@ export function earlyReturnArm(
   exitTailGates: readonly Gate<ExitTailCandidate>[] = EXIT_TAIL_GATES,
   bypass: ArmCopies = NO_COPIES,
   bypassTailGates: readonly Gate<BypassTailCandidate>[] = BYPASS_TAIL_GATES,
+  armHead?: { readonly asked: boolean; onMet: () => void },
 ): Set<Block> | null {
   // does the loop's own exit path run it? forward only (`offExitPathOf`)
   const offExitPath = offExitPathOf(exit, dom);
@@ -358,6 +359,31 @@ export function earlyReturnArm(
   const armOfBody = onlyFromBody(preds, body, exit);
   const armsOnly = (bb: Block) =>
     bb !== to && bb !== exit && armOfBody(bb) && offExitPath(bb) && !reachFrom(bb).has(bb);
+  // THE ARM'S OWN HEAD, ENTERED BY SEVERAL ARMS ONLY, at the rung of last resort (`armHead`, the
+  // `heads` rung of structure.ts `CASE_EXIT_RUNGS`). agbcc cross-jumps the `m(36); g(..); return;`
+  // three arms of a loop end with into one block, which reaches the function's shared return, so no
+  // single exit is a `break` target for both it and the loop's other exit, and neither `while (1)`
+  // nor the bottom test reads the loop (kl2dct sub_080222AC). Owned by every arm entering it, as a
+  // block past the head is, under the same counts: every predecessor in the body, off the exit
+  // path, and no cycle through it; each arm then writes its own copy, on a path exclusive of the
+  // others. Unasked, it only notes the head it would own.
+  const headOwned = (bb: Block): boolean => {
+    if (
+      armHead === undefined ||
+      bb !== to ||
+      bb === exit ||
+      (preds.get(bb) ?? []).length < 2 ||
+      !armOfBody(bb) ||
+      !offExitPath(bb) ||
+      reachFrom(bb).has(bb)
+    ) {
+      return false;
+    }
+    if (!armHead.asked) {
+      armHead.onMet();
+    }
+    return armHead.asked;
+  };
   // a return tail the loop's own exit path also runs, after a block of its own (THE EXIT PATH RUNS IT
   // TOO, above), asked for only when the caller has found no reading without it
   const acyclicPast = (bb: Block) => ![bb, ...reachFrom(bb)].some((y) => reachFrom(y).has(y));
@@ -408,7 +434,7 @@ export function earlyReturnArm(
     if (body.has(bb)) {
       return null;
     } // re-enters the loop → not an exit
-    if ((entryOwned && dom.get(bb)!.has(to)) || armsOnly(bb)) {
+    if ((entryOwned && dom.get(bb)!.has(to)) || armsOnly(bb) || (bb.ops.some(effectful) && headOwned(bb))) {
       owned.add(bb);
     } else if (bb.ops.some(effectful) && !exitTail(bb) && !bypassTail(bb)) {
       return null;
