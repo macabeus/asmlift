@@ -294,7 +294,7 @@ the switch: `f = 1; break;` in the arm, `f = 0;` ahead of the switch and `if (f 
 after it (`caseExitBreak` in `structure.ts`). A two-level exit taken from a case body sets its own
 two-level flag there instead, tested after the switch as well as after the loop, so it needs no
 second flag. This flag is asked only in a rerun of the whole function once every run without it has
-declined and one met such an exit (`CaseExitRanking` in `structure.ts`): it reruns the whole goto
+declined and one met such an exit (`CASE_EXIT_RUNGS` in `structure.ts`): it reruns the whole goto
 ladder below (`JumpRanking`) only after that ladder, its gotos included, declined, so it turns a
 decline into a lift and never changes a published lift. It is not byte-matching either: on
 agbcc the flag's test survives (`cmp rF, #0`), so the `synthetic:sw_caseexit_goto` rows lift on all
@@ -302,12 +302,16 @@ five toolchains and match on none; a ranked `goto` respell of that exit, as `/ca
 `synthetic:sw_hitexit` below, is the matching follow-up. The third is an exit from a switch nested
 in a case body to the enclosing switch's merge (`case 1: switch (u) { case 1: goto shared; … }`),
 where the arm's `break;` would leave only the inner switch. Where the inner switch ends at that
-merge too, nothing of the outer arm follows it, so the inner `break;` alone reaches the merge
-(`switchMergeExit` in `structure.ts`; `synthetic:sw_gotocase_inner` on agbcc, IDO and both GCC
-2.7.2). An inner switch with code of its own after it, which the exit would skip, still declines:
-no compiled function has one yet. A merge that is a bare return is `return;` instead, from inside a nested loop or switch alike (`synthetic:sw_xjret_end` on mwcc).
-Both are asked one rerun later still, once the runs asking the case-exit flag alone have declined
-and met such an exit (`CaseExitRanking.mergeExits`), so they too only turn a decline into a lift.
+merge too and its arm leaves sideways, the inner arm's `break;` reaches the inner switch's end,
+which is the merge, and structuring goes on there inside the outer arm, which writes its own
+`break;` after the inner switch (`switchMergeExit` in `structure.ts`; `synthetic:sw_gotocase_inner`
+on agbcc, IDO and both GCC 2.7.2). An inner switch with code of its own after it, which the exit
+would skip, still declines: no compiled function has one yet. A merge that is a bare return is
+`return;` instead, from inside a nested loop or switch alike
+(`synthetic:sw_xjret_end` on mwcc). Both are the next rung of the same reruns (`CASE_EXIT_RUNGS`),
+asked once every run before it declined and the last one met such an exit: straight after the
+first run where no case exit was met, otherwise after the runs asking the case-exit flag alone,
+so they too only turn a decline into a lift.
 The structurer lives in
 [`packages/core/src/structure/`](../packages/core/src/structure) — the most intricate code in the
 project, because destroying SSA (assigning merge values back to named C variables without

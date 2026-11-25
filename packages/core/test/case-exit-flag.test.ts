@@ -6,7 +6,7 @@
 // the switch and `if (f != 0) break;` right after it (structure.ts `caseExitBreak`). Every fixture
 // is judged against its own IR by the trace oracle (`irAgreement`), as `structure()` returns it and
 // as it ships after `readabilityRewrites`. The flag is asked only once every run without it declined
-// (structure.ts `CaseExitRanking`), so the controls keep the spelling they had: an exit the other
+// (structure.ts `CASE_EXIT_RUNGS`), so the controls keep the spelling they had: an exit the other
 // readings spell, one whose code ends in a `return` with no enclosing loop to re-enter (copied into
 // the arm), and a tested exit out of an arm of a switch nested in another switch of the loop, which
 // declines, since the test after the inner switch would leave only the outer one. Each dispatch
@@ -249,7 +249,7 @@ test('a two-level exit out of a case body sets its one flag, read after the swit
 
 test('CONTROL: a tested exit the other readings spell keeps that spelling, with no flag', () => {
   // the arm's own test is the inner loop's exit, which the copies of `k()` reach as `continue;`, so
-  // a run that asks no exit flag lifts it already (`CaseExitRanking`)
+  // a run that asks no exit flag lifts it already (`CASE_EXIT_RUNGS`)
   const { src, agreement, shipped } = judged(nested('tested'));
   expect(src).not.toMatch(/= 1;\n\s*break;/);
   alike(agreement);
@@ -276,7 +276,7 @@ test('CONTROL: a decline whose case bodies reach no loop exit is not structured 
   // while (++j < n);`, then a loop-free switch whose case 0 reaches two sibling cases, which no
   // structuring spells. No branch in the loop's case bodies leaves the loop, so nothing asks for the
   // rerun with the flag: the `caseExitFlags` hook is read only where one was asked
-  // (`CaseExitRanking`).
+  // (`CASE_EXIT_RUNGS`).
   const fn = parse(`fn cd {
 ^bb0(%n: s32):
   %z: s32 = const {value=0}

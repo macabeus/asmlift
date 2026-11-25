@@ -28,7 +28,7 @@ const enumerate = (sym: string, stem: string) => {
 
 test('the unsigned pin builds candidates: the case exit flag spells its loop', () => {
   // under the `u32` pin the counted loop takes no `for`, and its switch's exit past the code after
-  // it is spelled with the case body's exit flag (structure.ts `CaseExitRanking`), so nothing is
+  // it is spelled with the case body's exit flag (structure.ts `CASE_EXIT_RUNGS`), so nothing is
   // held and both pins build candidates
   const e = enumerate('sw_gotocase2', 'ido71-swgotocase2');
   const cands = e.run();

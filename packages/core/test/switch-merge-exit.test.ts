@@ -2,14 +2,14 @@
 //
 // A `goto` out of an arm of a switch nested in a case body, for the code after the outer switch,
 // reaches the outer switch's merge from inside the inner one, where C binds a `break;` to the inner
-// switch. Where the inner switch ends at that merge too, nothing of the outer arm follows it, so
-// structure.ts `switchMergeExit` writes the inner `break;` alone; an inner switch with a merge of
-// its own, code the exit would skip, still declines. A merge that is a bare `ret` is `return;`
-// instead, from inside a loop nested in the arm as well; an exit from inside such a loop to a merge
-// that runs code still declines. Each fixture is judged
+// switch. Where the inner switch ends at that merge too, structure.ts `switchMergeExit` writes the
+// inner `break;`, and the outer arm its own `break;` after the inner switch; an inner switch with a
+// merge of its own, code the exit would skip, still declines. A merge that is a bare `ret` is
+// `return;` instead, from inside a loop nested in the arm as well; an exit from
+// inside such a loop to a merge that runs code still declines. Each fixture is judged
 // against its own IR by the trace oracle (`irAgreement`), as `structure()` returns it and as it
 // ships after `readabilityRewrites`. Both spellings are asked only once every run without them
-// declined (structure.ts `CaseExitRanking`), and each fixture declines without them.
+// declined (structure.ts `CASE_EXIT_RUNGS`), and each fixture declines without them.
 import { readFileSync } from 'node:fs';
 import { expect, test } from 'vitest';
 
@@ -174,7 +174,8 @@ ${tail === 'return' ? '  ret' : '  %k: s32 = call %m {target="k"}\n  ret'}
 }`;
 
 test("an arm of a nested switch reaches the outer switch's merge with the inner `break;`", () => {
-  // the inner switch ends at the outer switch's merge, so the outer arm writes nothing after it
+  // the inner switch ends at the outer switch's merge, so its arm's `break;` reaches it, and the
+  // outer arm writes its own `break;` after the inner switch
   const { src, agreement, shipped } = judged(GOTOCASE_INNER);
   expect(src).toMatch(/mark\(1\);\n\s*k\(v\d+\);\n\s*break;\n\s*}\n\s*continue;\n\s*case 2:/);
   expect(src).not.toMatch(/ = 1;\n\s*break;/);

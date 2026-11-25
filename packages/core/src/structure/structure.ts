@@ -440,28 +440,27 @@ interface JumpRanking {
   readonly free: Set<Block>;
 }
 
-/** Whether a case body's exit out of its loop past the switch's end is spelled with the exit flag
- *  (`caseExitBreak`), and an exit to an enclosing switch's merge with `break;` or `return;`
- *  (`switchMergeExit`), and whether a structuring without them met one. Asked only in the runs
- *  `structure` makes after every run without it declined and one met such an exit, so it turns a
- *  decline into a lift and never one lift into another: where the code from the exit on can be
- *  copied into the arm, or a last-resort rung reads the loop, that spelling is published already.
- *  The exits to an enclosing switch's merge are asked one level later still (`mergeExits`), once the
- *  runs asking the case-exit flags alone declined, or at once where no run met a case exit: those runs can lift through a later rung where an
- *  earlier one met a merge exit, and asking both at once would publish the earlier rung's lift in
- *  its place (an mwcc nest of switches in a loop). Nor are they asked in the join reading's ladder
- *  where the copies' ladder runs after it (`structureWithinBudget`): a function the join reading
- *  would lift with the flag can be one the copies lift without it, published so already (two of
- *  case-goto.test.ts's and join-past-returns.test.ts's fixtures). */
+/** The rungs of case-body exits that add a statement the asm does not hold, in the order their
+ *  reruns come, each asking the ones before it too (`structure`, after `jumpRanked`). A rung is
+ *  asked only in a run made once every run before it declined and the last one met an exit the
+ *  rung spells, so it turns a decline into a lift and never one lift into another: where the code
+ *  from the exit on can be copied into the arm, or a last-resort rung reads the loop, that
+ *  spelling is published already.
+ *  - `flags`: a case body's exit out of its loop past the switch's end, with the exit flag
+ *    (`caseExitBreak`);
+ *  - `merge`: an exit to an enclosing switch's merge, `break;` or the merge's own `return`
+ *    (`switchMergeExit`). It comes after `flags` because those runs can lift through a later
+ *    ladder rung where an earlier one met a merge exit, and asking both at once would publish the
+ *    earlier rung's lift in its place (an mwcc nest of switches in a loop). Nor is it asked in the
+ *    join reading's ladder where the copies' ladder runs after it (`structureWithinBudget`): a
+ *    function the join reading would lift with it can be one the copies lift without it. */
+const CASE_EXIT_RUNGS = ['flags', 'merge'] as const;
+type CaseExitRung = (typeof CASE_EXIT_RUNGS)[number];
 interface CaseExitRanking {
-  readonly asked: boolean;
-  /** whether a run that did not ask the case-exit flags met an exit one spells */
-  wanted: boolean;
-  /** whether `switchMergeExit` is asked too, in a run that asks */
-  readonly mergeExits?: boolean;
-  /** whether a run that did not ask `switchMergeExit` met an exit it spells: a function that met
-   *  only those goes straight to the run that asks them */
-  wantedMerge: boolean;
+  /** the rungs this run asks */
+  readonly asked: ReadonlySet<CaseExitRung>;
+  /** the unasked rungs this run met an exit of */
+  readonly met: Set<CaseExitRung>;
 }
 
 /** The `while (1)` loops spelled `for (init; cond; inc)` with `continue;` into their latch (THE LOOP
@@ -676,7 +675,7 @@ function structureLadder(
   refusedHeld: (() => void)[],
 ): SFn {
   let refused: { error: StructureError; held: (() => void)[] } | undefined;
-  let caseExit: CaseExitRanking = { asked: false, wanted: false, wantedMerge: false };
+  let caseExit: CaseExitRanking = { asked: new Set(), met: new Set() };
   const attempt = (
     loopTailCopy: LoopTailCopyRanking,
     pastExit: PastExitRanking,
@@ -809,19 +808,18 @@ function structureLadder(
     return sfn;
   };
   let sfn = jumpRanked();
-  // the case bodies' exit flags, asked once every run without them declined and one met an exit
-  // they spell, and then the exits to an enclosing switch's merge too, once the runs asking the
-  // flags alone declined (or none was met) and the last run met such a merge; those runs read every
-  // switch at least as far, so where they decline too, theirs is the refusal that stands
-  if (sfn === null && (caseExit.wanted || caseExit.wantedMerge) && hooks.caseExitFlags !== false) {
-    if (caseExit.wanted) {
+  // the case-exit rungs (`CASE_EXIT_RUNGS`), each asked once every run before it declined and the
+  // last one met an exit it spells; those runs read every switch at least as far, so where they
+  // decline too, theirs is the refusal that stands
+  for (const [n, rung] of CASE_EXIT_RUNGS.entries()) {
+    if (
+      sfn === null &&
+      caseExit.met.has(rung) &&
+      (rung !== 'merge' || reading.copies || !reading.asked) &&
+      hooks.caseExitFlags !== false
+    ) {
       refused = undefined;
-      caseExit = { asked: true, wanted: false, mergeExits: false, wantedMerge: false };
-      sfn = jumpRanked();
-    }
-    if (sfn === null && caseExit.wantedMerge && (reading.copies || !reading.asked)) {
-      refused = undefined;
-      caseExit = { asked: true, wanted: false, mergeExits: true, wantedMerge: false };
+      caseExit = { asked: new Set(CASE_EXIT_RUNGS.slice(0, n + 1)), met: new Set() };
       sfn = jumpRanked();
     }
   }
@@ -830,6 +828,12 @@ function structureLadder(
   }
   refusedHeld.push(...refused!.held);
   throw refused!.error;
+}
+
+/** A `ret` block a jump out of a nested loop or switch may copy where it leaves: it holds nothing a
+ *  second copy would run twice in the source. */
+function copyableRet(b: Block): boolean {
+  return isRet(b) && !b.ops.some(effectful);
 }
 
 /** Whether a floating value lies in bytes [lo, hi) of an object of type `t`, at any depth. A
@@ -2012,9 +2016,8 @@ function structureRanked(
           breakArms.push({ from: e.from, to: e.to, region });
           return true;
         }
-        // a `ret` target the edge does not own is copied into the body where the edge leaves, so it
-        // must hold nothing a second copy would run twice in the source
-        if (owned !== null || (isRet(e.to) && !e.to.ops.some(effectful))) {
+        // a `ret` target the edge does not own is copied into the body where the edge leaves
+        if (owned !== null || copyableRet(e.to)) {
           return true;
         }
         if (outward && innerBodyHas(nl, e.from)) {
@@ -5091,31 +5094,35 @@ function structureRanked(
     }
     return [{ k: 'break', ofSwitch: true }];
   };
-  // AN EXIT TO AN ENCLOSING SWITCH'S MERGE FROM A SWITCH NESTED IN ONE OF ITS ARMS, which the
-  // `break;` there binds to the inner switch. Where every switch between ends at that merge too, as
-  // a falling-free arm with no loop entered since the enclosing arm began, the inner `break;`
-  // reaches it: nothing of the arms between is written after their switch, so each one's end is
-  // the merge (agbcc, IDO and GCC 2.7.2 lay sw_gotocase_inner's inner `goto shared;` out this way).
-  // A switch between with a merge of its own, code the exit would have to skip, declines: no
-  // compiled function has one yet. A merge that is a bare `ret` is `return;` instead, from inside a
-  // nested loop or switch as well: mwcc's sw_xjret_end leaves its inner switch and loop for the
-  // outer switch's merge, the epilogue. Both are asked only in the reruns made once every run
-  // without them declined (`CaseExitRanking`), so a published lift never moves.
+  // AN EXIT TO AN ENCLOSING SWITCH'S MERGE, `b`, from inside a loop or switch nested in its arm
+  // `i`, where `break;` binds to the nested one (`switchBreakAt`). Two spellings:
+  // - a merge that is a bare `ret` is `return;` (mwcc's sw_xjret_end leaves its inner switch and
+  //   loop for the outer switch's merge, the epilogue);
+  // - from the arm of a switch nested in arm `i`, with no loop entered since `i` began: where that
+  //   innermost switch ends at `b` too and does not fall into a sibling, its `break;` reaches `b`.
+  //   The innermost arm has no region of its own, or `switchBreakAt` would have chosen it: it leaves
+  //   sideways (`escapedTo`), as agbcc, IDO and GCC 2.7.2 lay sw_gotocase_inner's `goto shared;` out.
+  //   Only the innermost switch is asked: structuring resumes at `b` after it, inside the arm that
+  //   holds it, and asks `switchBreakAt` there again, so each switch between writes its own
+  //   `break;` after the one nested in it, or declines where it has a merge of its own.
+  // Asked only in the `merge` rung's runs (`CASE_EXIT_RUNGS`), so a published lift never moves.
   const switchMergeExit = (b: Block, i: number): Stmt[] | undefined => {
-    const bareRet = b.params.length === 0 && b.ops.length === 1 && isRet(b) && b.ops[0].operands.length === 0;
-    const between = switchFrames.slice(i + 1);
+    const copiedRet = b.params.length === 0 && b.ops.length === 1 && isRet(b) && b.ops[0].operands.length === 0;
+    const inner = switchFrames[switchFrames.length - 1];
     const shared =
-      between.length > 0 &&
+      i < switchFrames.length - 1 &&
       switchFrames[i].loop === loopCtx &&
-      between.every((f) => f.merge === b && f.fallsTo === null && f.loop === loopCtx);
-    if (!bareRet && !shared) {
+      inner.merge === b &&
+      inner.fallsTo === null &&
+      inner.loop === loopCtx;
+    if (!copiedRet && !shared) {
       return undefined;
     }
-    caseExit.wantedMerge ||= caseExit.mergeExits !== true;
-    if (caseExit.mergeExits !== true) {
+    if (!caseExit.asked.has('merge')) {
+      caseExit.met.add('merge');
       return undefined;
     }
-    return bareRet ? [{ k: 'return' }] : [{ k: 'break', ofSwitch: true }];
+    return copiedRet ? [{ k: 'return' }] : [{ k: 'break', ofSwitch: true }];
   };
   // A CASE BODY'S JUMP OUT OF THE LOOP ITS SWITCH SITS IN, past the switch's end (the merge is
   // `switchBreakAt`'s): `f = 1; break;`, and the flag goes to the switch's scope, whose
@@ -5157,8 +5164,11 @@ function structureRanked(
     if (frames.length !== 1 || frames[0].flags === null) {
       return null;
     }
-    caseExit.wanted ||= !caseExit.asked;
-    return caseExit.asked ? frames[0] : null;
+    if (!caseExit.asked.has('flags')) {
+      caseExit.met.add('flags');
+      return null;
+    }
+    return frames[0];
   };
   // Is the code from `lc`'s exit on one a case body cannot copy? A `for`'s exit (its `break;` is
   // the latch's), or an exit that reaches a block being structured around this one (an enclosing
@@ -5654,7 +5664,7 @@ function structureRanked(
             ? undefined
             : (loopCtx.forLatch ??
               (foreverLoops.has(loopCtx.header) && forRank.asked.has(loopCtx.header) ? loopCtx.header : undefined));
-        // Nor, once the rerun asks the flag (`CaseExitRanking`) and this switch is the first opened
+        // Nor, once the rerun asks the flag (`CASE_EXIT_RUNGS`) and this switch is the first opened
         // in its loop, are the blocks a case body's exit flag leaves the loop for (`caseExitBreak`):
         // the loop's exit, and a non-outward two-level exit's second target. One that is a case
         // arm's own entry is a jump, and the others are ends (`analyzeArmExit`).
@@ -5668,7 +5678,7 @@ function structureRanked(
                   ? [lc.twoLevel.to]
                   : []),
               ];
-        const flagged = caseExit.asked ? flagTargets : [];
+        const flagged = caseExit.asked.has('flags') ? flagTargets : [];
         const jumps = new Set<Block>([
           ...(continueTo !== undefined && continueTo !== at ? [continueTo] : []),
           ...flagged.filter((x) => siblings.has(x)),
@@ -5724,7 +5734,9 @@ function structureRanked(
         const refusal = chain === null ? null : armRefusal(jumped, chain);
         const declines = chain === null || refusal !== null;
         // unasked, a reading the flag could change only notes it where it declines
-        caseExit.wanted ||= !caseExit.asked && declines && flagTargets.length > 0;
+        if (!caseExit.asked.has('flags') && declines && flagTargets.length > 0) {
+          caseExit.met.add('flags');
+        }
         return { exits: jumped, falls, chain, refusal, declines };
       };
       // THE EMISSION'S PER-ARM REFUSALS, the one definition of them. Every refusal the emission
@@ -6683,7 +6695,7 @@ function structureRanked(
     // loop (`caseExitFrame`); elsewhere the exit is refused. A two-level exit's flag, outward or
     // not, is that flag itself (`caseExitFlags` says why). The frame is asked only where this
     // block's break or two-level exit reads it, since asking notes the flag's rerun
-    // (`CaseExitRanking`), which every other branch in a case body would request for nothing.
+    // (`CASE_EXIT_RUNGS`), which every other branch in a case body would request for nothing.
     let caseFrame: SwitchFrame | null = null;
     if (
       twoLevel !== undefined &&
