@@ -574,8 +574,8 @@ export class DraftKeys {
 /** Did `bound-plus-one-counter-wraps` CAUSE this structuring's decline? The rule fires from every
  *  attempt `forPlanAt` makes, committed or not, and on loops the thrown refusal never reaches
  *  (held-pin-decline.test.ts's sw_gotocase_inner with its `goto` in a loop fires it and declines on
- *  its switches' cases), so its firing alone says nothing about the decline. The question is asked the one way that answers it: the
- *  same structuring with that rule off. Where that one structures, the refusal was the rule's, and
+ *  its switches' cases), so its firing alone says nothing about the decline. The question is asked
+ *  the one way that answers it: the same structuring with that rule off. Where that one structures, the refusal was the rule's, and
  *  the other pin, whose counter the rule admits, can take the loop; where it still throws, the
  *  decline is the function's and the row aborts as any other default decline does. The tree the
  *  ablated run builds is discarded — it is the `for` the rule refuses as wrong under this pin.

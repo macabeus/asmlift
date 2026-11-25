@@ -5,10 +5,10 @@
 // inner loop after the switch has rewritten `p`, and the arm that leaves for the outer latch reads
 // `p`. That arm is reached from the break's exit only round the outer loop and back through the
 // inner header, which binds `p` afresh, so it reads no value the break left stale, and the exit
-// region (structure.ts `exitRegionOf`) does not take it in: sub_080349AC's script loop, whose arms
-// `bl` to the outer latch, was refused for it. The control reads `p` in the exit itself (`h(p)`),
-// which is stale there, and keeps the naming that reads the old value. Both are judged against
-// their own IR by the trace oracle (`irAgreement`).
+// region (structure.ts `exitRegionOf`) does not take it in, as in sub_080349AC's script loop, whose
+// arms `bl` to the outer latch. The control reads `p` in the exit itself (`h(p)`), which is stale
+// there, and keeps the naming that reads the old value. Both are judged against their own IR by the
+// trace oracle (`irAgreement`).
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';

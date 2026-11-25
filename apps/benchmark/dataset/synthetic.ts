@@ -18105,15 +18105,14 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { sw_gotocase_inner: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
   },
   //      dw_outerlatch_arms (kl2dct sub_080349AC's script loop): a do-while over a script pointer
-  //      whose switch breaks to the code after the loop, and whose cases 8 and 9 leave for the outer
-  //      latch, case 8 reading a count case 1 rewrites ahead of agbcc's never-taken `cont` latch.
-  //      Those arms are reached from the latch's exit only round the outer loop and back through the
-  //      inner header, which binds the count afresh, so the break rule's exit region stops at the
-  //      loop (structure.ts `exitRegionOf`); walked past the header, it refuses that latch and agbcc
-  //      declines. Only agbcc and IDO:
-  //      the other three decline in their frontends first (the GCC 2.7.2 pair's `jr v0` dispatch,
-  //      mwcc's `lis` high half reaching a merge), and IDO declines on its case body reaching
-  //      several sibling cases.
+  //      whose `break;` cases reach agbcc's never-taken `cont` latch and whose `goto out;` cases the
+  //      code after the loop, and whose cases 8 and 9 leave for the outer latch, case 8 reading a
+  //      count case 1 rewrites ahead of the latch. Those arms are reached from the latch's exit only
+  //      round the outer loop and back through the inner header, which binds the count afresh, so
+  //      the break rule's exit region stops at the loop (structure.ts `exitRegionOf`); walked past
+  //      the header, it refuses that latch and agbcc declines. Only agbcc and IDO: the other three
+  //      decline in their frontends first (the GCC 2.7.2 pair's `jr v0` dispatch, mwcc's `lis` high
+  //      half reaching a merge), and IDO declines on its case body reaching several sibling cases.
   {
     sym: 'dw_outerlatch_arms',
     src:
@@ -18168,7 +18167,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // on to the outer latch, so no copy of it ends in a `return`. The goto source (A798) and a flag
   // do-while that jump threading sends straight to the exit (349AC, agbcc keeps the `cont` test).
   // Both lift with the case body's exit flag (`f = 1; break;`, `if (f != 0) break;` after the
-  // switch), asked only once every run without it declines (structure.ts `CaseExitRanking`).
+  // switch), asked only once every run without it declines (structure.ts `CASE_EXIT_RUNGS`).
   {
     sym: 'sw_caseexit_goto',
     src:

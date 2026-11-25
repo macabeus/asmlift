@@ -5235,9 +5235,9 @@ function structureRanked(
   // entering the loop again. A path that comes back round an enclosing loop enters through the
   // header, which binds its parameters afresh, and every other loop value a block past it reads is
   // defined again on the way (it is defined in the body, which the header dominates), so nothing
-  // there reads a name this iteration rewrote. Walked past the header, the region took in the arms
-  // of a switch that leave the loop from inside it (sub_080349AC's `bl` arms to the outer latch),
-  // which read the re-bound pointer, and refused a break they never see. The walk stops at the
+  // there reads a name this iteration rewrote. Walked past the header, the region would take in the
+  // arms of a switch that leave the loop from inside it (sub_080349AC's `bl` arms to the outer
+  // latch), which read the re-bound pointer, and refuse a break they never see. The walk stops at the
   // header only: on a reducible CFG every other body block lies past it.
   const exitRegionOf = (frame: LoopFrame, exit: Block): Set<Block> =>
     new Set([exit, ...reachAvoiding(exit, frame.header)].filter((x) => !frame.body.has(x)));

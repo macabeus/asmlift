@@ -3,13 +3,14 @@
 // A `goto` out of an arm of a switch nested in a case body, for the code after the outer switch,
 // reaches the outer switch's merge from inside the inner one, where C binds a `break;` to the inner
 // switch. Where the inner switch ends at that merge too, structure.ts `switchMergeExit` writes the
-// inner `break;`, and the outer arm its own `break;` after the inner switch; an inner switch with a
-// merge of its own, code the exit would skip, still declines. A merge that is a `ret` with no
-// effect is that `return` instead, from inside a loop nested in the arm as well; an exit from
-// inside such a loop to a merge that runs code still declines. Each fixture is judged
-// against its own IR by the trace oracle (`irAgreement`), as `structure()` returns it and as it
-// ships after `readabilityRewrites`. Both spellings are asked only once every run without them
-// declined (structure.ts `CASE_EXIT_RUNGS`), and each fixture declines without them.
+// inner `break;`, and the outer arm its own `break;` after the inner switch. Where the inner switch
+// has code of its own after it, which the exit must skip, the control lifts through the reading
+// that copies that code into the inner switch's other arms, so the inner switch ends at the merge
+// again. A merge that is a `ret` with no effect is that `return` instead, from inside a loop nested
+// in the arm as well; an exit from inside such a loop to a merge that runs code still declines.
+// Each fixture is judged against its own IR by the trace oracle (`irAgreement`), as `structure()`
+// returns it and as it ships after `readabilityRewrites`. Both spellings are asked only once every
+// run without them declined (structure.ts `CASE_EXIT_RUNGS`), and each fixture declines without them.
 import { readFileSync } from 'node:fs';
 import { expect, test } from 'vitest';
 
@@ -55,8 +56,9 @@ const ran = (ir: string, callee: string): number =>
 /** agbcc -O2's synthetic:sw_gotocase_inner as the frontend hands it to structure, with each load a
  *  call the oracle can run: `for (i = lo; i <= hi; i++) { if (f(i) <= 26) { switch (id(i)) { case 1:
  *  switch (u(i)) { case 0: k(10); break; case 1: goto shared; … } continue; case 3: case 4: shared:
- *  if (x(i) > 20) continue; mark(1); k(i); break; … } break; } } for (j = 0; j < 3; j++) k(j);`. The inner switch's `goto shared;` runs the shared body (#8, #9), and #9 leaves for the
- *  outer switch's merge #15, the loop's exit, whose code holds a loop. */
+ *  if (x(i) > 20) continue; mark(1); k(i); break; … } break; } } for (j = 0; j < 3; j++) k(j);`.
+ *  The inner switch's `goto shared;` runs the shared body (#8, #9), and #9 leaves for the outer
+ *  switch's merge #15, the loop's exit, whose code holds a loop. */
 const GOTOCASE_INNER = `fn gi {
 ^bb0(%0: s32, %1: s32):
   %4: u32 = icmp_slt %1, %0
