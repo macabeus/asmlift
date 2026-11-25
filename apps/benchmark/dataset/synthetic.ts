@@ -4710,8 +4710,8 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void nine();\nvoid stkbody_none(int *p, int n);',
     proto: { stkbody_none: { returnsVoid: true }, nine: { returnsVoid: true } },
   },
-  // A CALLEE'S BODY IS LIFTED READING ITS OWN CALLEES' BODIES (core pipeline.ts `bodyReadsIn`), one
-  // level further. kl2dct's sub_08037530 calls sub_08037AF8, whose body stages a 9-word call to
+  // A CALLEE'S BODY IS LIFTED READING ITS OWN CALLEES' BODIES (core frontend/callee-body.ts
+  // `calleeBodyReads`), at every depth. kl2dct's sub_08037530 calls sub_08037AF8, whose body stages a 9-word call to
   // EntityCreate: lifted with no body of its own, that call cannot be sized, the body lift fails, and
   // the caller's guess is left without a bound (the loop counter in r0 then decides nothing).
   //   stkbody_nest: `mid` stages the five stack words of `nine`, which only `nine`'s body sizes. With
@@ -4723,6 +4723,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //     lifted `mid2(*a0, &gv, a2 + 3)`. That call is taken at no more than `one`'s own body reads
   //     (call-plan.ts `entryReadCalls`), so `mid2` reads one word and the left-over r1 and r2 are
   //     none of its arguments. Not on mwcc: its synthetic flags inline both callees away.
+  //   stkbody_deep: stkbody_nest's chain one wrapper longer (`top` calls `mid`): `nine`'s body sizes
+  //     `mid`'s call three levels down. Read to two levels only, agbcc lifted `v0 = top(v0)`.
   {
     sym: 'stkbody_nest',
     src:
@@ -4738,6 +4740,26 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { stkbody_nest: { returnsVoid: true }, nine: { returnsVoid: true }, mid: { returnsVoid: true } },
   },
   {
+    sym: 'stkbody_deep',
+    src:
+      'extern int gv[];\n' +
+      'extern int gk[];\n' +
+      'void nine(a, b, c, d, e, f, g, h, i) int a, b, c, d, e, f, g, h, i;\n' +
+      '{ gv[0] = a + e; gv[1] = b + f; gv[2] = c + g; gv[3] = d + h; gv[4] = i; }\n' +
+      'void mid() { nine(gk[0], gk[1], gk[2], gk[3], 0, 1, 0, 0x1f, gk[4]); }\n' +
+      'void top() { gv[20] = 3; mid(); }\n' +
+      'void stkbody_deep(int n) { int i; for (i = 0; i < n; i++) { gv[8 + i] = i; top(); } }',
+    features: ['multi-arg', 'array'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'extern int gv[];\nextern int gk[];\nvoid nine();\nvoid mid();\nvoid top();\nvoid stkbody_deep(int n);',
+    proto: {
+      stkbody_deep: { returnsVoid: true },
+      nine: { returnsVoid: true },
+      mid: { returnsVoid: true },
+      top: { returnsVoid: true },
+    },
+  },
+  {
     sym: 'stkbody_rnest',
     src:
       'extern int gv[];\n' +
@@ -4749,11 +4771,14 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'extern int gv[];\nint one();\nvoid mid2();\nvoid stkbody_rnest(int *p, int b, int c);',
     proto: { stkbody_rnest: { returnsVoid: true }, one: { returns: 'int' }, mid2: { returnsVoid: true } },
   },
-  // A CALL TO ITSELF IS SIZED BY ITS OWN ENTRY (frontend/callee-body.ts `bodyReads`): kl2dct's
+  // A CALL TO ITSELF IS SIZED BY ITS OWN ENTRY (frontend/callee-body.ts `unliftedReads`): kl2dct's
   // EntityCreate calls itself with nine words, and no body read sized that call, so it declined "the
   // store to [sp,#0] is never reloaded". The stack words its own entry loads (frontend/thumb-entry.ts,
-  // never a lift of itself) size it as they would any callee whose body does not lift. agbcc only:
-  // no O32 frontend scans an entry.
+  // never a lift of itself) size it as they would any callee whose body does not lift. Only the
+  // Thumb frontend scans an entry: gcc 2.7.2, KMC and mwcc stage the same self call and still decline
+  // "outgoing stack arguments not modelled" (an ABI that can skip an argument register, O32 and
+  // PowerPC `evenWordAlignedArgs`, cannot say from a scan that every register is an argument), and
+  // IDO turns the self call into a loop. Their rows pin that state.
   {
     sym: 'stkbody_self',
     src:
@@ -4764,7 +4789,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '    if (a > 0) stkbody_self(a - 1, b, c, d, e, f, g, h, i + 1);\n' +
       '}',
     features: ['multi-arg', 'array'],
-    toolchains: ['agbcc'],
+    toolchains: ['agbcc', 'mwcc_242_81', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
     ctx: 'extern int gv[];\nvoid stkbody_self();',
     proto: { stkbody_self: { returnsVoid: true } },
   },
