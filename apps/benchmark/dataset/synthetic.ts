@@ -18283,8 +18283,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //      arm of a switch nested in case 1 for a case of the outer switch, which the narrow goto
   //      may never spell (a goto names a case of the switch it sits in), so the row must decline or
   //      lift goto-free. Its mwcc cell compiles to a comparison tree that leaves the second loop's
-  //      `lis r3,gA@ha` in r3 into the epilogue, a half only the void return reads
-  //      (frontend/high-half.ts `assertNoneEscaped`).
+  //      `lis r3,gA@ha` in r3 into the epilogue, a half the void return does not read
+  //      (frontend/ppc.ts `returnOperands`).
   {
     sym: 'sw_gotocase3',
     src:
@@ -18421,8 +18421,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //      round the outer loop and back through the inner header, which binds the count afresh, so
   //      the break rule's exit region stops at the loop (structure.ts `exitRegionOf`); walked past
   //      the header, it refuses that latch and agbcc declines. mwcc leaves the loop's `lis` half in
-  //      r3 into the epilogue, read only by the void return (frontend/high-half.ts
-  //      `assertNoneEscaped`), and the GCC 2.7.2 pair forms the table base in the dispatch's own
+  //      r3 into the epilogue, which the void return does not read (frontend/ppc.ts
+  //      `returnOperands`), and the GCC 2.7.2 pair forms the table base in the dispatch's own
   //      block, `lui;addiu` (frontend/mips.ts `formedTable`). IDO heads the do-while with the
   //      jump-table dispatch itself, its exits leaving from the switch, which no loop reading takes.
   {

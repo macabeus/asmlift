@@ -465,10 +465,11 @@ interface JumpRanking {
  *    would lift with it can be one the join lifts without it (an ido7.1 nest of a loop in a
  *    switch in a case, leaving for an effect-free `return` merge). That join's own ladder asks
  *    it where it never asks the join, and its copies' ladder after a declined join does.
- *  - `siblings`: a case body that reaches two or more closed sibling cases, copied into it but
- *    the one it keeps its fall-through into (switch-recover.ts `closedSiblingExit`). Held to `merge`'s ladders, for the same reason: a
- *    function the copies lift with it can be one the join lifts without it (case 0 of a Thumb table
- *    whose two paths enter cases 1 and 2, the join ending the switch at case 2's body). */
+ *  - `siblings`: a case body that reaches two or more closed sibling cases, each copied into it
+ *    save the one it keeps its fall-through into (switch-recover.ts `closedSiblingExit`). Held to
+ *    `merge`'s ladders, for the same reason: a function the copies lift with it can be one the join
+ *    lifts without it (case 0 of a Thumb table whose two paths enter cases 1 and 2, the join ending
+ *    the switch at case 2's body). */
 const CASE_EXIT_RUNGS = ['flags', 'merge', 'siblings'] as const;
 type CaseExitRung = (typeof CASE_EXIT_RUNGS)[number];
 interface CaseExitRanking {
@@ -5832,10 +5833,9 @@ function structureRanked(
           }
           return { exits: jumped, falls, chain, refusal, declines };
         };
-        // The arm above a sibling keeps its fall-through only where that reading declines nothing,
-        // as the one-sibling copies' keeper does not need to be: an arm already falling into the
-        // sibling, or the emission's own refusals of a fall-through, can refuse the one a copy would
-        // spell. Then every sibling is copied, the reading `/tail-copies` makes.
+        // The arm above a sibling keeps its fall-through only where that reading declines nothing:
+        // an arm already falling into the sibling, or the emission's own refusals of a fall-through,
+        // can refuse the one it would spell. Then every sibling is copied, the `/tail-copies` reading.
         let kept = false;
         const first = readExits(!copyEveryTailEntrant, () => {
           kept = true;

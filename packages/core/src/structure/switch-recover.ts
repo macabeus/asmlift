@@ -471,15 +471,15 @@ export function copyClosedSiblings(
  *  h(i, 1); } break; case 1: h(i, 0); break; case 2: h(i, 1); break;` keeps one `h(i, 0); break;`
  *  and one `h(i, 1); break;`, and case 0's two paths jump into them (kl2dct sub_0800BF80's two DMA
  *  tails). Every sibling is closed, a `break` with its own blocks, so each copy reaches the merge and
- *  nothing else. A sibling that leaves sideways is never copied here, although the
- *  one-sibling copy takes one: its copy writes what it steps into outside the switch, a loop's latch
- *  and the code after the loop among them, into every entrant, and with it the switch's first merge
- *  reading lifts where it would decline and leave a later reading to write that code once (a
- *  `while` whose latch ends `i++; if (gS[i] == 4) break;`, on agbcc: the latch written into nine
- *  arms, 30 calls where the later reading writes 21 and the asm holds 13). A sibling that reaches
- *  siblings of its own is not followed, so the copies never nest (followed, every arm of a switch
- *  whose arms each reach all the others would copy all of them, exponentially). The entrant's own
- *  walk stepped into no block the switch does not dominate (`reaches` is absent otherwise).
+ *  nothing else. A sibling that leaves sideways is never copied here, although the one-sibling
+ *  copy takes one: its copy writes what it steps into outside the switch, a loop's latch and the
+ *  code after the loop among them, into every entrant, and the switch's first merge reading would
+ *  then lift where it declines and leaves a later reading to write that code once (on agbcc, a
+ *  `while` whose latch ends `i++; if (gS[i] == 4) break;` would get that latch in nine arms).
+ *  A sibling that reaches siblings of its own is not followed, so the copies never nest (followed,
+ *  every arm of a switch whose arms each reach all the others would copy all of them,
+ *  exponentially). The entrant's own walk stepped into no block the switch does not dominate
+ *  (`reaches` is absent otherwise).
  *
  *  THE ARM KEEPS ITS FALL-THROUGH INTO THE SIBLING THE ASM LAYS OUT RIGHT AFTER IT: where the block
  *  after the arm's last own block is a sibling no other arm falls into, the exit is a fall-through
@@ -494,9 +494,8 @@ export function copyClosedSiblings(
  *  order is what the emitted switch prints, while here one entrant picks among several siblings,
  *  which arm order cannot rank, and the layout is the one witness of the path it falls on. The
  *  two agree on agbcc, whose arm order follows the layout (`switchArmsFollowLayout`), and elsewhere
- *  can pick different spellings of one program. The layout only picks between those spellings, so
- *  it reads `layoutIndex` at no strength of the compiler half: where a frontend moved a block, the
- *  other sibling is kept or none is.
+ *  can pick different spellings of one program. The layout only picks between those spellings:
+ *  where a frontend moved a block, the other sibling is kept or none is, and the C is the same.
  *
  *  Every sibling copied, the entrant is a closed `break` holding their blocks. Asked only where the
  *  caller hands `severalSiblings` in with `asked` set (the `siblings` rung of structure.ts
