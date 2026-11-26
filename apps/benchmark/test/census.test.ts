@@ -80,6 +80,8 @@ describe("the properties of the winners' variations rank.ts argues from", () => 
       'synthetic:stkwalk_call:mwcc_242_81  unsigned/unreduce',
       'synthetic:stkwalk_kr:mwcc_242_81  unsigned/unreduce',
       'synthetic:stkwalk_up:mwcc_242_81  unsigned/unreduce',
+      // the case-label goto's control, a counted loop over `gE[i]` whose index mwcc reduced
+      'synthetic:sw_gotocase_inner:mwcc_242_81  signed/unreduce',
       // a switch on `p[i]` in a counted loop: the mwcc controls of the stolen-likely-slot rows
       'synthetic:sw_h3:mwcc_242_81  signed/unreduce',
       'synthetic:sw_h4:mwcc_242_81  signed/unreduce',
@@ -88,6 +90,8 @@ describe("the properties of the winners' variations rank.ts argues from", () => 
       'synthetic:sw_jtloop:mwcc_242_81  signed/unreduce',
       // the same loop with a call after the switch
       'synthetic:sw_jtloopcall:mwcc_242_81  signed/unreduce',
+      // a counted loop over `gK[i]` whose case bodies a cross-jump shares
+      'synthetic:sw_xjsib2:mwcc_242_81  unsigned/unreduce',
     ]);
   });
 

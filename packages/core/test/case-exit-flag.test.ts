@@ -275,7 +275,7 @@ test('CONTROL: a decline whose case bodies reach no loop exit is not structured 
   // `do { switch (j) { case 0: if (a(j)) e(j); break; case 1: b(j); break; case 2: d(j); } k(j); }
   // while (++j < n);`, then a loop-free switch whose case 0 reaches two sibling cases, which no
   // structuring spells. No branch in the loop's case bodies leaves the loop, so nothing asks for the
-  // rerun with the flag: the `caseExitFlags` hook is read only where one was asked
+  // rerun with the flag: the `exitRungs` hook is read only where one was asked
   // (`CASE_EXIT_RUNGS`).
   const fn = parse(`fn cd {
 ^bb0(%n: s32):
@@ -322,7 +322,7 @@ test('CONTROL: a decline whose case bodies reach no loop exit is not structured 
   recoverTypes(fn);
   // not enumerable, so the runs' copies of the hooks leave it out and only the rerun's question reads it
   let asked = 0;
-  const hooks = Object.defineProperty({}, 'caseExitFlags', {
+  const hooks = Object.defineProperty({}, 'exitRungs', {
     get: (): undefined => {
       asked++;
       return undefined;

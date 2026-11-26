@@ -564,11 +564,7 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
         while (p >= 0 && writtenReg(instrs[p]) !== x.ops[1]) {
           p--;
         }
-        const hi = p >= 0 && instrs[p].mnemonic === 'lui' ? tableBaseOf(instrs[p]) : null;
-        if (!hi || hi.sym !== lo.sym) {
-          return [{ sym: '', addend: NaN }];
-        }
-        return [paired(hi, parseImm(instrs[p].ops[1]), parseImm(x.ops[2]))];
+        return [luiPairedWith(x, lo.sym, p) ?? { sym: '', addend: NaN }];
       }),
     );
   /** The table a `%hi` / `%lo` pair addresses: the high record's symbol and addend plus both
@@ -580,6 +576,13 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
     sym: hi.sym,
     addend: hi.addend + (((hiImm & 0xffff) << 16) + (((loImm & 0xffff) << 16) >> 16)),
   });
+  /** The table an `addiu rB,rH,%lo(T)` (`lo`, whose LO16 names `loSym`) addresses with the `lui
+   *  rH,%hi(T)` at `hiIdx`, the nearest earlier writer of rH: null where that writer is no `lui` on
+   *  a table's section or names another symbol (`hoistedTable`, `formedTable`). */
+  const luiPairedWith = (lo: Instr, loSym: string, hiIdx: number): TableKey | null => {
+    const hi = hiIdx >= 0 && instrs[hiIdx].mnemonic === 'lui' ? tableBaseOf(instrs[hiIdx]) : null;
+    return hi && hi.sym === loSym ? paired(hi, parseImm(instrs[hiIdx].ops[1]), parseImm(lo.ops[2])) : null;
+  };
   /** The table a base the dispatch's block forms addresses, read with the load's displacement `off`.
    *  The base pairs with the load: IDO, KMC and gcc 2.7.2 fold the table's `%lo` into the `lw`
    *  whenever the block forms the base, so `lw rV,%lo(T+K)(at)`'s displacement is the low half of
@@ -609,6 +612,24 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
       return null;
     }
     return paired(hi, hiImm, off);
+  };
+
+  /** The table a base the dispatch's block forms WHOLE addresses: `lui rH,%hi(T); addiu
+   *  rB,rH,%lo(T)` ahead of the `addu`, and the load at displacement 0 with no relocation of its
+   *  own — how GCC 2.7.2 and KMC spell a dispatch whose base no loop preheader holds (`lui
+   *  t0,%hi(.rodata); addiu t0,t0,%lo(.rodata); addu v0,v0,t0; lw v0,0(v0); jr v0`). The two halves
+   *  must name one symbol, and the `lui` joins the idiom (`hiIdx`). Refuses (null) any other `%lo`
+   *  carrier, a `lui` another block wrote, and a load that carries a `%lo` of its own, which would
+   *  add the low half twice. */
+  const formedTable = (bi2: number, ld: Instr, off: number): { key: TableKey; hiIdx: number } | null => {
+    const lo = instrs[bi2];
+    const loRel = lo.mnemonic === 'addiu' ? textRelocAt(ad, lo.addr) : null;
+    if (loRel?.type !== 'R_MIPS_LO16' || off !== 0 || textRelocAt(ad, ld.addr) !== null) {
+      return null;
+    }
+    const hiIdx = defBefore(lo.ops[1], bi2);
+    const key = luiPairedWith(lo, loRel.sym, hiIdx);
+    return key && { key, hiIdx };
   };
 
   const out = new Map<number, MipsJT>();
@@ -643,6 +664,7 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
       table: { sym: string; addend: number } | null = null,
       sllIdx = -1,
       baseIdx = -1,
+      hiIdx = -1,
       hoisted: HoistedDispatch | null = null;
     for (const [idxCand, baseCand] of [
       [oa, ob],
@@ -660,13 +682,14 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
       if (sll.mnemonic !== 'sll' || (sll.ops[2] !== '0x2' && sll.ops[2] !== '2')) {
         continue;
       } // index*4
-      const tb = out ?? inBlockTable(instrs[bi2], instrs[ldIdx], mem.off);
+      const formed = out || bi2 < 0 ? null : formedTable(bi2, instrs[ldIdx], mem.off);
+      const tb = out ?? formed?.key ?? inBlockTable(instrs[bi2], instrs[ldIdx], mem.off);
       if (!tb) {
         continue;
       }
       scrutReg = sll.ops[1];
       table = tb;
-      [sllIdx, baseIdx] = [si, bi2];
+      [sllIdx, baseIdx, hiIdx] = [si, bi2, formed?.hiIdx ?? -1];
       hoisted = out ? { reg: baseCand, table: out } : null;
       break;
     }
@@ -685,7 +708,7 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
     // slot must be empty, and nothing from the bounds slot on may rewrite the scrutinee before the
     // `sll` scales it (IDO's in-place `sll` IN the slot is that `sll`).
     const k = bounds.at;
-    const idiom = new Set([ldIdx, aIdx, gpIdx, sllIdx, baseIdx]);
+    const idiom = new Set([ldIdx, aIdx, gpIdx, sllIdx, baseIdx, hiIdx]);
     if (
       instrs[i + 1]?.mnemonic !== 'nop' ||
       entersBetween(instrs, instrs[k].addr, instrs[i + 1].addr) ||

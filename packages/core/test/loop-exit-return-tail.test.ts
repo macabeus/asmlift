@@ -806,3 +806,95 @@ describe('a return tail a path that bypasses the loop also enters', () => {
     expect(shipped).toEqual({ judged: 300, disagree: 0 });
   });
 });
+
+// THE ARM'S OWN HEAD, ENTERED BY SEVERAL ARMS ONLY (`earlyReturnArm`, structure.ts `HeadsRanking`):
+// agbcc cross-jumps the `m(36); g(..); return;` three arms of a loop end with into one block, and
+// that block's `g(..); return;` into another case's path (kl2dct sub_080222AC). No exit is a `break`
+// target for both it and the loop's own exit, so only every arm owning the block reads the loop. The
+// `if` ahead of the switch returns early on one path, so the copies write the switch, and the loop in
+// it, once per path that reaches it, where the join writes it once.
+const headsIr = `fn xr {
+^bb0(%0: s32, %1: s32):
+  %q0: s32 = const {value=5}
+  %qc: u32 = icmp_eq %1, %q0
+  cond_br %qc, ^bb20(), ^bb21()
+^bb20():
+  %p: s32 = call %1 {target="p"}
+  %zp: s32 = const {value=0}
+  %cp: u32 = icmp_ne %p, %zp
+  cond_br %cp, ^bb22(), ^bb23()
+^bb22():
+  %r: s32 = call %1 {target="r"}
+  ret
+^bb21():
+  %q: s32 = call %1 {target="q"}
+  br ^bb23()
+^bb23():
+  switch_br %0, ^bb1(), ^bb11(), ^bb9() {cases=[0;1]}
+^bb11():
+  %h: s32 = call %1 {target="h"}
+  %zh: s32 = const {value=0}
+  %ch: u32 = icmp_ne %h, %zh
+  cond_br %ch, ^bb8(), ^bb9()
+^bb1():
+  %z: s32 = const {value=0}
+  br ^bb2(%z)
+^bb2(%i: s32):
+  %a: s32 = call %i {target="t"}
+  %za: s32 = const {value=0}
+  %ca: u32 = icmp_ne %a, %za
+  cond_br %ca, ^bb7(), ^bb3()
+^bb3():
+  %b: s32 = call %i {target="u"}
+  %zb: s32 = const {value=0}
+  %cb: u32 = icmp_ne %b, %zb
+  cond_br %cb, ^bb7(), ^bb4()
+^bb4():
+  %c: s32 = call %i {target="w"}
+  %zc: s32 = const {value=0}
+  %cc: u32 = icmp_ne %c, %zc
+  cond_br %cc, ^bb7(), ^bb5()
+^bb5():
+  %one: s32 = const {value=1}
+  %i2: s32 = add %i, %one
+  %lt: u32 = icmp_slt %i2, %1
+  cond_br %lt, ^bb2(%i2), ^bb6()
+^bb6():
+  %k: s32 = call %i2 {target="k"}
+  br ^bb9()
+^bb7():
+  %m: s32 = call %0 {target="m"}
+  br ^bb8()
+^bb8():
+  %g: s32 = call %0 {target="g"}
+  ret
+^bb9():
+  %e: s32 = call %0 {target="e"}
+  ret
+}`;
+
+describe("a loop's arms entering one return tail own its head", () => {
+  test('each arm writes the tail once more, the join writes the loop once, and the program is the IR', () => {
+    const { src, agreement, shipped } = judged(headsIr);
+    expect(src.match(/\bm\(/g)).toHaveLength(3);
+    expect(src.match(/while \(1\)/g)).toHaveLength(1);
+    expect(agreement.disagree).toBe(0);
+    expect(agreement.judged).toBeGreaterThan(SEEDS.length / 2);
+    expect(shipped.disagree).toBe(0);
+  });
+
+  test('the copies, which write the loop once per path into the switch, are not the default', () => {
+    const fn = parse(headsIr);
+    verify(fn);
+    recoverTypes(fn);
+    const src = cBackend.emit(structure(fn, { copyReturnTails: true }));
+    expect(src.match(/while \(1\)/g)).toHaveLength(2);
+  });
+
+  test('unasked, the loop is read by no reading', () => {
+    const fn = parse(headsIr);
+    verify(fn);
+    recoverTypes(fn);
+    expect(() => structure(fn, {}, { exitRungs: false })).toThrow(/cannot structure/);
+  });
+});

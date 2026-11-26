@@ -9,6 +9,7 @@ import { Block, Fn, Op, Value, forwardingTarget, isBodyless, successorsOf } from
 import { orderSensitive } from '../ir/discipline';
 import { SWAPPED_ICMP } from '../ir/opcodes';
 import { Expr, Stmt, SwitchCase } from '../l3/ast';
+import type { RungAsk } from './structure-options';
 
 /** Which side of a relational test a compiler's dispatch lands a pinned case body on. */
 export type SwitchBoundCase = 'taken' | 'either';
@@ -106,7 +107,14 @@ export type ArmExit =
   | { kind: 'break'; region?: ReadonlySet<Block>; escapedTo?: ReadonlySet<Block> }
   | { kind: 'fallthrough'; to: Block; breaks: boolean; region: ReadonlySet<Block> }
   | { kind: 'goto'; to: Block; breaks: boolean; region: ReadonlySet<Block> }
-  | { kind: 'unstructurable'; why: string };
+  | {
+      kind: 'unstructurable';
+      why: string;
+      /** A body that reaches two or more siblings and leaves through no block the switch does not
+       *  dominate: the siblings and its own blocks, which `copyClosedSiblings` reads to copy them
+       *  into it (ONE ARM INTO SEVERAL CLOSED SIBLINGS, there). */
+      reaches?: { siblings: ReadonlySet<Block>; region: ReadonlySet<Block> };
+    };
 
 export interface SwitchRecovery {
   /** `mergeAt`, given the tree's case and default blocks, may name the switch's end ahead of the
@@ -380,15 +388,8 @@ export function copySharedFallTargets(
 ): Map<Block, ArmExit> {
   const out = new Map(exitOf);
   for (const { to, movers } of sharedFallTargets(order, dflt, exitOf, faller)) {
-    const own = exitOf.get(to);
-    if (own?.kind !== 'break') {
-      continue;
-    }
-    const { region, escapedTo } = own;
-    if (
-      region === undefined &&
-      (escapedTo === undefined || sidewaysEnds === undefined || ![...escapedTo].every(sidewaysEnds))
-    ) {
+    const copy = copyableSibling(exitOf.get(to), sidewaysEnds);
+    if (copy === undefined) {
       continue;
     }
     for (const [e, x] of movers(onFallerKept)) {
@@ -397,13 +398,135 @@ export function copySharedFallTargets(
       }
       out.set(
         e,
-        region === undefined
-          ? { kind: 'break', escapedTo: escapedTo! }
-          : { kind: 'break', region: new Set([...x.region, ...region]) },
+        'escapedTo' in copy
+          ? { kind: 'break', escapedTo: copy.escapedTo }
+          : { kind: 'break', region: new Set([...x.region, ...copy.region]) },
       );
     }
   }
   return out;
+}
+
+/** WHAT A COPY OF A SIBLING WRITES, for the one-sibling copy (`copySharedFallTargets`): a closed
+ *  sibling's own blocks, or, for one that leaves sideways only forward, the blocks outside the
+ *  switch it steps into (the copying entrant then structures to the CFG's joins, as the sibling
+ *  does) — or `undefined` where the sibling is not copied. The several-sibling copy takes closed
+ *  siblings only (`closedSiblingExit`). */
+function copyableSibling(
+  own: ArmExit | undefined,
+  sidewaysEnds: ((s: Block) => boolean) | undefined,
+): { region: ReadonlySet<Block> } | { escapedTo: ReadonlySet<Block> } | undefined {
+  if (own?.kind !== 'break') {
+    return undefined;
+  }
+  if (own.region !== undefined) {
+    return { region: own.region };
+  }
+  return own.escapedTo !== undefined && sidewaysEnds !== undefined && [...own.escapedTo].every(sidewaysEnds)
+    ? { escapedTo: own.escapedTo }
+    : undefined;
+}
+
+/** How `copyClosedSiblings` reads the arms: whether an arm may keep its fall-through into the
+ *  sibling laid out right after its own blocks (`faller`; `onFallerKept` fires where one does), and
+ *  the asm's block order that says which sibling that is (`layoutIndex`). */
+export interface ClosedSiblingReading {
+  readonly faller: boolean;
+  readonly layoutIndex: (blk: Block) => number;
+  readonly onFallerKept?: () => void;
+}
+
+/** The arms of `exitOf` that reach several closed siblings, each given them as copies
+ *  (`closedSiblingExit`), written over `out`: asked, or else only noted (`onMet`). It reads the
+ *  arms as walked, so it runs beside `copySharedFallTargets` or alone, at any merge a reading names. */
+export function copyClosedSiblings(
+  exitOf: ReadonlyMap<Block, ArmExit>,
+  severalSiblings: RungAsk,
+  reading: ClosedSiblingReading,
+  out: Map<Block, ArmExit> = new Map(exitOf),
+): Map<Block, ArmExit> {
+  for (const [e, x] of exitOf) {
+    if (x.kind !== 'unstructurable' || x.reaches === undefined) {
+      continue;
+    }
+    const exit = closedSiblingExit(e, x.reaches, exitOf, out, reading);
+    if (exit === null) {
+      continue;
+    }
+    if (!severalSiblings.asked) {
+      severalSiblings.onMet();
+      continue;
+    }
+    if (exit.kind === 'fallthrough') {
+      reading.onFallerKept?.();
+    }
+    out.set(e, exit);
+  }
+  return out;
+}
+
+/** ONE ARM INTO SEVERAL CLOSED SIBLINGS, for `copyClosedSiblings`: the arm's exit once the siblings
+ *  it reaches are written out again under it, or null. agbcc's cross-jump makes it out of one case
+ *  whose two paths each end the way another case does: `case 0: if (c) { A; h(i, 0); } else { B;
+ *  h(i, 1); } break; case 1: h(i, 0); break; case 2: h(i, 1); break;` keeps one `h(i, 0); break;`
+ *  and one `h(i, 1); break;`, and case 0's two paths jump into them (kl2dct sub_0800BF80's two DMA
+ *  tails). Every sibling is closed, a `break` with its own blocks, so each copy reaches the merge and
+ *  nothing else. A sibling that leaves sideways is never copied here, although the one-sibling
+ *  copy takes one: its copy writes what it steps into outside the switch, a loop's latch and the
+ *  code after the loop among them, into every entrant, and the switch's first merge reading would
+ *  then lift where it declines and leaves a later reading to write that code once (on agbcc, a
+ *  `while` whose latch ends `i++; if (gS[i] == 4) break;` would get that latch in nine arms).
+ *  A sibling that reaches siblings of its own is not followed, so the copies never nest (followed,
+ *  every arm of a switch whose arms each reach all the others would copy all of them,
+ *  exponentially). The entrant's own walk stepped into no block the switch does not dominate
+ *  (`reaches` is absent otherwise).
+ *
+ *  THE ARM KEEPS ITS FALL-THROUGH INTO THE SIBLING THE ASM LAYS OUT RIGHT AFTER IT: where the block
+ *  after the arm's last own block is a sibling no other arm falls into, the exit is a fall-through
+ *  into that sibling (`breaks`: the others' copies end the switch) and only the others are copied.
+ *  That is the path the asm runs straight into the sibling on: agbcc lays `case 0: if (c) { A; h(i,
+ *  0); break; } B; case 2: h(i, 1); break;` out as `c ? A : B` with `h(i, 0)` cross-jumped under A
+ *  and `h(i, 1)` under B, the same asm as the copies, and it recompiles to the target only from this
+ *  reading (`synthetic:sw_xjsib2`); on mwcc the two spellings differ. So, like the one-sibling
+ *  copies, `/tail-copies` (`faller` false) copies every sibling instead and the differ referees the
+ *  pair. It is not the one-sibling copies' keeper (`sharedFallTargets`), which keeps the entrant
+ *  the arm order puts above the sibling: there several entrants share one sibling and the arm
+ *  order is what the emitted switch prints, while here one entrant picks among several siblings,
+ *  which arm order cannot rank, and the layout is the one witness of the path it falls on. The
+ *  two agree on agbcc, whose arm order follows the layout (`switchArmsFollowLayout`), and elsewhere
+ *  can pick different spellings of one program. The layout only picks between those spellings:
+ *  where a frontend moved a block, the other sibling is kept or none is, and the C is the same.
+ *
+ *  Every sibling copied, the entrant is a closed `break` holding their blocks. Asked only where the
+ *  caller hands `severalSiblings` in with `asked` set (the `siblings` rung of structure.ts
+ *  `CASE_EXIT_RUNGS`); unasked, `onMet` notes the arm it would copy. A sibling the copy writes can
+ *  be the code after a switch with no merge (the `stop` reading's default block): then only the arm
+ *  entering it holds it twice. */
+function closedSiblingExit(
+  entrant: Block,
+  reaches: { siblings: ReadonlySet<Block>; region: ReadonlySet<Block> },
+  exitOf: ReadonlyMap<Block, ArmExit>,
+  out: ReadonlyMap<Block, ArmExit>,
+  { faller, layoutIndex }: ClosedSiblingReading,
+): ArmExit | null {
+  const sibs = [...reaches.siblings];
+  const regions = sibs.map((sib) => {
+    const own = exitOf.get(sib);
+    return own?.kind === 'break' ? own.region : undefined;
+  });
+  if (!regions.every((r) => r !== undefined)) {
+    return null;
+  }
+  const next = Math.max(...[...reaches.region].map(layoutIndex)) + 1;
+  const kept = !faller
+    ? -1
+    : sibs.findIndex(
+        (sib) =>
+          layoutIndex(sib) === next &&
+          ![...out].some(([e, y]) => e !== entrant && (y.kind === 'fallthrough' || y.kind === 'goto') && y.to === sib),
+      );
+  const region = new Set([...reaches.region, ...regions.flatMap((r, i) => (i === kept ? [] : [...r!]))]);
+  return kept === -1 ? { kind: 'break', region } : { kind: 'fallthrough', to: sibs[kept], breaks: true, region };
 }
 
 /** TWO OR MORE ARMS ENTERING ONE SIBLING'S BODY, put back as one fall-through and `goto`s to the
@@ -1019,6 +1142,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       return {
         kind: 'unstructurable',
         why: `a case body reaches several sibling cases (${names()}) — C fall-through reaches only one, so this needs a goto`,
+        ...(escapedTo.size === 0 ? { reaches: { siblings: into, region: seen } } : {}),
       };
     }
     return {

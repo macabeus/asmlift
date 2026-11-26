@@ -118,7 +118,9 @@ export interface StructureOptions extends ArithCompilerFacts {
    *  write that body back into EVERY entrant instead of letting the one the arm-order policy puts
    *  above the sibling keep its fall-through (`copySharedFallTargets`). rank.ts's `/tail-copies`
    *  variation: which arm the source wrote the tail under is not in the asm, and one compiler answers
-   *  both ways, so the differ referees it. Inert where no switch has such a sibling. */
+   *  both ways, so the differ referees it. The same choice for an arm entering SEVERAL closed
+   *  siblings (`copyClosedSiblings`): off, it keeps its fall-through into the one laid out right
+   *  after it; on, it copies every one. Inert where no switch has such a sibling. */
   copyEveryTailEntrant?: boolean;
   /** In a jump table where two or more arms enter one sibling CASE arm's body and the copies would
    *  write that body back into the entrants (`copySharedFallTargets`), spell them with the one
@@ -500,10 +502,12 @@ export interface StructureHooks {
   breakTailGates?: readonly Gate<BreakTailCycle>[];
   /** `emitForever`'s two-level exit rule (`TWO_LEVEL_REGION_GATES`), ablatable the same way. */
   twoLevelRegionGates?: readonly Gate<TwoLevelRegion>[];
-  /** false never asks a case body's exit flag, nor an exit to an enclosing switch's merge (structure.ts
-   *  `CASE_EXIT_RUNGS`), so that exit stays refused: for a test whose fixture is held at that
-   *  refusal to reach another rule. */
-  caseExitFlags?: boolean;
+  /** false never asks the exits structure.ts reads only in a rerun after a decline: a case body's
+   *  exit flag, an exit to an enclosing switch's merge, the copies of several closed siblings into
+   *  one case body (`CASE_EXIT_RUNGS`), nor a loop's arms owning one tail head (`HeadsRanking`), so
+   *  that exit stays refused: for a test whose fixture is held at that refusal to reach another
+   *  rule. */
+  exitRungs?: boolean;
   /** true where the caller structures the join after this run and publishes it where this run
    *  declines (pipeline.ts `copiesByDefault`): the `merge` rung (structure.ts `CASE_EXIT_RUNGS`) is
    *  then not asked here, as it is not in the join's ladder where the copies' ladder follows it, so
@@ -538,7 +542,8 @@ export interface StructureHooks {
    *  chooser reads the target's asm layout there (structure/cross-jumped-tail.ts). */
   onJoinPastReturns?: (site: JoinPastReturnsSite) => void;
   /** Fired each time a jump table's cross-jumped sibling is read with an entrant left FALLING into
-   *  it (`copySharedFallTargets`' `onFallerKept`) — the one place `copyEveryTailEntrant` changes
+   *  it (`copySharedFallTargets`' `onFallerKept`, and `copyClosedSiblings`' where that reading is
+   *  the one the switch takes) — the one place `copyEveryTailEntrant` changes
    *  what the structurer reads. A structuring with that option off that never fires it builds the
    *  same tree as the same options with it on, so rank.ts skips `/tail-copies` on its sibling
    *  rather than structure a tree the dedup would discard. Like `onBranchSenseSite`, the domain
@@ -633,4 +638,13 @@ export function calledOnly(
   const declaredArgs = of(tables.declaredArgs);
   const declaredReturns = of(tables.declaredReturns);
   return { ...(declaredArgs ? { declaredArgs } : {}), ...(declaredReturns ? { declaredReturns } : {}) };
+}
+
+/** One rung of structure.ts's reruns as a pass that reads it sees it: whether this run asks it, and
+ *  what to call where an exit it would spell is met unasked (exit-arms.ts `earlyReturnArm`'s
+ *  `armHead`, switch-recover.ts `copyClosedSiblings`' `severalSiblings`). The rerun's own record of
+ *  the rung (`CaseExitRanking`, `HeadsRanking`) stays the structurer's. */
+export interface RungAsk {
+  readonly asked: boolean;
+  onMet(): void;
 }

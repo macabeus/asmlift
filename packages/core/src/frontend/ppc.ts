@@ -1911,10 +1911,17 @@ function liftOnce(
   // `settleReturnHome` may hand each return f1 instead. A table base left in r3 is no return value, as a
   // pending half is none (`placeholders`); reading one would refuse, and a merge of one with a value
   // still does.
+  //
+  // NOR ANYTHING AT ALL WHERE THE FUNCTION'S STATED DECLARATION IS VOID, as mips.ts `returnsWord`
+  // reads it: r3 is scratch on every path. mwcc can leave a loop's `lis r3,gA@ha` live in r3 into
+  // the epilogue, and reading r3 there would hand that pending half to the `ret` through the
+  // post-loop join, which `assertNoneEscaped` refuses. The context's own `void` alone is not read
+  // here, as pipeline.ts `dropVoidReturnOperands` drops a `ret` operand only for a stated entry.
+  const returnsVoid = declaresVoidReturn(prototypes[name]);
   const returnOperands = (bi: number): Value[] =>
     floatReturn
       ? [readReg(fpu!.returnReg, bi)]
-      : ssa.hasReachingDef(RET, bi, (v) => !placeholders.has(v) && !parked(v, RET))
+      : !returnsVoid && ssa.hasReachingDef(RET, bi, (v) => !placeholders.has(v) && !parked(v, RET))
         ? [readReg(RET, bi)]
         : [];
   // A RETURN NOTHING WROTE r3 FOR STILL RETURNS r3 — the caller's value, which on PowerPC is the

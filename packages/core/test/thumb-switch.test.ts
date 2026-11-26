@@ -260,18 +260,24 @@ test('a fall-through that would carry an effect out of a loop DECLINES', () => {
   expect(closed).toMatch(/do \{\s*\n\s*v0 = sideA\(\);/);
 });
 
-testCopies('overlaps C cannot spell DECLINE instead of being silently closed or duplicated', () => {
-  // Emitting these as ordinary `break` arms would drop a real control-flow edge — the output would
-  // look entirely normal and run the wrong code, which is the whole hazard of a recovered table.
-  // The shared tail CALLS here: a bare `bx lr` tail is duplicated into the arms as a `return`, which
-  // legitimately removes the second exit — these fixtures need the exit to survive as an edge.
+testCopies('an arm reaching two siblings is never closed over a dropped edge: copied, or ended at the join', () => {
+  // Emitting case 0 as an ordinary `break` arm would drop a real control-flow edge — the output
+  // would look entirely normal and run the wrong code, which is the whole hazard of a recovered
+  // table. The shared tail CALLS here: a bare `bx lr` tail is duplicated into the arms as a
+  // `return`, which legitimately removes the second exit — this fixture needs the exit to survive.
   const tail = '.Lend:\n\tbl\tsideZ\n\tbx\tlr\n';
   const fallsTo = (n: number) => `\tb\t.Lc${n}\n`;
   const armB = '\tbl\tsideB\n' + LEAVE,
     armC = '\tbl\tsideC\n' + LEAVE;
-  // (c) reaches two different siblings.
+  // (c) reaches two different siblings, both closed `break` arms. Case 0 sits directly above case 1,
+  // so it keeps its fall-through into it and case 2's body is copied into it once more
+  // (switch-recover.ts `closedSiblingExit`, the `siblings` rung): every path keeps its edge, case 0
+  // running sideC() or sideB(), then the switch's end.
   const reachesTwo = conv(['\tcmp\tr2, #0\n\tbeq\t.Lc1\n' + fallsTo(2), armB, armC], tail);
-  expect(() => lift(reachesTwo)).toThrow(/reaches several sibling cases/);
+  const copied = lift(reachesTwo);
+  expect(copied).toMatch(
+    /case 0:\s*if \(a2 != 0\) \{\s*sideC\(\);\s*break;\s*\}\s*case 1:\s*sideB\(\);\s*break;\s*case 2:\s*sideC\(\);\s*break;\s*\}\s*return sideZ\(\);/,
+  );
   // The default reads the join past early returns: case 1 and the default reach only the return
   // tail (sideZ's call), so they return, and the join is case 2's body, below the switch. Case 0's
   // two targets are then a `break` to the join and a fall into case 1, both of which C spells.

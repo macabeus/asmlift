@@ -309,10 +309,24 @@ on agbcc, IDO and both GCC 2.7.2). An inner switch with code of its own after it
 must skip, gets no such `break;`; a reading that copies that code into the inner switch's other
 arms ends the inner switch at the merge again, and lifts it. A merge that is a `ret` with no effect
 is that `return` instead, from inside a nested loop or switch alike (`synthetic:sw_xjret_end` on
-mwcc, and `synthetic:sw_xjret_val`'s `return gOut;` on all five toolchains). Both are the next rung of the same reruns (`CASE_EXIT_RUNGS`),
+mwcc, and `synthetic:sw_xjret_val`'s `return gOut;` on all five toolchains). Both are the next rung of the same reruns (`CASE_EXIT_RUNGS`, the merge rung),
 asked once every run before it declined and the last one met such an exit: straight after the
 first run where no case exit was met, otherwise after the runs asking the case-exit flag alone,
-so they too only turn a decline into a lift. The structurer lives in
+so they too only turn a decline into a lift. The third rung of those reruns, `siblings`, is not
+an exit: it puts back a case body that agbcc's cross-jump sends into two or more sibling cases,
+each ending the way the body's own paths do, by writing those siblings out again inside it — every
+one but the sibling the asm lays out right after the body, which it falls into (`closedSiblingExit`
+in `structure/switch-recover.ts`; kl2dct `sub_0800BF80`'s two DMA tails, `synthetic:sw_xjsib2`). Only closed siblings, which reach the switch's merge and nothing else, are
+copied, so the copy never carries the code after the switch into each arm. Behind all of those
+runs sits one more reading of the whole function, the arm's own head (`HeadsRanking` in
+`structure.ts`): a loop whose early-return arms all jump into one tail with an effect, which agbcc
+cross-jumped and which runs on into the function's shared return, so no single `break` target
+serves both it and the loop's other exit (kl2dct `sub_080222AC`, `synthetic:dw_xjret_arms`). There
+every arm owns that tail's head and writes its own copy. It is asked only once the join's ladder and
+the copies' have both declined with it unasked and one of them met such a head, and then in the
+same order, the join's first, because under the copies the loop holding those arms is written once
+per path the cascade ahead of it copies (18 times in `sub_080222AC`, where the join writes it once).
+The structurer lives in
 [`packages/core/src/structure/`](../packages/core/src/structure) — the most intricate code in the
 project, because destroying SSA (assigning merge values back to named C variables without
 changing meaning) is where several audit rounds found the subtlest bugs.
@@ -328,7 +342,8 @@ structuring of the whole function under the reading it was asked (`structure()` 
 early returns, or the return-tail copies under `copyReturnTails`) declines, its `for`, outward and
 loop tail-copy reruns included, and only in a switch none of them spelled goto-free (`JumpRanking`
 in `structure.ts`). The whole-function readings are chosen above that ladder, not inside it
-(`structureReturnTailReading` in `pipeline.ts`). Where the target declares the join its default
+(`structureReturnTailReading` in `pipeline.ts`, and, behind the join and the copies, their reruns
+with the arm's own head asked, `HeadsRanking`). Where the target declares the join its default
 (`joinPastReturnsByDefault` in `target.ts`: mwcc_242_81 and mwcc_233_163n), a function whose join needs
 the goto publishes it even where the copies would lift without one, unless the copies are the
 shorter, the layout shows a cross-jumped return tail, or cse left a return unfolded (THE COPIES,

@@ -18,10 +18,11 @@ import { parse } from '../src/ir/parse';
 import { T } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
 import { type SFn, type Stmt, type SwitchCase, caseGotoViolation, reachesEnd } from '../src/l3/ast';
-import { readabilityRewrites } from '../src/pipeline';
+import { decompile, readabilityRewrites } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
 import { compareScored, gotoCount } from '../src/rank';
 import { structure as structureJoined } from '../src/structure/structure';
+import { ARMV4T_AGBCC } from '../src/target';
 import { irAgreement, testCopies, withCopies } from './helpers';
 
 // The tests declared `testCopies` pin the recovery the return-tail copies reach (`/ret-copy`,
@@ -511,5 +512,157 @@ describe('the ranking tie-break', () => {
     expect(gotoCount(copies.source)).toBe(0);
     type C = Parameters<typeof compareScored>[0];
     expect(compareScored(withGoto as unknown as C, copies as unknown as C)).toBeGreaterThan(0);
+  });
+});
+
+// ONE ARM INTO SEVERAL CLOSED SIBLINGS (switch-recover.ts `closedSiblingExit`, the `siblings` rung
+// of structure.ts `CASE_EXIT_RUNGS`): agbcc's cross-jump of `case 0: if (c) { a(); h0(); } else {
+// b(); h1(); } break;` onto `case 1: h0(); break;` and `case 2: h1(); break;` (kl2dct sub_0800BF80).
+// No case-label goto spells an arm entering two cases, and a fall-through reaches one of them: case 0,
+// directly above case 1, keeps its fall-through into it and takes a copy of case 2, and under
+// `/tail-copies` (`copyEveryTailEntrant`) a copy of each.
+const intoTwo = ({ bb2 = '  br ^bb9()' } = {}) => `fn xs {
+^bb0(%0: s32, %1: s32):
+  switch_br %0, ^bb1(), ^bb2(), ^bb3(), ^bb4(), ^bb9() {cases=[0;1;2;3]}
+^bb1():
+  %r1: s32 = call %0 {target="a"}
+  %z1: s32 = const {value=0}
+  %c1: u32 = icmp_slt %1, %z1
+  cond_br %c1, ^bb2(), ^bb3()
+^bb2():
+  %2: s32 = call %0 {target="h0"}
+${bb2}
+^bb3():
+  %3: s32 = call %0 {target="h1"}
+  br ^bb9()
+^bb4():
+  %4: s32 = call %0 {target="d"}
+  br ^bb9()
+^bb9():
+  ret
+}`;
+
+describe('an arm entering two closed siblings takes a copy of each', () => {
+  test('case 0 falls into case 1 and holds case 2 once more, and the program is the IR', () => {
+    const { src, agreement, shipped } = lifted(intoTwo());
+    expect(src).toMatch(
+      /case 0:\n\s*a\(a0\);\n\s*if \(a1 >= 0\) \{\n\s*h1\(a0\);\n\s*break;\n\s*\}\n\s*case 1:\n\s*h0\(a0\);/,
+    );
+    expect(src.match(/h0\(/g)).toHaveLength(1);
+    expect(src.match(/h1\(/g)).toHaveLength(2);
+    judgedAlike(agreement);
+    judgedAlike(shipped);
+  });
+
+  test('under `/tail-copies` case 0 holds both bodies once more, and the program is the IR', () => {
+    const { src, agreement, shipped } = lifted(intoTwo(), { copyEveryTailEntrant: true });
+    expect(src).toMatch(
+      /case 0:\n\s*a\(a0\);\n\s*if \(a1 >= 0\) \{\n\s*h1\(a0\);\n\s*\} else \{\n\s*h0\(a0\);\n\s*\}\n\s*break;/,
+    );
+    expect(src.match(/h0\(/g)).toHaveLength(2);
+    expect(src.match(/h1\(/g)).toHaveLength(2);
+    judgedAlike(agreement);
+    judgedAlike(shipped);
+  });
+
+  test('a sibling that reaches a sibling of its own is not followed, and the arm declines', () => {
+    const fn = parse(intoTwo({ bb2: '  %c2: u32 = icmp_slt %1, %0\n  cond_br %c2, ^bb3(), ^bb9()' }));
+    verify(fn);
+    recoverTypes(fn);
+    expect(() => structure(fn, {})).toThrow(/a case body reaches several sibling cases/);
+  });
+
+  test('unasked, the arm declines as it did', () => {
+    const fn = parse(intoTwo());
+    verify(fn);
+    recoverTypes(fn);
+    expect(() => structure(fn, {}, { exitRungs: false })).toThrow(/a case body reaches several sibling cases/);
+  });
+});
+
+// …AND AT A SWITCH WITH NO MERGE (`copyClosedSiblings`, at the `stop` reading): every case returns on
+// its own, so the switch has no end a `break` reaches, and agbcc's cross-jump sends cases 3 to 6 into
+// the `return 1;` and `return 2;` of cases 1 and 2 (`synthetic:sw_retsib`, pokeemerald's
+// GetNewBerryIdByDifficulty). The row's agbcc listing (`-O2 -mthumb-interwork`).
+const AGBCC_SW_RETSIB = `sw_retsib:
+	push	{r4, lr}
+	lsl	r0, r0, #0x18
+	lsr	r0, r0, #0x18
+	lsl	r1, r1, #0x18
+	lsr	r1, r1, #0x18
+	ldr	r2, .L26
+	ldr	r2, [r2]
+	add	r2, r2, r1
+	ldrb	r4, [r2]
+	mov	r1, #0x7
+	bl	__umodsi3
+	lsl	r0, r0, #0x18
+	lsr	r0, r0, #0x18
+	cmp	r0, #0x6
+	bhi	.L24	@cond_branch
+	lsl	r0, r0, #0x2
+	ldr	r1, .L26+0x4
+	add	r0, r0, r1
+	ldr	r0, [r0]
+	mov	pc, r0
+.L27:
+	.align	2, 0
+.L26:
+	.word	gP
+	.word	.L22
+	.align	2, 0
+	.align	2, 0
+.L22:
+	.word	.L24
+	.word	.L25
+	.word	.L20
+	.word	.L8
+	.word	.L11
+	.word	.L14
+	.word	.L17
+.L8:
+	cmp	r4, #0
+	beq	.L25	@cond_branch
+	b	.L24
+.L11:
+	cmp	r4, #0
+	beq	.L20	@cond_branch
+	b	.L24
+.L14:
+	cmp	r4, #0x2
+	beq	.L25	@cond_branch
+	b	.L20
+.L17:
+	cmp	r4, #0
+	bne	.L18	@cond_branch
+.L25:
+	mov	r0, #0x1
+	b	.L23
+.L18:
+	cmp	r4, #0x1
+	beq	.L20	@cond_branch
+.L24:
+	mov	r0, #0x0
+	b	.L23
+.L20:
+	mov	r0, #0x2
+.L23:
+	pop	{r4}
+	pop	{r1}
+	bx	r1`;
+const retsibOpts = { prototypes: { sw_retsib: { params: ['u8', 'u8'], returns: 'u8' } } };
+
+describe('an arm entering two returning siblings of a switch with no merge takes a copy of each', () => {
+  test('agbcc: every case returns its own constant, the arms entering two with a copy of each but a fall-through', () => {
+    const src = decompile('sw_retsib', AGBCC_SW_RETSIB, ARMV4T_AGBCC, retsibOpts).source;
+    expect(src).not.toMatch(/goto|ASMLIFT_ERROR/);
+    expect(src).toMatch(/case 1:\n\s*return 1;/);
+    expect(src).toMatch(/case 2:\n\s*return 2;/);
+    // case 6's last block is laid out right above case 0's `return 0;`, and falls into it
+    // (`closedSiblingExit`); its two other paths take copies of case 1 and case 2
+    expect(src).toMatch(/case 6:\n\s*if \(v0 == 0\) return 1;\n\s*if \(v0 == 1\) return 2;\n\s*case 0:\n\s*return 0;/);
+    expect(src.match(/return 0;/g)).toHaveLength(4);
+    expect(src.match(/return 1;/g)).toHaveLength(4);
+    expect(src.match(/return 2;/g)).toHaveLength(4);
   });
 });

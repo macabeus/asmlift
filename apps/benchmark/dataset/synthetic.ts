@@ -16705,6 +16705,142 @@ export const SYNTHETIC: SynthSpec[] = [
       d: { params: 1, returnsVoid: true },
     },
   },
+  // dw_xjret_arms (kl2dct sub_080222AC): a do-while in a case whose three early-return arms end in the
+  // same `m(36); g(gC[i], gD[i], 2, n); return;`, which agbcc cross-jumps into one block, and that
+  // block into the `g(..., 2, n); return;` sibling cases end in. No exit is a `break` target for both
+  // it and the loop's bottom test, so neither `while (1)` nor the do-while reads the loop, until every
+  // arm entering the block owns it (exit-arms.ts `earlyReturnArm`, THE ARM'S OWN HEAD), asked last
+  // (structure.ts `HeadsRanking`). The other four toolchains keep the arms apart, and are controls.
+  {
+    sym: 'dw_xjret_arms',
+    src:
+      'extern s32 gX, gN;\n' +
+      'extern u8 gT[];\n' +
+      'extern s16 gU[];\n' +
+      'extern u16 gC[], gD[];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      'void g(s32 a, s32 b, s32 c, s32 d);\n' +
+      'void dw_xjret_arms(s32 n)\n' +
+      '{\n' +
+      '    s32 i;\n' +
+      '    switch (gX) {\n' +
+      '    case 1: k(1); g(gC[0], gD[0], 2, n); return;\n' +
+      '    case 2: k(2); g(gC[1], gD[1], 2, n); return;\n' +
+      '    case 3:\n' +
+      '        i = 0;\n' +
+      '        do {\n' +
+      '            if (gT[i] == 1) {\n' +
+      '                if (gU[i] > 3) { m(36); g(gC[i], gD[i], 2, n); return; }\n' +
+      '            } else if (gT[i] == 2) {\n' +
+      '                if (gU[i] < -3) { m(36); g(gC[i], gD[i], 2, n); return; }\n' +
+      '            } else if (gT[i] == 5) {\n' +
+      '                if (gU[i] == 0) { m(36); g(gC[i], gD[i], 2, n); return; }\n' +
+      '            }\n' +
+      '            k(i);\n' +
+      '            i++;\n' +
+      '        } while (i < gN);\n' +
+      '        k(99);\n' +
+      '        break;\n' +
+      '    case 4: k(4); break;\n' +
+      '    case 5: k(5); g(gC[5], gD[5], 2, n); return;\n' +
+      '    case 6: k(6); break;\n' +
+      '    }\n' +
+      '    k(100);\n' +
+      '}',
+    features: ['dense', 'switch-arms', 'break'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx:
+      'extern s32 gX, gN;\n' +
+      'extern u8 gT[];\n' +
+      'extern s16 gU[];\n' +
+      'extern u16 gC[], gD[];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      'void g(s32 a, s32 b, s32 c, s32 d);\n' +
+      'void dw_xjret_arms(s32 n);',
+    proto: {
+      dw_xjret_arms: { params: 1, returnsVoid: true },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      g: { params: 4, returnsVoid: true },
+    },
+  },
+  // sw_xjsib2 (kl2dct sub_0800BF80): case 7 ends each of its two paths the way case 1 and case 3 do,
+  // and agbcc's cross-jump sends both paths into those bodies. One arm entering two siblings has no
+  // case-label goto spelling and falls into one of them at most: it keeps its fall-through into the
+  // closed `break` arm laid out right after it and takes a copy of the other, or under
+  // `/tail-copies` a copy of each (switch-recover.ts `closedSiblingExit`, the `siblings` rung of
+  // structure.ts `CASE_EXIT_RUNGS`). The other four toolchains keep the calls in place, and are
+  // controls.
+  {
+    sym: 'sw_xjsib2',
+    src:
+      'extern u8 gK[], gS[];\n' +
+      'extern s32 gN;\n' +
+      'void h(s32 i, s32 s);\n' +
+      'void g1(s32 x);\n' +
+      'void g2(s32 x);\n' +
+      'void sw_xjsib2(void)\n' +
+      '{\n' +
+      '    s32 i;\n' +
+      '    for (i = 0; i < gN; i++) {\n' +
+      '        switch (gK[i]) {\n' +
+      '        case 1: case 2: h(i, 0); break;\n' +
+      '        case 3: case 5: h(i, 1); break;\n' +
+      '        case 7:\n' +
+      '            if (gS[i] == 3) { g1(i); h(i, 0); }\n' +
+      '            else { g2(i); h(i, 1); }\n' +
+      '            break;\n' +
+      '        case 11: h(i, 2); break;\n' +
+      '        case 12: h(i, 3); break;\n' +
+      '        }\n' +
+      '    }\n' +
+      '}',
+    features: ['dense', 'switch-arms', 'break'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx:
+      'extern u8 gK[], gS[];\n' +
+      'extern s32 gN;\n' +
+      'void h(s32 i, s32 s);\n' +
+      'void g1(s32 x);\n' +
+      'void g2(s32 x);\n' +
+      'void sw_xjsib2(void);',
+    proto: {
+      sw_xjsib2: { returnsVoid: true },
+      h: { params: 2, returnsVoid: true },
+      g1: { params: 1, returnsVoid: true },
+      g2: { params: 1, returnsVoid: true },
+    },
+  },
+  // sw_retsib (pokeemerald GetNewBerryIdByDifficulty): every case returns on its own, so the switch
+  // has no merge, and agbcc's cross-jump sends cases 3 to 6 into the `return 1;` and `return 2;` of
+  // cases 1 and 2. Each arm entering two of them takes a copy of each at the `stop` reading
+  // (switch-recover.ts `copyClosedSiblings`). The other toolchains keep the returns apart, and are
+  // controls.
+  {
+    sym: 'sw_retsib',
+    src:
+      'extern u8 *gP;\n' +
+      'u8 sw_retsib(u8 d, u8 c)\n' +
+      '{\n' +
+      '    u8 x = gP[c];\n' +
+      '    switch (d % 7) {\n' +
+      '    default: return 0;\n' +
+      '    case 0: return 0;\n' +
+      '    case 1: return 1;\n' +
+      '    case 2: return 2;\n' +
+      '    case 3: if (x == 0) return 1; else return 0;\n' +
+      '    case 4: if (x == 0) return 2; else return 0;\n' +
+      '    case 5: if (x == 2) return 1; else return 2;\n' +
+      '    case 6: if (x == 0) return 1; else if (x == 1) return 2; else return 0;\n' +
+      '    }\n' +
+      '}',
+    features: ['dense', 'switch-arms'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx: 'extern u8 *gP;\nu8 sw_retsib(u8 d, u8 c);',
+    proto: { sw_retsib: { params: ['u8', 'u8'], returns: 'u8' } },
+  },
   {
     sym: 'cmn_store',
     src:
@@ -18146,7 +18282,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //      is the only spelling of the source. sw_gotocase_inner is the control: the goto leaves an
   //      arm of a switch nested in case 1 for a case of the outer switch, which the narrow goto
   //      may never spell (a goto names a case of the switch it sits in), so the row must decline or
-  //      lift goto-free.
+  //      lift goto-free. Its mwcc cell compiles to a comparison tree that leaves the second loop's
+  //      `lis r3,gA@ha` in r3 into the epilogue, a half the void return does not read
+  //      (frontend/ppc.ts `returnOperands`).
   {
     sym: 'sw_gotocase3',
     src:
@@ -18266,7 +18404,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '        k(gA[i]);\n' +
       '}',
     features: ['branch', 'switch-arms'],
-    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
     ctx:
       'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
       'extern struct E gE[];\n' +
@@ -18282,9 +18420,11 @@ export const SYNTHETIC: SynthSpec[] = [
   //      count case 1 rewrites ahead of the latch. Those arms are reached from the latch's exit only
   //      round the outer loop and back through the inner header, which binds the count afresh, so
   //      the break rule's exit region stops at the loop (structure.ts `exitRegionOf`); walked past
-  //      the header, it refuses that latch and agbcc declines. Only agbcc and IDO: the other three
-  //      decline in their frontends first (the GCC 2.7.2 pair's `jr v0` dispatch, mwcc's `lis` high
-  //      half reaching a merge), and IDO declines on its case body reaching several sibling cases.
+  //      the header, it refuses that latch and agbcc declines. mwcc leaves the loop's `lis` half in
+  //      r3 into the epilogue, which the void return does not read (frontend/ppc.ts
+  //      `returnOperands`), and the GCC 2.7.2 pair forms the table base in the dispatch's own
+  //      block, `lui;addiu` (frontend/mips.ts `formedTable`). IDO heads the do-while with the
+  //      jump-table dispatch itself, its exits leaving from the switch, which no loop reading takes.
   {
     sym: 'dw_outerlatch_arms',
     src:
@@ -18321,7 +18461,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '    }\n' +
       '}',
     features: ['branch', 'switch-arms', 'break'],
-    toolchains: ['agbcc', 'ido7.1'],
+    toolchains: ['agbcc', 'ido7.1', 'mwcc_242_81', 'gcc2.7.2', 'gcc2.7.2kmc'],
     ctx:
       'extern void g(s32 x);\n' +
       'extern void h(s32 i, s32 x, s32 y, s32 z);\n' +

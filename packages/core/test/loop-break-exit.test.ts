@@ -983,7 +983,7 @@ const CODE_ARM_UNDER_IF = `fn codearmif {
 }`;
 
 test('a branch above a code-running `break` arm in a tested loop joins inside the body', () => {
-  const { src, agreement, shipped } = judged(CODE_ARM_UNDER_IF, { caseExitFlags: false });
+  const { src, agreement, shipped } = judged(CODE_ARM_UNDER_IF, { exitRungs: false });
   expect(src).toContain('for (v0 = 0; v0 < a0; v0 = v0 + 1) {');
   expect(src).toMatch(/if \(d\(v0\)\) \{\n {16}x2\(x\(v0\)\);\n {16}break;\n {12}\}\n {8}\}\n {8}y\(v0\);/);
   expect(src.match(/y\(/g)).toHaveLength(1);

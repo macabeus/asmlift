@@ -378,6 +378,78 @@ test('a load displacement that is no paired %lo of the base declines', () => {
   }
 });
 
+// THE BASE THE DISPATCH'S BLOCK FORMS WHOLE (frontend/mips.ts `formedTable`). GCC 2.7.2 and KMC
+// spell a dispatch whose base no preheader holds as `lui t0,%hi(T) ; addiu t0,t0,%lo(T) ; addu
+// v0,v0,t0 ; lw v0,0(v0) ; jr v0` (`synthetic:dw_outerlatch_arms:gcc2.7.2`): the `%lo` rides on the
+// `addiu`, and the load carries none.
+const formedTableData = (at: number, lo: string, loadLo = false): AsmData => {
+  const bytes = new Uint8Array(at + 8);
+  bytes.set([0, 0, 0, 0x2c, 0, 0, 0, 0x24], 0);
+  bytes.set([0, 0, 0, 0x24, 0, 0, 0, 0x2c], at);
+  return {
+    sections: new Map([['.rodata', bytes]]),
+    relocs: [
+      { section: '.text', offset: 0xc, type: 'R_MIPS_HI16', sym: '.rodata', addend: 0 },
+      { section: '.text', offset: 0x10, type: 'R_MIPS_LO16', sym: lo, addend: 0 },
+      ...(loadLo ? [{ section: '.text', offset: 0x18, type: 'R_MIPS_LO16', sym: '.rodata', addend: 0 }] : []),
+      ...[0, 4, at, at + 4].map((offset) => ({
+        section: '.rodata',
+        offset,
+        type: 'R_MIPS_32',
+        sym: '.text',
+        addend: 0,
+      })),
+    ],
+    symbols: new Map([
+      ['other', { section: '.rodata', value: 0, size: 8, index: 1 }],
+      ['.text', { section: '.text', value: 0, size: 0, index: 2 }],
+    ]),
+    symbolCount: 2,
+    bigEndian: true,
+  };
+};
+const formed = (hi: string, lo: string) =>
+  obj(
+    ' 0:\tsltiu\tat,a0,0x2',
+    ' 4:\tbeqz\tat,34 <f+0x34>',
+    ' 8:\tsll\tv0,a0,0x2',
+    ` c:\tlui\tt0,${hi}`,
+    `10:\taddiu\tt0,t0,${lo}`,
+    '14:\taddu\tv0,v0,t0',
+    '18:\tlw\tv0,0(v0)',
+    '1c:\tjr\tv0',
+    '20:\tnop',
+    '24:\tjr\tra',
+    '28:\tli\tv0,5',
+    '2c:\tjr\tra',
+    '30:\tli\tv0,9',
+    '34:\tjr\tra',
+    '38:\tli\tv0,-1',
+  );
+
+test("a table base the dispatch's block forms with its own lui and addiu is read at both halves", () => {
+  for (const [hi, lo, at] of [
+    ['0x0', '32', 32],
+    ['0x1', '0', 0x10000],
+    ['0x1', '-24576', 0xa000],
+  ] as const) {
+    const out = decompile('f', formed(hi, lo), MIPS_GCC, { asmData: formedTableData(at, '.rodata') }).source;
+    expect(out).toContain('switch (a0)');
+    expect(out).toMatch(/case 0:\s*return 5;/);
+    expect(out).toMatch(/case 1:\s*return 9;/);
+  }
+});
+
+test('a formed table base whose halves name two symbols, or whose load adds a %lo again, declines', () => {
+  const declines = /indirect jump 'jr v0'/;
+  expect(() => decompile('f', formed('0x0', '32'), MIPS_GCC, { asmData: formedTableData(32, 'other') })).toThrow(
+    declines,
+  );
+  expect(() =>
+    decompile('f', formed('0x0', '32'), MIPS_GCC, { asmData: formedTableData(32, '.rodata', true) }),
+  ).toThrow(declines);
+});
+
 // IDO `-KPIC` forms the base off the GOT: `lw at,%got(T)(gp)` (GOT16, its immediate the high
 // half) and the load's own LO16, then adds gp to the gp-relative entry. The first table of a unit is
 // at displacement 0; a later one folds its `%lo` into the load (`lw t6,8(at)`), and one past 32 KiB
