@@ -5790,7 +5790,7 @@ function structureRanked(
         const readExits = (keepSibling: boolean, onSiblingKept?: () => void) => {
           const copiedInto = new Set<Block>();
           const sideways = (s: Block) => forwardToMerge(s, b, at, siblings);
-          const several = { faller: keepSibling, layoutIndex, onFallerKept: onSiblingKept, sidewaysEnds: sideways };
+          const several = { faller: keepSibling, layoutIndex, onFallerKept: onSiblingKept };
           const copyOver = (from: ReadonlyMap<Block, ArmExit>, onCopied?: (to: Block) => void) =>
             copyClosedSiblings(
               from,

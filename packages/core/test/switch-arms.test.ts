@@ -828,7 +828,7 @@ test('copySharedFallTargets copies a region-less sibling only where `sidewaysEnd
   expect(kept).toBe(1);
 });
 
-test('copyClosedSiblings holds every sibling to the one-sibling test, and the arm laid out above one keeps it', () => {
+test('copyClosedSiblings copies closed siblings only, and the arm laid out above one keeps it', () => {
   const blk = (): Block => ({ params: [], ops: [mkOp('br')] });
   const [e, s1, s2, x, f] = [blk(), blk(), blk(), blk(), blk()];
   const layout = [e, s1, s2, x, f];
@@ -865,16 +865,11 @@ test('copyClosedSiblings holds every sibling to the one-sibling test, and the ar
   // nor where the sibling below the arm is not one it reaches
   const apart = (b: Block) => [e, x, s1, s2].indexOf(b);
   expect(copyClosedSiblings(closed, asked, { faller: true, layoutIndex: apart }).get(e)?.kind).toBe('break');
-  // A sibling that leaves sideways only forward is copied as `copySharedFallTargets` copies it: the
-  // entrant steps where it steps. Refused by `sidewaysEnds`, or with none, the entrant stays.
+  // A sibling that leaves sideways is never copied here, although `copySharedFallTargets` copies
+  // one: the entrant stays, kept fall-through or not.
   const sideways = new Map(closed).set(s2, { kind: 'break', escapedTo: new Set([x]) });
-  expect(copyClosedSiblings(sideways, asked, reading).get(e)).toBe(entrant);
-  expect(copyClosedSiblings(sideways, asked, { ...reading, sidewaysEnds: () => false }).get(e)).toBe(entrant);
   for (const faller of [false, true]) {
-    expect(copyClosedSiblings(sideways, asked, { ...reading, faller, sidewaysEnds: (b) => b === x }).get(e)).toEqual({
-      kind: 'break',
-      escapedTo: new Set([x]),
-    });
+    expect(copyClosedSiblings(sideways, asked, { ...reading, faller }).get(e)).toBe(entrant);
   }
 });
 
