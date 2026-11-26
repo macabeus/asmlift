@@ -294,7 +294,8 @@ export const NO_COPIES: ArmCopies = { offExitPath: false, onExitPath: false, cyc
 // on every toolchain, and the rows name the cross-jump only as its commonest source:
 //   - `bypassTail` (`offExitPath`): an effectful block the loop's own exit path does not run, which a
 //     path from outside the loop enters (not only the loop's arms: a tail only they enter is a
-//     `break` target, written once after the loop), is admitted, the arm's own head included, when
+//     `break` target, written once after the loop, save at the heads rung, `HeadsRanking`, where
+//     `armsOnly` owns its head), is admitted, the arm's own head included, when
 //     no rule of `BYPASS_TAIL_GATES` refuses it. A path that took the arm reaches it only through
 //     the arm's copy, which ends in its `return`; a path from outside never ran the arm, and the exit
 //     never reaches it. It is not owned: a path that did not take the arm runs it too
@@ -353,31 +354,25 @@ export function earlyReturnArm(
   const offExitPath = offExitPathOf(exit, dom);
   const entryOwned = dom.get(to)!.has(from) && to !== exit && offExitPath(to);
   // the duplication policy's admission: the loop's own exit path does not run it, and no cycle holds
-  // it — and, for a tail that returns, only the loop's exit arms enter it (`armsOnly`, below). Never
-  // the arm's own head: an edge straight from the body into a block others enter too is a `break` to
-  // it, which `while (1)` writes once, after the loop — unless the exit path reaches it after a block
-  // of its own, which no `break` can skip (`exitTail`).
+  // it — and, for a tail that returns, only the loop's exit arms enter it (`armsOnly`, below). Not
+  // the arm's own head, save at the heads rung (THE ARM'S OWN HEAD, below): an edge straight from the
+  // body into a block others enter too is a `break` to it, which `while (1)` writes once, after the
+  // loop — unless the exit path reaches it after a block of its own, which no `break` can skip
+  // (`exitTail`).
   const armOfBody = onlyFromBody(preds, body, exit);
   const armsOnly = (bb: Block) =>
-    bb !== to && bb !== exit && armOfBody(bb) && offExitPath(bb) && !reachFrom(bb).has(bb);
+    bb !== exit && armOfBody(bb) && offExitPath(bb) && !reachFrom(bb).has(bb) && (bb !== to || headAsked(bb));
   // THE ARM'S OWN HEAD, ENTERED BY SEVERAL ARMS ONLY, at the rung of last resort (`armHead`,
   // structure.ts `HeadsRanking`). agbcc cross-jumps the `m(36); g(..); return;`
   // three arms of a loop end with into one block, which reaches the function's shared return, so no
   // single exit is a `break` target for both it and the loop's other exit, and neither `while (1)`
   // nor the bottom test reads the loop (kl2dct sub_080222AC). Owned by every arm entering it, as a
-  // block past the head is, under the same counts: every predecessor in the body, off the exit
-  // path, and no cycle through it; each arm then writes its own copy, on a path exclusive of the
-  // others. Unasked, it only notes the head it would own.
-  const headOwned = (bb: Block): boolean => {
-    if (
-      armHead === undefined ||
-      bb !== to ||
-      bb === exit ||
-      (preds.get(bb) ?? []).length < 2 ||
-      !armOfBody(bb) ||
-      !offExitPath(bb) ||
-      reachFrom(bb).has(bb)
-    ) {
+  // block past the head is, under the same counts (`armsOnly`): every predecessor in the body, off
+  // the exit path, and no cycle through it; each arm then writes its own copy, on a path exclusive
+  // of the others. A head with an effect only, and one with several predecessors, since a head the
+  // arm alone enters is owned already (`entryOwned`). Unasked, it only notes the head it would own.
+  const headAsked = (bb: Block): boolean => {
+    if (armHead === undefined || !bb.ops.some(effectful)) {
       return false;
     }
     if (!armHead.asked) {
@@ -435,7 +430,7 @@ export function earlyReturnArm(
     if (body.has(bb)) {
       return null;
     } // re-enters the loop → not an exit
-    if ((entryOwned && dom.get(bb)!.has(to)) || armsOnly(bb) || (bb.ops.some(effectful) && headOwned(bb))) {
+    if ((entryOwned && dom.get(bb)!.has(to)) || armsOnly(bb)) {
       owned.add(bb);
     } else if (bb.ops.some(effectful) && !exitTail(bb) && !bypassTail(bb)) {
       return null;
