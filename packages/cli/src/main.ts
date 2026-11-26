@@ -16,7 +16,7 @@ import { pascalBackend } from '@asmlift/core/backend/pascal';
 import { errorsFirst } from '@asmlift/core/compiler-diagnostics';
 import { detectName } from '@asmlift/core/detect';
 import { type AsmData, parseAsmData } from '@asmlift/core/frontend/asmdata';
-import type { CalleeBodies } from '@asmlift/core/frontend/callee-body';
+import { type CalleeBodies, type CalleeBody, definesLabel } from '@asmlift/core/frontend/callee-body';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { polishFactsOf, polished } from '@asmlift/core/l3/polish/index';
 import { type CalleeBodyFact, type OnGap, calleeBodyNotesOf, decompile, ownArityNotesOf } from '@asmlift/core/pipeline';
@@ -40,7 +40,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { readAsmIncludes } from './asm-includes';
-import { guessedArityNote } from './callees';
+import { guessedArityCallees, guessedArityNote } from './callees';
 import { type CommandCompilers, compilersFromCommand } from './compile-command';
 import { type AsmliftToolConfig, type UnitCompiler, asmliftBlock, resolveTarget } from './config';
 import { declaredBlock, indentedDeclarations } from './declare';
@@ -806,12 +806,15 @@ export async function runCli(
   let calleeBodyFiles: ReadonlyMap<string, string> | undefined;
   if (toolCfg?.elf) {
     const elfPath = resolve(configDir!, toolCfg.elf);
-    const outside = elfBodyCallees(asm, name, unitTarget, prototypes, symbols, asmData?.relocs, moduleFlag);
-    if (outside.length > 0) {
+    const bodies: Record<string, CalleeBody> = {};
+    const files = new Map<string, string>();
+    // the bodies of `callees` the ELF gives, and those its Thumb ranges have in the project's
+    // assembly, into `bodies`; the names read off the project's assembly
+    const readBodiesOf = async (callees: readonly string[]): Promise<string[]> => {
       const read = calleeBodiesFromElf(
         elfPath,
         readFileSync(elfPath),
-        outside,
+        callees,
         unitTarget,
         objInput?.disasmRange ??
           ((elf, t, section, start, stop) => disasmRange(elf, t, section, start, stop, toolCfg?.objdump)),
@@ -824,17 +827,48 @@ export async function runCli(
       const thumb = Object.keys(read.bodies).filter((c) => read.bodies[c].kind === 'thumb');
       const image =
         thumb.length > 0 && toolCfg.compiler !== undefined ? readElfImage(readFileSync(elfPath)) : undefined;
-      if (image !== undefined) {
-        const project = await calleeBodiesFromProjectAsm(
-          configDir!,
-          image,
-          thumb,
-          objInput?.assembleBody ?? assembleWith(),
-        );
-        Object.assign(read.bodies, project.bodies);
-        calleeBodyFiles = new Map(Object.entries(project.files));
+      Object.assign(bodies, read.bodies);
+      if (image === undefined) {
+        return [];
       }
-      calleeBodies = Object.keys(read.bodies).length === 0 ? undefined : read.bodies;
+      const project = await calleeBodiesFromProjectAsm(
+        configDir!,
+        image,
+        thumb,
+        objInput?.assembleBody ?? assembleWith(),
+      );
+      Object.assign(bodies, project.bodies);
+      Object.entries(project.files).forEach(([c, f]) => files.set(c, f));
+      return Object.keys(project.bodies);
+    };
+    const outside = elfBodyCallees(asm, name, unitTarget, prototypes, symbols, asmData?.relocs, moduleFlag);
+    if (outside.length > 0) {
+      // A BODY READ OFF THE PROJECT'S ASSEMBLY LIFTS READING ITS OWN CALLEES' BODIES (core
+      // frontend/callee-body.ts `calleeBodyReads`, at every depth): a 9-word call in it lifts only
+      // where its callee's body sizes the stack block. So the callees each such body guesses, that
+      // neither the input nor a body asked already defines, are read too, by the same two readers,
+      // and theirs in turn, until a round reads no new body off the project's assembly. Each name is
+      // asked once. Only those bodies: no other listing has its callees read, because the benchmark
+      // harness hands a row the ELF's bodies its own freeze holds (apps/benchmark
+      // cases/callee-bodies.ts), and the project's assembly is a reading it never freezes. KNOWN GAP:
+      // an objdump listing's own callees (MIPS, PowerPC) are read only where the input or a body
+      // already read holds them.
+      const asked = new Set<string>(outside);
+      let fresh = await readBodiesOf(outside);
+      while (fresh.length > 0) {
+        const next = [
+          ...new Set(
+            fresh.flatMap((c) => {
+              const body = bodies[c];
+              return body.kind === 'listing' ? guessedArityCallees(body.text, c, unitTarget, prototypes, symbols) : [];
+            }),
+          ),
+        ].filter((c) => c !== name && !asked.has(c) && !definesLabel(asm, c) && !Object.hasOwn(bodies, c));
+        next.forEach((c) => asked.add(c));
+        fresh = next.length === 0 ? [] : await readBodiesOf(next);
+      }
+      calleeBodies = Object.keys(bodies).length === 0 ? undefined : bodies;
+      calleeBodyFiles = files.size === 0 ? undefined : files;
     }
   }
   // A body is named in the note only where the lift ASKED it (core `DecompileResult.calleeBodiesAsked`):
@@ -843,15 +877,19 @@ export async function runCli(
   // …and a callee the lift sized off its own body's stack loads (`DecompileResult.calleeStackSized`)
   // is no guess, and is named as what sized it; one whose body ruled out a hidden struct-return
   // pointer, or was passed an earlier result its body reads (`DecompileResult.calleeBodyFacts`), is
-  // named with what its body decided
+  // named with what its body decided; and a body read under one of those, at any depth, that answered
+  // the lift of that body (`DecompileResult.calleeBodiesBelow`) decided what it answered, and is named
+  // as read there
   const protoNote = ({
     calleeBodiesAsked: asked,
     calleeBodyFacts: facts,
     calleeStackSized: sized,
+    calleeBodiesBelow: below,
   }: {
     calleeBodiesAsked: Readonly<Record<string, number>>;
     calleeBodyFacts: Readonly<Record<string, readonly CalleeBodyFact[]>>;
     calleeStackSized: Readonly<Record<string, number>>;
+    calleeBodiesBelow: readonly string[];
   }) =>
     guessedArityNote(
       asm,
@@ -864,6 +902,7 @@ export async function runCli(
       new Map(Object.entries(sized)),
       calleeBodyFiles,
       new Map(Object.entries(facts)),
+      below,
     );
   // a note that names its own tag (`[own-return]`) carries it; every other one is the arity bound's
   const ownArityNote = (notes: readonly string[]) =>

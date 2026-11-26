@@ -395,12 +395,41 @@ test('dispatch code that is not a register computation, or that disturbs the dis
   // reads the table pointer the unlifted idiom loaded into r1
   expect(refused('\tadd\tr2, r1, #0\n')).toThrow(jump);
   // the decline names the reason the recognised table was refused, not "jump tables unsupported"
-  expect(refused('\tstr\tr3, [r2]\n')).toThrow(/'str r3, \[r2\]' is not a register computation or a load/);
+  expect(refused('\tstr\tr3, [r2]\n')).toThrow(
+    /'str r3, \[r2\]' is not a register computation, a load or a store to a frame word/,
+  );
   expect(refused('\tadc\tr2, r3\n')).toThrow(/'adc r2, r3' is not a register computation/);
   expect(refused('\tadd\tr2, r1, #0\n')).toThrow(
     /'add r2, r1, #0' reads 'r1', which the unlifted dispatch idiom wrote/,
   );
   expect(refused('\tadd\tr0, r3, #0x5\n')).toThrow(/writes the register the dispatch needs, 'r0'/);
+});
+
+// Reload gives a PRE value a stack home where too many are live across the dispatch: agbcc -O2
+// then stores it there before the `mov pc` (`str r1, [sp]` in the jt_pre_spill row, kleod's
+// EntityCreate plus one line: `str r1, [sp, #0x2c]`). The case that reloads it reads what the dispatch computed.
+const withSpill = (extra: string) =>
+  'f:\n\tsub\tsp, #0x4\n\tcmp\tr0, #0x1\n\tbhi\t.Ldef\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .Lp\n\tadd\tr0, r0, r1\n' +
+  `\tldr\tr0, [r0]\n${extra}\tmov\tpc, r0\n.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n\t.word\t.Lc1\n` +
+  '.Lc0:\n\tldr\tr0, [sp]\n\tadd\tsp, #0x4\n\tbx\tlr\n.Lc1:\n\tmov\tr0, #11\n\tadd\tsp, #0x4\n\tbx\tlr\n' +
+  '.Ldef:\n\tmov\tr0, r2\n\tadd\tsp, #0x4\n\tbx\tlr\n';
+
+test("a PRE value's stack-home store in the dispatch is lifted as the frame word's store", () => {
+  const out = decompile('f', withSpill('\tsub\tr1, r3, #0x5\n\tstr\tr1, [sp]\n'), ARMV4T_AGBCC).source;
+  expect(out).toMatch(/case 0:\s*\n\s*return a3 - 5;/);
+  expect(out).toMatch(/else \{\s*\n\s*return a2;/);
+});
+
+test('a store in the dispatch other than a word store of a computed register to a frame word DECLINES', () => {
+  const refused = (extra: string) => () => decompile('f', withSpill(extra), ARMV4T_AGBCC);
+  const notHome = /is not a register computation, a load or a store to a frame word/;
+  expect(refused('\tsub\tr1, r3, #0x5\n\tstrb\tr1, [sp]\n')).toThrow(notHome); // a byte store
+  expect(refused('\tsub\tr1, r3, #0x5\n\tstrh\tr1, [sp]\n')).toThrow(notHome); // a halfword store
+  expect(refused('\tsub\tr1, r3, #0x5\n\tstr\tr1, [r2]\n')).toThrow(notHome); // another base
+  expect(refused('\tsub\tr1, r3, #0x5\n\tstr\tr1, [sp, r2]\n')).toThrow(notHome); // a register offset
+  // the target and the table pointer the unlifted idiom loaded: the value from before the dispatch
+  expect(refused('\tstr\tr0, [sp]\n')).toThrow(/'str r0, \[sp\]' reads 'r0', which the unlifted dispatch idiom wrote/);
+  expect(refused('\tstr\tr1, [sp]\n')).toThrow(/'str r1, \[sp\]' reads 'r1', which the unlifted dispatch idiom wrote/);
 });
 
 testCopies('a case may fall into the default when the dispatch code writes what the default reads', () => {

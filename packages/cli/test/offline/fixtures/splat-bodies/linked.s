@@ -154,6 +154,17 @@ sel:
 .Lp_sel:
 	.4byte	gp
 	.size	sel, .-sel
+	.align	2, 0
+	.globl	fw
+	.type	fw, %function
+	.thumb
+	.thumb_func
+fw:
+	push	{lr}
+	bl	rd1
+	pop	{r0}
+	bx	r0
+	.size	fw, .-fw
 	.data
 	.globl	gp
 gp:	.4byte	0

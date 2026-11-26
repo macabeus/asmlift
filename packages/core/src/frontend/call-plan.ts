@@ -989,13 +989,15 @@ export function callDeclarations(
     // (frontend/callee-body.ts): at most `bodyWords()` argument words. It answers only a refusal
     // about registers at or past it — the gap rule's (`fallbackArgc`'s `bound`) and the dispatch
     // pass-through gate's — since whether those are arguments changes nothing the callee computes.
-    // It never caps the count: it bounds what the callee READS, and a source call passes more
-    // whenever a parameter goes unused or a K&R call hands extra arguments, so a register the caller
+    // It never caps an emitted call's count: it bounds what the callee READS, and a source call
+    // passes more whenever a parameter goes unused or a K&R call hands extra arguments, so a register the caller
     // set up for the call stays an argument (`tick(5)` to a body that reads none, `rd1(a, b, 7)` to
     // one that reads r0, whose 7 also proves r0 is the caller's own a passed on). Asked lazily, as a
     // refusal would fire, so a call no gate questions lifts no body. Only a callee whose entry
     // states no parameter list is asked: a list nothing here can size, or a variadic one, still
-    // states parameters the call must be handed (`refuseShortOfDeclared`).
+    // states parameters the call must be handed (`refuseShortOfDeclared`). The one count it caps is
+    // a call inside a BODY lift that is taken at every incoming register (`entryWords` below): there
+    // the count is no call the output spells but an upper bound on what that body reads.
     const stated = callee === undefined ? undefined : known(prototypes, callee);
     const unstated = callee !== undefined && p.widths === null && asksCalleeBody(stated);
     let bodyMemo: { words: number | undefined } | undefined;
@@ -1099,10 +1101,18 @@ export function callDeclarations(
     // A register a call destroyed on every path holds nothing of this function's arguments, so a
     // read of it could add nothing to what the body reads of them, and it is not taken: taken, a
     // callee making two calls that nothing declares would refuse its own lift, and lose its bound.
-    const entryWords =
+    // Nor is a register at or past what the call's own callee's body reads (`bodyWords`, handed to a
+    // body lift by the readers of the lift above it: frontend/callee-body.ts `calleeBodyReads`): that
+    // callee reads none of them, so they add nothing to what this body reads, and the count stays an
+    // upper bound; the call is never emitted. The body is asked only when some register is taken: at
+    // none the min is 0 whatever it says, and the ask would lift that callee's body and, through it,
+    // every body below.
+    const liveWords =
       unstated && entryReadCalls?.has(callee!) === true
         ? target.argRegs.reduce((n, r, k) => (ssa.writtenOnEveryPath(r, bi, () => false) ? n : k + 1), 0)
         : undefined;
+    const entryWords =
+      liveWords === undefined || liveWords === 0 ? liveWords : Math.min(liveWords, bodyWords() ?? Infinity);
     // A STACK BLOCK THE CALLEE'S BODY LICENSED states the arity outright: arguments past the
     // registers are staged only once every register is one, so the call takes all of them and the
     // block, one word each — what a count of that many words in a prototype would state. That holds

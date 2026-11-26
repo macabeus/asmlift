@@ -4710,6 +4710,89 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void nine();\nvoid stkbody_none(int *p, int n);',
     proto: { stkbody_none: { returnsVoid: true }, nine: { returnsVoid: true } },
   },
+  // A CALLEE'S BODY IS LIFTED READING ITS OWN CALLEES' BODIES (core frontend/callee-body.ts
+  // `calleeBodyReads`), at every depth. kl2dct's sub_08037530 calls sub_08037AF8, whose body stages a 9-word call to
+  // EntityCreate: lifted with no body of its own, that call cannot be sized, the body lift fails, and
+  // the caller's guess is left without a bound (the loop counter in r0 then decides nothing).
+  //   stkbody_nest: `mid` stages the five stack words of `nine`, which only `nine`'s body sizes. With
+  //     it, `mid`'s body reads no argument and the call is `mid()`; without, the guess takes the
+  //     pointer the loop left in r0, `v0 = mid(v0)`. Not on mwcc: no stack-argument
+  //     lowering there.
+  //   stkbody_rnest: `mid2` hands its one argument to `one`, a call its body lift takes at every
+  //     register still holding an incoming value (r0-r3), which would bound `mid2` at four words,
+  //     `mid2(*a0, &gv, a2 + 3)`. That call is taken at no more than `one`'s own body reads
+  //     (call-plan.ts `entryWords`), so `mid2` reads one word and the left-over r1 and r2 are
+  //     none of its arguments. Not on mwcc: its synthetic flags inline both callees away.
+  //   stkbody_deep: stkbody_nest's chain one wrapper longer (`top` calls `mid`): `nine`'s body sizes
+  //     `mid`'s call three levels down (read to two levels only, the guess is `v0 = top(v0)`).
+  {
+    sym: 'stkbody_nest',
+    src:
+      'extern int gv[];\n' +
+      'extern int gk[];\n' +
+      'void nine(a, b, c, d, e, f, g, h, i) int a, b, c, d, e, f, g, h, i;\n' +
+      '{ gv[0] = a + e; gv[1] = b + f; gv[2] = c + g; gv[3] = d + h; gv[4] = i; }\n' +
+      'void mid() { nine(gk[0], gk[1], gk[2], gk[3], 0, 1, 0, 0x1f, gk[4]); }\n' +
+      'void stkbody_nest(int n) { int i; for (i = 0; i < n; i++) { gv[8 + i] = i; mid(); } }',
+    features: ['multi-arg', 'array'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'extern int gv[];\nextern int gk[];\nvoid nine();\nvoid mid();\nvoid stkbody_nest(int n);',
+    proto: { stkbody_nest: { returnsVoid: true }, nine: { returnsVoid: true }, mid: { returnsVoid: true } },
+  },
+  {
+    sym: 'stkbody_deep',
+    src:
+      'extern int gv[];\n' +
+      'extern int gk[];\n' +
+      'void nine(a, b, c, d, e, f, g, h, i) int a, b, c, d, e, f, g, h, i;\n' +
+      '{ gv[0] = a + e; gv[1] = b + f; gv[2] = c + g; gv[3] = d + h; gv[4] = i; }\n' +
+      'void mid() { nine(gk[0], gk[1], gk[2], gk[3], 0, 1, 0, 0x1f, gk[4]); }\n' +
+      'void top() { gv[20] = 3; mid(); }\n' +
+      'void stkbody_deep(int n) { int i; for (i = 0; i < n; i++) { gv[8 + i] = i; top(); } }',
+    features: ['multi-arg', 'array'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'extern int gv[];\nextern int gk[];\nvoid nine();\nvoid mid();\nvoid top();\nvoid stkbody_deep(int n);',
+    proto: {
+      stkbody_deep: { returnsVoid: true },
+      nine: { returnsVoid: true },
+      mid: { returnsVoid: true },
+      top: { returnsVoid: true },
+    },
+  },
+  {
+    sym: 'stkbody_rnest',
+    src:
+      'extern int gv[];\n' +
+      'int one(a) int a; { return gv[a] + 1; }\n' +
+      'void mid2(a) int a; { gv[2] = one(a); }\n' +
+      'void stkbody_rnest(int *p, int b, int c) { gv[5] = c + 3; mid2(p[0]); }',
+    features: ['multi-arg'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'extern int gv[];\nint one();\nvoid mid2();\nvoid stkbody_rnest(int *p, int b, int c);',
+    proto: { stkbody_rnest: { returnsVoid: true }, one: { returns: 'int' }, mid2: { returnsVoid: true } },
+  },
+  // A CALL TO ITSELF IS SIZED BY ITS OWN ENTRY (frontend/callee-body.ts `unliftedReads`): kl2dct's
+  // EntityCreate calls itself with nine words, which no body read sizes ("the store to [sp,#0] is
+  // never reloaded"). The stack words its own entry loads (frontend/thumb-entry.ts,
+  // never a lift of itself) size it as they would any callee whose body does not lift. Only the
+  // Thumb frontend scans an entry: gcc 2.7.2, KMC and mwcc stage the same self call and still decline
+  // "outgoing stack arguments not modelled" (an ABI that can skip an argument register, O32 and
+  // PowerPC `evenWordAlignedArgs`, cannot say from a scan that every register is an argument), and
+  // IDO turns the self call into a loop. Their rows pin that state.
+  {
+    sym: 'stkbody_self',
+    src:
+      'extern int gv[];\n' +
+      'void stkbody_self(int a, int b, int c, int d, int e, int f, int g, int h, int i)\n' +
+      '{\n' +
+      '    gv[0] = a + e; gv[1] = b + f; gv[2] = c + g; gv[3] = d + h; gv[4] = i;\n' +
+      '    if (a > 0) stkbody_self(a - 1, b, c, d, e, f, g, h, i + 1);\n' +
+      '}',
+    features: ['multi-arg', 'array'],
+    toolchains: ['agbcc', 'mwcc_242_81', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'extern int gv[];\nvoid stkbody_self();',
+    proto: { stkbody_self: { returnsVoid: true } },
+  },
   // A CALLEE BODY'S STAGED HIGH-REGISTER RESTORE READS NO ARGUMENT (frontend/thumb.ts
   // `bodySavedRegs`, `restoreCopies`). agbcc restores r8-sl through `pop {r3, r4, r5}; mov r8, r3; …`,
   // and some path reaches that restore without writing r3 (here `hiw`'s `a >= 8` exit). Lifted as the
@@ -4805,6 +4888,40 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'extern void h(void);\nvoid sretbody_void(unsigned char *src);',
     proto: { sretbody_void: { returnsVoid: true }, h: { params: [], returnsVoid: true } },
+  },
+  // A CALL TO ITSELF IS NO STRUCT RETURN WHERE ITS OWN RETURNS SAY SO (frontend/callee-body.ts
+  // `unliftedReads`, the return scan of a body that is not lifted). `sretbody_self` hands its own frame
+  // object `t` to a call to itself at argument 0, which with nothing declaring it is the same caller
+  // bytes as a struct returned through memory, which the frame audit refuses (`hiddenReturnPointerStands`).
+  // Its own body is never lifted for that question (that lift is the one under way), but agbcc's
+  // `pop {r0}; bx r0` holds the return address at every return, so no return hands back a hidden
+  // pointer, and `t` is the 12 bytes the call fills. Nothing declares the function in the context: a
+  // declared return answers without the body. The return scan is the Thumb frontend's (the return
+  // through the return register is ARM's); the other compilers' rows pin their state.
+  {
+    sym: 'sretbody_self',
+    src:
+      'struct S { int a, b, c; };\nextern int gk;\n' +
+      'void sretbody_self(struct S *o, int n)\n{\n    struct S t;\n    if (n > 0) {\n' +
+      '        sretbody_self(&t, n - 1);\n        o->a = t.a + 1; o->b = t.b; o->c = t.c * 2;\n' +
+      '    } else {\n        o->a = 0; o->b = n; o->c = gk;\n    }\n}',
+    features: ['struct-return', 'stack-addr'],
+    toolchains: [...FIVE],
+    ctx: 'struct S { int a, b, c; };\nextern int gk;',
+  },
+  // …and its twin that does return the struct through memory still declines: `sretbody_selfret`'s
+  // returns hand back the hidden pointer in r0, so the scan proves nothing, and `t` may be the frame
+  // the callee fills as its return value. agbcc only, the one compiler with the return scan.
+  {
+    sym: 'sretbody_selfret',
+    src:
+      'struct S { int a, b, c; };\nextern int gk;\n' +
+      'struct S sretbody_selfret(int n)\n{\n    struct S t;\n    if (n > 0) {\n' +
+      '        t = sretbody_selfret(n - 1);\n        t.a += 1;\n' +
+      '    } else {\n        t.a = 0; t.b = n; t.c = gk;\n    }\n    return t;\n}',
+    features: ['struct-return'],
+    toolchains: ['agbcc'],
+    ctx: 'struct S { int a, b, c; };\nextern int gk;',
   },
   // …and a body that returns a constant is no struct return either, on every compiler that hands the
   // pointer back at each return: agbcc and the three O32 ones (`move v0, a0`, measured at the field).
@@ -14486,6 +14603,61 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc', 'mwcc_242_81', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
     ctx: 'extern s32 gOut;\nvoid jt_pre_midg(s32 x, s32 *p, s32 c);',
     proto: { jt_pre_midg: { returnsVoid: true } },
+  },
+  // A PRE VALUE'S STACK HOME IN THE DISPATCH (EntityCreate). jt_pre_midg's shape with eight more
+  // switches on x - 50, x - 63, …: nine values now live across the first table's dispatch, and agbcc
+  // -O2 keeps eight in registers and gives the ninth a stack home, so PRE's insertion before the
+  // tablejump (gcse.c `insert_insn_end_bb`) reads `rT = x - 141; str rT, [sp]` there. thumb.ts
+  // `dispatchExtraRefusal` admits that word store to a frame word, lowered in the kept dispatch as
+  // the store any block makes. kl2dct's EntityCreate stores five such values ([sp,#0x40..0x50]). The
+  // other toolchains spell the tables their own way (jt_pre_midg's note), so their rows pin the
+  // same source there.
+  {
+    sym: 'jt_pre_spill',
+    src:
+      'extern s32 gOut[12];\nvoid jt_pre_spill(s32 x, s32 *p, s32 c)\n{\n    if (c) {\n' +
+      '        gOut[0] = x - 37;\n        gOut[1] = x - 50;\n        gOut[2] = x - 63;\n' +
+      '        gOut[3] = x - 76;\n        gOut[4] = x - 89;\n        gOut[5] = x - 102;\n' +
+      '        gOut[6] = x - 115;\n        gOut[7] = x - 128;\n        gOut[8] = x - 141;\n    } else {\n' +
+      '        switch (x) {\n        case 1: p[0] = 1; break;\n        case 2: p[1] = 2; break;\n' +
+      '        case 3: p[2] = 3; break;\n        case 4: break;\n        case 5: p[4] = 5; break;\n' +
+      '        case 6: p[5] = 6; break;\n        case 7: p[6] = 7; break;\n' +
+      '        case 8: p[7] = 8; break;\n        default: p[8] = 9; break;\n        }\n    }\n' +
+      '    switch (x) {\n    case 37: p[10] = 1; break;\n    case 38: p[11] = 2; break;\n' +
+      '    case 39: p[12] = 3; break;\n    case 40: p[13] = 4; break;\n    case 41: p[14] = 5; break;\n' +
+      '    case 42: p[15] = 6; break;\n    case 43: p[16] = 7; break;\n    case 44: p[17] = 8; break;\n' +
+      '    }\n    switch (x) {\n    case 50: p[18] = 1; break;\n    case 51: p[19] = 2; break;\n' +
+      '    case 52: p[20] = 3; break;\n    case 53: p[21] = 4; break;\n    case 54: p[22] = 5; break;\n' +
+      '    case 55: p[23] = 6; break;\n    case 56: p[24] = 7; break;\n    case 57: p[25] = 8; break;\n' +
+      '    }\n    switch (x) {\n    case 63: p[26] = 1; break;\n    case 64: p[27] = 2; break;\n' +
+      '    case 65: p[28] = 3; break;\n    case 66: p[29] = 4; break;\n    case 67: p[30] = 5; break;\n' +
+      '    case 68: p[31] = 6; break;\n    case 69: p[32] = 7; break;\n    case 70: p[33] = 8; break;\n' +
+      '    }\n    switch (x) {\n    case 76: p[34] = 1; break;\n    case 77: p[35] = 2; break;\n' +
+      '    case 78: p[36] = 3; break;\n    case 79: p[37] = 4; break;\n    case 80: p[38] = 5; break;\n' +
+      '    case 81: p[39] = 6; break;\n    case 82: p[40] = 7; break;\n    case 83: p[41] = 8; break;\n' +
+      '    }\n    switch (x) {\n    case 89: p[42] = 1; break;\n    case 90: p[43] = 2; break;\n' +
+      '    case 91: p[44] = 3; break;\n    case 92: p[45] = 4; break;\n    case 93: p[46] = 5; break;\n' +
+      '    case 94: p[47] = 6; break;\n    case 95: p[48] = 7; break;\n    case 96: p[49] = 8; break;\n' +
+      '    }\n    switch (x) {\n    case 102: p[50] = 1; break;\n    case 103: p[51] = 2; break;\n' +
+      '    case 104: p[52] = 3; break;\n    case 105: p[53] = 4; break;\n' +
+      '    case 106: p[54] = 5; break;\n    case 107: p[55] = 6; break;\n' +
+      '    case 108: p[56] = 7; break;\n    case 109: p[57] = 8; break;\n    }\n    switch (x) {\n' +
+      '    case 115: p[58] = 1; break;\n    case 116: p[59] = 2; break;\n' +
+      '    case 117: p[60] = 3; break;\n    case 118: p[61] = 4; break;\n' +
+      '    case 119: p[62] = 5; break;\n    case 120: p[63] = 6; break;\n' +
+      '    case 121: p[64] = 7; break;\n    case 122: p[65] = 8; break;\n    }\n    switch (x) {\n' +
+      '    case 128: p[66] = 1; break;\n    case 129: p[67] = 2; break;\n' +
+      '    case 130: p[68] = 3; break;\n    case 131: p[69] = 4; break;\n' +
+      '    case 132: p[70] = 5; break;\n    case 133: p[71] = 6; break;\n' +
+      '    case 134: p[72] = 7; break;\n    case 135: p[73] = 8; break;\n    }\n    switch (x) {\n' +
+      '    case 141: p[74] = 1; break;\n    case 142: p[75] = 2; break;\n' +
+      '    case 143: p[76] = 3; break;\n    case 144: p[77] = 4; break;\n' +
+      '    case 145: p[78] = 5; break;\n    case 146: p[79] = 6; break;\n' +
+      '    case 147: p[80] = 7; break;\n    case 148: p[81] = 8; break;\n    }\n}',
+    features: ['dense', 'branch'],
+    toolchains: ['agbcc', 'mwcc_242_81', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'extern s32 gOut[12];\nvoid jt_pre_spill(s32 x, s32 *p, s32 c);',
+    proto: { jt_pre_spill: { returnsVoid: true } },
   },
   // A TABLE BEHIND ANOTHER FUNCTION'S TABLE. IDO, KMC and gcc 2.7.2 form each base in its dispatch
   // block, both halves against the `.rodata` section symbol with addend 0, so the second table's

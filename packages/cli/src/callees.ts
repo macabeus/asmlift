@@ -186,7 +186,10 @@ export function guessedArityCallees(
  *  A callee in `facts` (core `DecompileResult.calleeBodyFacts`) had its body, wherever it was read,
  *  decide more of the call than its registers: that it returns no struct through a hidden pointer,
  *  or that it reads its first argument register, so the call is passed the result an earlier call
- *  left there. It is named again, on a line of its own, with what its body decided. */
+ *  left there. It is named again, on a line of its own, with what its body decided. A callee in
+ *  `below` (core `DecompileResult.calleeBodiesBelow`) is no callee of this function: its body was
+ *  read under a body named above, and decided what that body answered. It is named on a line of its
+ *  own, with the file it was read off. */
 export function guessedArityNote(
   asm: string,
   self: string,
@@ -198,6 +201,7 @@ export function guessedArityNote(
   sized?: ReadonlyMap<string, number>,
   files?: ReadonlyMap<string, string>,
   facts?: ReadonlyMap<string, readonly CalleeBodyFact[]>,
+  below?: readonly string[],
 ): string {
   const all = guessedArityCallees(asm, self, target, prototypes, symbols, relocs);
   const bodySized = all.filter((n) => sized?.has(n));
@@ -240,6 +244,10 @@ export function guessedArityNote(
       : `asmlift: [proto] ${decided.length} callee(s) with no declaration had a call decided by their own body: ` +
         `${decided
           .map(([n, f]) => `${n} (${files?.get(n) ?? 'tools.asmlift.elf'}: ${f.map((k) => said[k]).join('; ')})`)
-          .join(', ')} — pass --proto '{"${decided[0][0]}":{"params":N,"returns":"T"}}' to state it\n`)
+          .join(', ')} — pass --proto '{"${decided[0][0]}":{"params":N,"returns":"T"}}' to state it\n`) +
+    (below === undefined || below.length === 0 || all.length === 0
+      ? ''
+      : `asmlift: [proto] ${below.length} more bod${below.length === 1 ? 'y' : 'ies'}, read under the bodies above, ` +
+        `decided what those bodies read: ${below.map((n) => `${n} (${files?.get(n) ?? 'tools.asmlift.elf'})`).join(', ')}\n`)
   );
 }

@@ -7,7 +7,7 @@
 // input, the body can: an argument it never reads is no argument it can tell from a missing one.
 // That answers only a question about a register at or past what the body reads (frontend/call-arity.ts
 // `fallbackArgc`'s `bound`, and the dispatch pass-through gate in frontend/call-plan.ts). It never
-// caps what the caller passes: a source call hands an unused parameter, or a K&R call extra
+// caps what an emitted call passes: a source call hands an unused parameter, or a K&R call extra
 // arguments, all the same, and a register below the bound may be read.
 //
 // THE BOUND IS A LIFT OF THE CALLEE, NOT ITS LIFTED SIGNATURE. A callee's own lifted parameters
@@ -20,7 +20,20 @@
 // (frontend/ssa.ts `mintArgSlotHoles`). That count is an UPPER bound on the argument words the
 // callee reads. A register an earlier call destroyed on every path is not taken: it holds none of
 // the callee's arguments, and a read of it would only make the lift refuse (`push {lr}; mov r0-r3,
-// #0; bl g; bl h` would lose its bound so, though it reads none).
+// #0; bl g; bl h` would lose its bound so, though it reads none). Nor is a register at or past what
+// that inner call's own callee's body reads, where the body lift is handed that body (call-plan.ts
+// `entryWords`): no such register is read there, so the count stays an upper bound. That caps an
+// entry-read call inside a body lift only, never an emitted call.
+//
+// A BODY IS LIFTED READING ITS OWN CALLEES' BODIES, at every depth (`calleeBodyReads`): a body that
+// stages stack words for a call nothing declares lifts only where that callee's body sizes the
+// block, and the call chain to that callee may be any number of wrappers long. Each body is lifted
+// once (a body on a call cycle twice, below). The function being lifted at the top is read as a
+// body that does not lift, by the frontend's scans (`unliftedReads`), never by a lift of itself.
+// Bodies on a call cycle below it (a strongly connected component of the bodies read) are each
+// lifted reading the others, and itself, the same way: a lift of one reading another member's lift
+// would read it before that answer exists, so what it says would hang on which member a call asked
+// first, and the answer must be the callee's alone.
 //
 // A RETURN READS THE RETURN REGISTER. Where the target returns in its first argument register (ARM
 // r0, PowerPC r3), a return that no path wrote that register for hands back the caller's first
@@ -34,7 +47,10 @@
 // register PAIR (r0:r1, r3:r4) that nothing declares is counted for its first register only.
 //
 // It answers nothing where:
-//   - the callee is the function being lifted (its own declaration is a different question);
+//   - the callee is the function being lifted, or a body on the same call cycle as the one being
+//     lifted (its own declaration is a different question), save what a body that does not lift
+//     answers: the incoming stack words its own entry loads, which size a call to itself
+//     (`unliftedReads`);
 //   - the text the body is read from (the input, or a body handed in) defines no label of that
 //     name: a `name:` line, an objdump `<name>:` header or a `glabel name` (the Thumb frontend lifts
 //     a text with no such label whole, as one function, so a lift alone does not say the callee is
@@ -119,13 +135,17 @@ export type CalleeBody =
 export type CalleeBodies = Readonly<Record<string, CalleeBody>>;
 
 /** One function of some text lifted under a table, with no bound of its own (`calleeBodyBounds`):
- *  the input, or a body handed in, with the relocations it carries (undefined for the input). */
+ *  the input, or a body handed in, with the relocations it carries (undefined for the input), and
+ *  `readers`, what that lift is to be handed of its own callees' bodies (`LiftOptions.calleeBody`):
+ *  the same readers, so the reading goes as deep as the calls do (`calleeBodyReads`). A lift that
+ *  ignores them reads no body below the first level. */
 export type CalleeLift = (
   callee: string,
   table: Prototypes,
   entryReadCalls: ReadonlySet<string>,
   text: string,
-  relocs?: readonly Reloc[],
+  relocs: readonly Reloc[] | undefined,
+  readers: CalleeBodyReaders,
 ) => Fn;
 
 /** The argument words callee `callee`'s own body can read at most, or `undefined` where its body
@@ -149,12 +169,22 @@ export type CalleeBodyReaders = {
   readsFirstArgument: CalleeReadsFirstArgument;
 };
 
+/** {@link calleeBodyReads}'s readers, and `bodiesUnder`: each callee whose body answered something
+ *  (a bound, stack words, or a yes) to the lift of `callee`'s body, once that body was read. */
+export type CalleeBodyReads = CalleeBodyReaders & {
+  bodiesUnder: (callee: string) => ReadonlySet<string>;
+};
+
 /** What each callee's body says, read as a call to it first asks and kept for the rest: the
  *  register bound, the incoming stack words it loads (`CalleeStackWords` below), whether it is no
  *  struct return through a hidden pointer (`CalleeReturnsNoHiddenPointer` below) and whether it
  *  reads its first argument register (`CalleeReadsFirstArgument` below), off ONE lift.
  *  `lift` lifts one function of a text (the input, or a body in `external`) under a table, with no
- *  bound of its own: one level of bodies is read, never the callee's callees'. `frontend` is what
+ *  bound of its own, handed these same readers for its own callees, so a body is read at whatever
+ *  depth a call first asks it and once only. `self` answers as a body that does not lift
+ *  (`unliftedReads`), and so does each body of a strongly connected component of more than one body
+ *  to the lift of a body of that component, which is lifted again once the component closes: a
+ *  cycle ends, and no answer depends on the order the calls ask in. `frontend` is what
  *  the target frontend says of its own lifts: its entry scan (`Frontend.entryStackWords`) and its
  *  return scan (`Frontend.returnsThroughReturnReg`), asked only of a body that does not lift. */
 export function calleeBodyReads(
@@ -165,20 +195,102 @@ export function calleeBodyReads(
   lift: CalleeLift,
   external?: CalleeBodies,
   frontend?: Pick<Frontend, 'entryStackWords' | 'returnsThroughReturnReg'>,
-): CalleeBodyReaders {
+): CalleeBodyReads {
   const memo = new Map<string, BodyReads>();
+  const under = new Map<string, Set<string>>();
+  const unlifted = (callee: string): BodyReads =>
+    bodyReads(callee, asm, target, prototypes, undefined, external, frontend);
+  // Tarjan's strongly connected components over the bodies read (`self` is no node: it is always
+  // read unlifted): each body's visit index and low link, the bodies whose lift is under way
+  // (innermost last), and the bodies visited whose component is still open
+  const index = new Map<string, number>();
+  const low = new Map<string, number>();
+  const lifting: string[] = [];
+  const open: string[] = [];
+  const onOpen = new Set<string>();
+  // each body of a closed component of more than one body, by component
+  const componentOf = new Map<string, number>();
   const read = (callee: string): BodyReads => {
-    if (!memo.has(callee)) {
-      memo.set(callee, bodyReads(self, callee, asm, target, prototypes, lift, external, frontend));
+    const reader = lifting.at(-1);
+    if (
+      callee === self ||
+      (reader !== undefined && componentOf.has(callee) && componentOf.get(callee) === componentOf.get(reader))
+    ) {
+      return unlifted(callee);
+    }
+    const link = (to: number): void => {
+      if (reader !== undefined) {
+        low.set(reader, Math.min(low.get(reader)!, to));
+      }
+    };
+    if (index.has(callee)) {
+      if (onOpen.has(callee)) {
+        link(index.get(callee)!);
+      }
+      // a body whose lift is under way has no answer yet; its component's answer replaces this one
+      return memo.get(callee) ?? unlifted(callee);
+    }
+    index.set(callee, index.size);
+    low.set(callee, index.get(callee)!);
+    open.push(callee);
+    onOpen.add(callee);
+    readLifted(callee);
+    link(low.get(callee)!);
+    if (low.get(callee) === index.get(callee)) {
+      const component = open.splice(open.lastIndexOf(callee));
+      component.forEach((c) => onOpen.delete(c));
+      // bodies that call each other: each lift above read another member before that one's answer
+      // existed, so what it says hangs on which member was asked first. Each is lifted again reading
+      // every member, itself included, as a body that does not lift, and every other body by its
+      // settled answer, which no member's answer changes.
+      if (component.length > 1) {
+        component.forEach((c) => componentOf.set(c, index.get(callee)!));
+        component.forEach(readLifted);
+      }
     }
     return memo.get(callee)!;
   };
-  return {
-    bound: (callee) => read(callee).bound,
-    stackWords: (callee) => read(callee).stack,
-    returnsNoHiddenPointer: (callee) => read(callee).noHiddenPointer === true,
-    readsFirstArgument: (callee) => read(callee).readsFirst === true,
+  const readLifted = (callee: string): void => {
+    lifting.push(callee);
+    try {
+      const asked = new Set<string>();
+      under.set(callee, asked);
+      const bodyLift: BodyLift = (c, table, entryReadCalls, text, relocs) =>
+        lift(c, table, entryReadCalls, text, relocs, recording(asked));
+      memo.set(callee, bodyReads(callee, asm, target, prototypes, bodyLift, external, frontend));
+    } finally {
+      lifting.pop();
+    }
   };
+  // the readers a body's lift is handed, noting each callee whose body answered it something
+  const recording = (asked: Set<string> | undefined): CalleeBodyReaders => {
+    const noted = <T>(callee: string, said: T, answered: boolean): T => {
+      if (answered) {
+        asked?.add(callee);
+      }
+      return said;
+    };
+    return {
+      bound: (callee) => {
+        const words = read(callee).bound;
+        return noted(callee, words, words !== undefined);
+      },
+      stackWords: (callee) => {
+        const words = read(callee).stack;
+        return noted(callee, words, words !== undefined);
+      },
+      returnsNoHiddenPointer: (callee) => {
+        const yes = read(callee).noHiddenPointer === true;
+        return noted(callee, yes, yes);
+      },
+      readsFirstArgument: (callee) => {
+        const yes = read(callee).readsFirst === true;
+        return noted(callee, yes, yes);
+      },
+    };
+  };
+  const none: ReadonlySet<string> = new Set();
+  return { ...recording(undefined), bodiesUnder: (callee) => under.get(callee) ?? none };
 }
 
 /** {@link calleeBodyReads}'s register bound alone. */
@@ -245,34 +357,36 @@ interface BodyReads {
   readonly readsFirst?: true;
 }
 
+/** A {@link CalleeLift} with its readers already bound. */
+type BodyLift = (
+  callee: string,
+  table: Prototypes,
+  entryReadCalls: ReadonlySet<string>,
+  text: string,
+  relocs?: readonly Reloc[],
+) => Fn;
+
+/** What `callee`'s body answers, read off the input or a body handed in. `lift` undefined reads it as
+ *  a body that does not lift (`unliftedReads`): the function being lifted, whose lift would be the
+ *  one under way, or, to the lift of a body on a call cycle, a body of that cycle
+ *  (`calleeBodyReads`). */
 function bodyReads(
-  self: string,
   callee: string,
   asm: string,
   target: TargetDescription,
   prototypes: Prototypes,
-  lift: CalleeLift,
+  lift: BodyLift | undefined,
   external: CalleeBodies | undefined,
   frontend: Pick<Frontend, 'entryStackWords' | 'returnsThroughReturnReg'> | undefined,
 ): BodyReads {
-  if (callee === self || declaresAggregateReturn(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined)) {
+  if (declaresAggregateReturn(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined)) {
     return {};
   }
-  // a body that lifts answers every reader; one that does not answers its entry's loads and whether
-  // the frontend's scan finds a return through the return register, and no bound
-  const lifted = (text: string, relocs?: readonly Reloc[]): BodyReads => {
-    const got = liftedReads(callee, text, target, prototypes, lift, relocs);
-    if (got !== undefined) {
-      return got;
-    }
-    // a scan of the entry's stack loads sees no register read, so where the ABI can skip an
-    // argument register (`evenWordAlignedArgs`) it cannot say the registers are all arguments
-    const stack = target.evenWordAlignedArgs === true ? undefined : frontend?.entryStackWords?.(callee, text);
-    const scanned =
-      target.compilerBehaviors.structReturnHandsBackPointer === true &&
-      frontend?.returnsThroughReturnReg?.(callee, text, target) === true;
-    return { stack, ...(scanned ? { noHiddenPointer: true } : {}) };
-  };
+  // a body that lifts answers every reader; one that does not, or is not lifted, answers what
+  // `unliftedReads` scans
+  const lifted = (text: string, relocs?: readonly Reloc[]): BodyReads =>
+    (lift === undefined ? undefined : liftedReads(callee, text, target, prototypes, lift, relocs)) ??
+    unliftedReads(callee, text, target, frontend);
   if (definesLabel(asm, callee)) {
     return weakNames(asm).has(callee) ? {} : lifted(asm);
   }
@@ -296,8 +410,30 @@ function bodyReads(
   return lifted(body.text, body.relocs);
 }
 
+/** WHAT A BODY ANSWERS WITHOUT ITS LIFT: the incoming stack words its straight-line entry loads, and
+ *  whether the frontend's scan finds a return through the return register, and no bound. Asked of a
+ *  body that does not lift, of the function being lifted, and of a body of the same call cycle as
+ *  the body being lifted: a CALL TO ITSELF is sized so, by the frontend's scan
+ *  (`Frontend.entryStackWords`), never by a lift of itself, which would be the lift being made.
+ *  A scan of the entry's stack loads sees no register read, so where the ABI can skip an argument
+ *  register (`evenWordAlignedArgs`) it cannot say the registers are all arguments, and says
+ *  nothing. */
+function unliftedReads(
+  callee: string,
+  text: string,
+  target: TargetDescription,
+  frontend: Pick<Frontend, 'entryStackWords' | 'returnsThroughReturnReg'> | undefined,
+): BodyReads {
+  const stack = target.evenWordAlignedArgs === true ? undefined : frontend?.entryStackWords?.(callee, text);
+  const scanned =
+    target.compilerBehaviors.structReturnHandsBackPointer === true &&
+    frontend?.returnsThroughReturnReg?.(callee, text, target) === true;
+  return { stack, ...(scanned ? { noHiddenPointer: true } : {}) };
+}
+
 /** The entry parameters a lift of `callee` out of `text` counts, once every call in it nothing lays
- *  out is taken at every argument register, and one past the highest incoming stack word among them
+ *  out is taken at every argument register that may hold an incoming value (short of what its own
+ *  callee's body is proven not to read), and one past the highest incoming stack word among them
  *  (`entryArgRank`): an argument slot past the registers is minted only below a stack word the body
  *  loads, so that count is a word it reads. Undefined where no lift proves it. */
 function liftedReads(
@@ -305,7 +441,7 @@ function liftedReads(
   text: string,
   target: TargetDescription,
   prototypes: Prototypes,
-  lift: CalleeLift,
+  lift: BodyLift,
   relocs?: readonly Reloc[],
 ): BodyReads | undefined {
   const helpers = helperPrototypes(target);
