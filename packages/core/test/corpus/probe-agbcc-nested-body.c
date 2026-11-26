@@ -28,6 +28,11 @@ void stkbody_cyc(int *p, int b) { gv[7] = b; cyca(p[0]); }
 extern int gh, gw;
 void cyob();
 void cyoa(a, b, c, d) int a, b, c, d; { if (a) cyob(a, b, c, d); }
-void cyob(a) int a; { gv[0] = a; cyoa(a - 1, 0, 0, 0); }
+void cyob(a) int a; { gv[0] = a; cyoa(a, 0, 0, 0); }
 void cyord1(int x) { gh = 5; cyoa(x); gw = 6; cyob(x); }
 void cyord2(int x) { gh = 5; cyob(x); gw = 6; cyoa(x); }
+/* `lz` hands `leaf` four constants, so the call holds none of `lz`'s incoming values and its bound
+ * takes no register of it: `leaf`'s body decides nothing, and is never lifted. */
+int leaf(a) int a; { return gv[a]; }
+void lz() { leaf(1, 2, 3, 4); }
+void stkbody_lz(int *p) { gv[10] = p[1]; lz(); }

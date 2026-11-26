@@ -77,13 +77,30 @@ describe('the reading goes as deep as the calls do', () => {
     expect(r.calleeBodiesBelow).toEqual(['nine']);
   });
 
+  // `lz` hands `leaf` four constants: its entry-read call takes no register, so `leaf`'s bound
+  // could change nothing, and asking it would lift `leaf`'s body (and every body below it) for no answer
+  test("a body's call that holds none of its incoming registers asks no body below", () => {
+    const r = decompile('stkbody_lz', fn('stkbody_lz'), ARMV4T_AGBCC, {
+      prototypes: { lz: { returnsVoid: true } },
+      calleeBodies: { lz: { kind: 'listing', text: fn('lz') }, leaf: { kind: 'listing', text: fn('leaf') } },
+    });
+    expect(r.source).toBe(
+      decompile('stkbody_lz', fn('stkbody_lz'), ARMV4T_AGBCC, {
+        prototypes: { lz: { returnsVoid: true } },
+        calleeBodies: { lz: { kind: 'listing', text: fn('lz') } },
+      }).source,
+    );
+    expect(r.calleeBodiesBelow).toEqual([]);
+  });
+
   test('a cycle ends, and proves no more than no bodies at all', () => {
     expect(lift('stkbody_cyc', fn('cyca') + fn('cycb') + fn('stkbody_cyc')).source).toBe(
       lift('stkbody_cyc', fn('stkbody_cyc')).source,
     );
   });
 
-  // `cyoa` hands `cyob` r0-r3, and `cyob` zeroes r1-r3 before it calls `cyoa`. Read in a cycle, a
+  // `cyoa` hands `cyob` r0-r3, and `cyob` zeroes r1-r3 before it calls `cyoa` and passes its own r0
+  // on, so each call keeps an incoming register and asks the other's body. Read in a cycle, a
   // lift of either reads the other before that one's lift is done, so `cyoa`'s bound was one where
   // `cyord1` asked it first and four where `cyord2` asked `cyob` first. Each is lifted again reading
   // the other as a body that does not lift, and the callee alone decides: `cyoa` four, `cyob` one.

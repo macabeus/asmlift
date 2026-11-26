@@ -1105,14 +1105,14 @@ export function callDeclarations(
     // body lift by the readers of the lift above it: frontend/callee-body.ts `calleeBodyReads`): that
     // callee reads none of them, so they add nothing to what this body reads, and the count stays an
     // upper bound. This min is the one place the body bound caps a count, and only here, where the
-    // call is never emitted.
-    const entryWords =
+    // call is never emitted. The body is asked only when some register is taken: at none the min is
+    // 0 whatever it says, and the ask would lift that callee's body and, through it, every body below.
+    const liveWords =
       unstated && entryReadCalls?.has(callee!) === true
-        ? Math.min(
-            target.argRegs.reduce((n, r, k) => (ssa.writtenOnEveryPath(r, bi, () => false) ? n : k + 1), 0),
-            bodyWords() ?? Infinity,
-          )
+        ? target.argRegs.reduce((n, r, k) => (ssa.writtenOnEveryPath(r, bi, () => false) ? n : k + 1), 0)
         : undefined;
+    const entryWords =
+      liveWords === undefined || liveWords === 0 ? liveWords : Math.min(liveWords, bodyWords() ?? Infinity);
     // A STACK BLOCK THE CALLEE'S BODY LICENSED states the arity outright: arguments past the
     // registers are staged only once every register is one, so the call takes all of them and the
     // block, one word each — what a count of that many words in a prototype would state. That holds

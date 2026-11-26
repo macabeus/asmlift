@@ -320,7 +320,6 @@ cyob:
 	push	{lr}
 	ldr	r1, .L51
 	str	r0, [r1]
-	sub	r0, r0, #0x1
 	mov	r1, #0x0
 	mov	r2, #0x0
 	mov	r3, #0x0
@@ -387,3 +386,52 @@ cyord2:
 	.word	gw
 .Lfe16:
 	.size	 cyord2,.Lfe16-cyord2
+	.align	2, 0
+	.globl	leaf
+	.type	 leaf,function
+	.thumb_func
+leaf:
+	ldr	r1, .L60
+	lsl	r0, r0, #0x2
+	add	r0, r0, r1
+	ldr	r0, [r0]
+	bx	lr
+.L61:
+	.align	2, 0
+.L60:
+	.word	gv
+.Lfe17:
+	.size	 leaf,.Lfe17-leaf
+	.align	2, 0
+	.globl	lz
+	.type	 lz,function
+	.thumb_func
+lz:
+	push	{lr}
+	mov	r0, #0x1
+	mov	r1, #0x2
+	mov	r2, #0x3
+	mov	r3, #0x4
+	bl	leaf
+	pop	{r0}
+	bx	r0
+.Lfe18:
+	.size	 lz,.Lfe18-lz
+	.align	2, 0
+	.globl	stkbody_lz
+	.type	 stkbody_lz,function
+	.thumb_func
+stkbody_lz:
+	push	{lr}
+	ldr	r1, .L64
+	ldr	r0, [r0, #0x4]
+	str	r0, [r1, #0x28]
+	bl	lz
+	pop	{r0}
+	bx	r0
+.L65:
+	.align	2, 0
+.L64:
+	.word	gv
+.Lfe19:
+	.size	 stkbody_lz,.Lfe19-stkbody_lz
