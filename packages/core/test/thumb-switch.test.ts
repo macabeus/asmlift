@@ -406,8 +406,8 @@ test('dispatch code that is not a register computation, or that disturbs the dis
 });
 
 // Reload gives a PRE value a stack home where too many are live across the dispatch: agbcc -O2
-// then stores it there before the `mov pc` (`str r1, [sp]` past eight values, kleod's EntityCreate
-// plus one line: `str r1, [sp, #0x2c]`). The case that reloads it reads what the dispatch computed.
+// then stores it there before the `mov pc` (`str r1, [sp]` in the jt_pre_spill row, kleod's
+// EntityCreate plus one line: `str r1, [sp, #0x2c]`). The case that reloads it reads what the dispatch computed.
 const withSpill = (extra: string) =>
   'f:\n\tsub\tsp, #0x4\n\tcmp\tr0, #0x1\n\tbhi\t.Ldef\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .Lp\n\tadd\tr0, r0, r1\n' +
   `\tldr\tr0, [r0]\n${extra}\tmov\tpc, r0\n.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n\t.word\t.Lc1\n` +

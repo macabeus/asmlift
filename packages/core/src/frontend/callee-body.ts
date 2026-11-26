@@ -8,15 +8,13 @@
 // That answers only a question about a register at or past what the body reads (frontend/call-arity.ts
 // `fallbackArgc`'s `bound`, and the dispatch pass-through gate in frontend/call-plan.ts). It never
 // caps what an emitted call passes: a source call hands an unused parameter, or a K&R call extra
-// arguments, all the same, and a register below the bound may be read. (Inside a body lift, the
-// entry-read calls below are no emitted calls, and they are capped at their callee's bound.)
+// arguments, all the same, and a register below the bound may be read.
 //
 // THE BOUND IS A LIFT OF THE CALLEE, NOT ITS LIFTED SIGNATURE. A callee's own lifted parameters
 // rest on the same guess one level down: a forwarding thunk (`push {lr}; bl g; pop {r1}; bx r1`)
 // lifts as `thk(void)` while g is undeclared, though it hands g every argument register it got. So
 // every call inside the callee whose arity nothing lays out is taken at every argument register
-// that may still hold the callee's own incoming value there (`LiftOptions.entryReadCalls`), short
-// of those its own callee's body is proven not to read (below), and
+// that may still hold the callee's own incoming value there (`LiftOptions.entryReadCalls`), and
 // only then are the callee's entry parameters counted: an argument register or incoming stack word
 // the body reads becomes one, and the frontend mints every argument slot below the highest one read
 // (frontend/ssa.ts `mintArgSlotHoles`). That count is an UPPER bound on the argument words the
@@ -25,17 +23,17 @@
 // #0; bl g; bl h` would lose its bound so, though it reads none). Nor is a register at or past what
 // that inner call's own callee's body reads, where the body lift is handed that body (call-plan.ts
 // `entryWords`): no such register is read there, so the count stays an upper bound. That caps an
-// entry-read call inside a body lift only; no emitted call is ever capped (below).
+// entry-read call inside a body lift only, never an emitted call.
 //
 // A BODY IS LIFTED READING ITS OWN CALLEES' BODIES, at every depth (`calleeBodyReads`): a body that
 // stages stack words for a call nothing declares lifts only where that callee's body sizes the
-// block, and the call chain to that callee may be any number of wrappers long. Each body is read
-// once per set of readers (a body on a call cycle twice, below). The function being lifted at the top is read as a body that does not
-// lift, by the frontend's scans (`unliftedReads`), never by a lift of itself. Bodies on a call
-// cycle below it (a strongly connected component of the bodies read) are each lifted reading the
-// others, and itself, the same way: a lift of one reading another member's lift would read it
-// before that answer exists, so what it says would hang on which member a call asked first, and the
-// answer must be the callee's alone.
+// block, and the call chain to that callee may be any number of wrappers long. Each body is lifted
+// once (a body on a call cycle twice, below). The function being lifted at the top is read as a
+// body that does not lift, by the frontend's scans (`unliftedReads`), never by a lift of itself.
+// Bodies on a call cycle below it (a strongly connected component of the bodies read) are each
+// lifted reading the others, and itself, the same way: a lift of one reading another member's lift
+// would read it before that answer exists, so what it says would hang on which member a call asked
+// first, and the answer must be the callee's alone.
 //
 // A RETURN READS THE RETURN REGISTER. Where the target returns in its first argument register (ARM
 // r0, PowerPC r3), a return that no path wrote that register for hands back the caller's first
@@ -415,10 +413,11 @@ function bodyReads(
 /** WHAT A BODY ANSWERS WITHOUT ITS LIFT: the incoming stack words its straight-line entry loads, and
  *  whether the frontend's scan finds a return through the return register, and no bound. Asked of a
  *  body that does not lift, of the function being lifted, and of a body of the same call cycle as
- *  the body being lifted: a CALL TO ITSELF is sized so, by the frontend's scan (`Frontend.entryStackWords`) and never by a lift of itself, which would be the
- *  lift being made. A scan of the entry's stack loads sees no register read, so where the ABI can
- *  skip an argument register (`evenWordAlignedArgs`) it cannot say the registers are all arguments,
- *  and says nothing. */
+ *  the body being lifted: a CALL TO ITSELF is sized so, by the frontend's scan
+ *  (`Frontend.entryStackWords`), never by a lift of itself, which would be the lift being made.
+ *  A scan of the entry's stack loads sees no register read, so where the ABI can skip an argument
+ *  register (`evenWordAlignedArgs`) it cannot say the registers are all arguments, and says
+ *  nothing. */
 function unliftedReads(
   callee: string,
   text: string,

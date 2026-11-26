@@ -1019,9 +1019,9 @@ no answer depends on which member a call asked first. A lift notes which bodies 
 `DecompileResult.calleeBodiesBelow` names the handed-in bodies reached only below the ones the top
 lift asked.
 
-The bound says what the callee READS, never
-what the caller passes: a source call hands an unused parameter, or a K&R call extra arguments, all
-the same. So it never caps the count, and `setx(a + 1, 4)`, `tick(5)` and `rd1(a, b, 7)` lift as
+The bound says what the callee READS, never what the caller passes: a source call hands an unused
+parameter, or a K&R call extra arguments, all the same. So it never caps an emitted call's count,
+and `setx(a + 1, 4)`, `tick(5)` and `rd1(a, b, 7)` lift as
 they do without the body. The bound answers only for registers at or past it, since whether those
 are arguments changes nothing the callee computes. A counted register there whose last write
 something else read since stops the count there, so `gH = 5; gA = rnd()` with rnd reading nothing
@@ -1126,11 +1126,11 @@ dispatch "just before the tablejump" (gcse.c `insert_insn_end_bb`), so what it a
 inserts: a data-processing op or a single load writing its first operand, and, where reload gives
 PRE's pseudo a stack home, the `str rS, [sp, #k]` that spills it (kl2dct's `EntityCreate` stores
 five values so; kleod's matching one keeps its four in registers, and one more line of it stores
-one). That store is lowered
-as any other block's store to the frame word, and the frame's own reading judges it. A store of a
-register the unlifted idiom wrote, any other store, a call, a flag read, or a write to the jump
-target, sp, pc or lr refuses. What the idiom left in a register no extra rewrote is a marker a read
-of which declines; a `str` extra reads its register and rewrites none.
+one). That store is lowered as any other block's store to the frame word, and the frame's own
+reading judges it. A store of a register the unlifted idiom wrote, any other store, a call, a flag
+read, or a write to the jump target, sp, pc or lr refuses. What the idiom left in a register no
+extra rewrote is a marker a read of which declines; a `str` extra reads its register and rewrites
+none.
 
 ## A float, across the tower
 

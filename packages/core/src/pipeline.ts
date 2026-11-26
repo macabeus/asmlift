@@ -692,10 +692,11 @@ const readsRead = new WeakMap<
 
 /** Each callee's body readers (frontend/callee-body.ts) as a lift of `name` under `table` reads them: every
  *  callee lifted from the same input, or from its body in `calleeBodies`, under the same table, map
- *  and context, reading its own callees' bodies through the same readers, at every depth. A body from outside the input is lifted with none of the input's
- *  side table, which describes the input's own object, and with only the relocations it carries
- *  (`CalleeBody.relocs`). Kept across lifts of the same function under the same caller table,
- *  map, data, context and bodies (`readsRead`). */
+ *  and context, reading its own callees' bodies through the same readers, at every depth. A body
+ *  from outside the input is lifted with none of the input's side table, which describes the
+ *  input's own object, and with only the relocations it carries (`CalleeBody.relocs`). Kept across
+ *  lifts of the same function under the same caller table, map, data, context and bodies
+ *  (`readsRead`). */
 function bodyReadsIn(
   name: string,
   asm: string,
@@ -720,9 +721,9 @@ function bodyReadsIn(
   // depth (frontend/callee-body.ts `calleeBodyReads`): a body that stages stack words for a call
   // nothing declares lifts only where that callee's body sizes the block, as at the top level, and a
   // call it takes at every incoming register (`entryReadCalls`) is taken at no more registers than
-  // that callee's body reads (call-plan.ts), which keeps the count an upper bound. Each body is read
-  // once; this function's own body, and to a body on a call cycle every body of that cycle, is read
-  // by its entry scan.
+  // that callee's body reads (call-plan.ts), which keeps the count an upper bound. Each body is
+  // lifted once; this function's own body, and to a body on a call cycle every body of that cycle,
+  // is read as a body that does not lift (its entry and return scans).
   const lift: CalleeLift = (callee, calleeTable, entryReadCalls, text, relocs, readers) =>
     liftStamped(
       callee,

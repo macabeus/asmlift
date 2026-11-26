@@ -4715,16 +4715,16 @@ export const SYNTHETIC: SynthSpec[] = [
   // EntityCreate: lifted with no body of its own, that call cannot be sized, the body lift fails, and
   // the caller's guess is left without a bound (the loop counter in r0 then decides nothing).
   //   stkbody_nest: `mid` stages the five stack words of `nine`, which only `nine`'s body sizes. With
-  //     it, `mid`'s body reads no argument and the call is `mid()`; without, the guess took the
-  //     pointer the loop left in r0 and lifted `v0 = mid(v0)`. Not on mwcc: no stack-argument
+  //     it, `mid`'s body reads no argument and the call is `mid()`; without, the guess takes the
+  //     pointer the loop left in r0, `v0 = mid(v0)`. Not on mwcc: no stack-argument
   //     lowering there.
   //   stkbody_rnest: `mid2` hands its one argument to `one`, a call its body lift takes at every
-  //     register still holding an incoming value (r0-r3), which bounded `mid2` at four words and
-  //     lifted `mid2(*a0, &gv, a2 + 3)`. That call is taken at no more than `one`'s own body reads
-  //     (call-plan.ts `entryReadCalls`), so `mid2` reads one word and the left-over r1 and r2 are
+  //     register still holding an incoming value (r0-r3), which would bound `mid2` at four words,
+  //     `mid2(*a0, &gv, a2 + 3)`. That call is taken at no more than `one`'s own body reads
+  //     (call-plan.ts `entryWords`), so `mid2` reads one word and the left-over r1 and r2 are
   //     none of its arguments. Not on mwcc: its synthetic flags inline both callees away.
   //   stkbody_deep: stkbody_nest's chain one wrapper longer (`top` calls `mid`): `nine`'s body sizes
-  //     `mid`'s call three levels down. Read to two levels only, agbcc lifted `v0 = top(v0)`.
+  //     `mid`'s call three levels down (read to two levels only, the guess is `v0 = top(v0)`).
   {
     sym: 'stkbody_nest',
     src:
@@ -4772,8 +4772,8 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { stkbody_rnest: { returnsVoid: true }, one: { returns: 'int' }, mid2: { returnsVoid: true } },
   },
   // A CALL TO ITSELF IS SIZED BY ITS OWN ENTRY (frontend/callee-body.ts `unliftedReads`): kl2dct's
-  // EntityCreate calls itself with nine words, and no body read sized that call, so it declined "the
-  // store to [sp,#0] is never reloaded". The stack words its own entry loads (frontend/thumb-entry.ts,
+  // EntityCreate calls itself with nine words, which no body read sizes ("the store to [sp,#0] is
+  // never reloaded"). The stack words its own entry loads (frontend/thumb-entry.ts,
   // never a lift of itself) size it as they would any callee whose body does not lift. Only the
   // Thumb frontend scans an entry: gcc 2.7.2, KMC and mwcc stage the same self call and still decline
   // "outgoing stack arguments not modelled" (an ABI that can skip an argument register, O32 and
@@ -4892,7 +4892,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // A CALL TO ITSELF IS NO STRUCT RETURN WHERE ITS OWN RETURNS SAY SO (frontend/callee-body.ts
   // `unliftedReads`, the return scan of a body that is not lifted). `sretbody_self` hands its own frame
   // object `t` to a call to itself at argument 0, which with nothing declaring it is the same caller
-  // bytes as a struct returned through memory, and the frame audit declined (`hiddenReturnPointerStands`).
+  // bytes as a struct returned through memory, which the frame audit refuses (`hiddenReturnPointerStands`).
   // Its own body is never lifted for that question (that lift is the one under way), but agbcc's
   // `pop {r0}; bx r0` holds the return address at every return, so no return hands back a hidden
   // pointer, and `t` is the 12 bytes the call fills. Nothing declares the function in the context: a
@@ -14609,8 +14609,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // -O2 keeps eight in registers and gives the ninth a stack home, so PRE's insertion before the
   // tablejump (gcse.c `insert_insn_end_bb`) reads `rT = x - 141; str rT, [sp]` there. thumb.ts
   // `dispatchExtraRefusal` admits that word store to a frame word, lowered in the kept dispatch as
-  // the store any block makes, and agbcc lifts where it declined "'str r1, [sp]' is not a register
-  // computation or a load". kl2dct's EntityCreate stores five such values ([sp,#0x40..0x50]). The
+  // the store any block makes. kl2dct's EntityCreate stores five such values ([sp,#0x40..0x50]). The
   // other toolchains spell the tables their own way (jt_pre_midg's note), so their rows pin the
   // same source there.
   {

@@ -4,8 +4,8 @@
 // A call nothing declares is bounded by its callee's body (frontend/callee-body.ts), and that body
 // is a lift too: a call inside it that stages stack words lifts only where ITS callee's body sizes
 // the block, and a call it takes at every incoming register reads no more than its callee's body
-// does. kl2dct's sub_08037530 calls sub_08037AF8, whose 9-word call to EntityCreate left its body
-// unlifted and the caller's guess unbounded. A call to the function itself is sized by the stack
+// does. kl2dct's sub_08037530 calls sub_08037AF8, whose body lifts only where EntityCreate's body
+// sizes its 9-word call to it. A call to the function itself is sized by the stack
 // words its own entry loads (callee-body.ts `unliftedReads`): kl2dct's EntityCreate calls itself with
 // nine words. A body whose lift is under way, met again further down (a cycle), is read the same way,
 // so the reading ends. The shapes are agbcc's own output
@@ -101,9 +101,9 @@ describe('the reading goes as deep as the calls do', () => {
 
   // `cyoa` hands `cyob` r0-r3, and `cyob` zeroes r1-r3 before it calls `cyoa` and passes its own r0
   // on, so each call keeps an incoming register and asks the other's body. Read in a cycle, a
-  // lift of either reads the other before that one's lift is done, so `cyoa`'s bound was one where
-  // `cyord1` asked it first and four where `cyord2` asked `cyob` first. Each is lifted again reading
-  // the other as a body that does not lift, and the callee alone decides: `cyoa` four, `cyob` one.
+  // lift of either reads the other before that one's lift is done, so a single pass would bound
+  // `cyoa` at one or four by which of `cyord1` and `cyord2` asks. Each is lifted again reading the
+  // other as a body that does not lift, and the callee alone decides: `cyoa` four, `cyob` one.
   test('bodies that call each other say the same whichever is asked first', () => {
     const both = fn('cyoa') + fn('cyob');
     const first = lift('cyord1', both + fn('cyord1')).source;

@@ -3408,13 +3408,13 @@ function recoverJumpTable(
 // it (`lowerTerminator`). PRE inserts `reg = expr` and nothing more, so the instructions accepted are
 // the ones `mayWriteReg` knows write their first operand — the data-processing ops and the single
 // loads — less the two that read the carry, and one store. Where reload gives PRE's pseudo a stack
-// home, its `reg = expr` becomes `rT = expr; str rT, [sp, #k]`: past eight values live across
-// the dispatch, agbcc -O2 spills them so (kleod's matching EntityCreate keeps four in registers, and
-// one more line puts `str r1, [sp, #0x2c]` in its dispatch; kl2dct's EntityCreate stores five). So
-// a word store of a register to a frame word, `str rS, [sp]` or `str rS, [sp, #k]`, is admitted,
-// and lowered in the kept block as the store any other block makes to that word: the frame's own
-// reading (its slots, its outgoing-argument blocks) judges it as it does every other. Anything
-// else refuses:
+// home, its `reg = expr` becomes `rT = expr; str rT, [sp, #k]`: with more values live across the
+// dispatch than registers to hold them, agbcc -O2 spills them so (kleod's matching EntityCreate
+// keeps four in registers, and one more line puts `str r1, [sp, #0x2c]` in its dispatch; kl2dct's
+// EntityCreate stores five). So a word store of a register to a frame word, `str rS, [sp]` or
+// `str rS, [sp, #k]`, is admitted, and lowered in the kept block as the store any other block makes
+// to that word: the frame's own reading (its slots, its outgoing-argument blocks) judges it as it
+// does every other. Anything else refuses:
 //   - a store but that one: a byte or halfword store, a store through any base but sp or with a
 //     register offset (`frameHomeStoreRefusal`), and a store of a register the idiom wrote, which
 //     would store the value from before the dispatch (below);

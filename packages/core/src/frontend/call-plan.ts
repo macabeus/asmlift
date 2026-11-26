@@ -989,8 +989,8 @@ export function callDeclarations(
     // (frontend/callee-body.ts): at most `bodyWords()` argument words. It answers only a refusal
     // about registers at or past it — the gap rule's (`fallbackArgc`'s `bound`) and the dispatch
     // pass-through gate's — since whether those are arguments changes nothing the callee computes.
-    // It never caps an emitted call's count: it bounds what the callee READS, and a source call passes more
-    // whenever a parameter goes unused or a K&R call hands extra arguments, so a register the caller
+    // It never caps an emitted call's count: it bounds what the callee READS, and a source call
+    // passes more whenever a parameter goes unused or a K&R call hands extra arguments, so a register the caller
     // set up for the call stays an argument (`tick(5)` to a body that reads none, `rd1(a, b, 7)` to
     // one that reads r0, whose 7 also proves r0 is the caller's own a passed on). Asked lazily, as a
     // refusal would fire, so a call no gate questions lifts no body. Only a callee whose entry
@@ -1104,9 +1104,9 @@ export function callDeclarations(
     // Nor is a register at or past what the call's own callee's body reads (`bodyWords`, handed to a
     // body lift by the readers of the lift above it: frontend/callee-body.ts `calleeBodyReads`): that
     // callee reads none of them, so they add nothing to what this body reads, and the count stays an
-    // upper bound. This min is the one place the body bound caps a count, and only here, where the
-    // call is never emitted. The body is asked only when some register is taken: at none the min is
-    // 0 whatever it says, and the ask would lift that callee's body and, through it, every body below.
+    // upper bound; the call is never emitted. The body is asked only when some register is taken: at
+    // none the min is 0 whatever it says, and the ask would lift that callee's body and, through it,
+    // every body below.
     const liveWords =
       unstated && entryReadCalls?.has(callee!) === true
         ? target.argRegs.reduce((n, r, k) => (ssa.writtenOnEveryPath(r, bi, () => false) ? n : k + 1), 0)
