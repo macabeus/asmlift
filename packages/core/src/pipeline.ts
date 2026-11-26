@@ -31,7 +31,7 @@ import { ABSORBED_KEYS, HOMED_UNDEF } from './frontend/ssa';
 import { type Fn, reachableBlocks } from './ir/core';
 import { deadOps } from './ir/discipline';
 import { print } from './ir/print';
-import { dropRetOperands, firstTrivialPhi } from './ir/simplify';
+import { firstTrivialPhi, pruneDeadParams } from './ir/simplify';
 import { type IrType, T, intWidth } from './ir/types';
 import { VerifyError, verify } from './ir/verify';
 import { LanguageBackend, SFn, emitDraft, gapReasonFor, walkExprs } from './l3/ast';
@@ -1226,7 +1226,17 @@ export function raiseRecovered(
  *  `u8 *` (`gHit = (void *)(v0 + 1)`, which mwcc rejects). The structurer already reads no `ret`
  *  operand under `returnsVoid`, so this changes no `return` it writes. */
 function dropVoidReturnOperands(fn: Fn): void {
-  if (dropRetOperands(fn)) {
+  let dropped = false;
+  for (const blk of fn.blocks) {
+    for (const op of blk.ops) {
+      if (op.opcode === 'ret' && op.operands.length > 0) {
+        op.operands = [];
+        dropped = true;
+      }
+    }
+  }
+  if (dropped) {
+    pruneDeadParams(fn);
     dce(fn);
     verify(fn);
   }

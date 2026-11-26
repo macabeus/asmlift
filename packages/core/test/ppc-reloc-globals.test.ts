@@ -319,10 +319,10 @@ test('an `@ha` that reaches its `@l` only through a JOIN refuses, and the refusa
   expect(() => dis('dia', diamond)).toThrow(/through a merge or a loop header/);
 });
 
-// A HALF ONLY A STATED VOID RETURN READS IS NO ESCAPE (frontend/high-half.ts `assertNoneEscaped`).
-// mwcc leaves a loop's `lis r3,gA@ha` live in r3 into the epilogue, and SSA hands it to the `ret`
-// through the join: under a declaration that returns nothing, that operand is dropped, and the join
-// with it. Anything else reading the join still refuses.
+// A STATED VOID RETURN READS NO r3 (frontend/ppc.ts `returnOperands`). mwcc leaves a loop's
+// `lis r3,gA@ha` live in r3 into the epilogue, and a `ret` reading r3 would take that half in
+// through the join, which frontend/high-half.ts `assertNoneEscaped` refuses: under a declaration
+// that returns nothing, the `ret` reads nothing. Anything else reading the join still refuses.
 const voidMergeAsm = (tail: string) =>
   '   0:\tmr      r5,r3\n' +
   '   4:\tb       18 <vm+0x18>\n' +
@@ -338,7 +338,7 @@ const vm = (tail: string, returnsVoid: boolean) =>
     prototypes: { vm: { params: 4, ...(returnsVoid ? { returnsVoid: true } : { returns: 's32' }) } },
   }).source;
 
-test('a high half only a stated void return reads is dropped with that return', () => {
+test('a high half only a stated void return would read leaves the return reading nothing', () => {
   const src = vm('  20:\tblr\n', true);
   expect(src).toMatch(/void vm\(/);
   expect(src).toContain('gVal');
