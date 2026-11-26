@@ -998,7 +998,28 @@ float result so handed to an undeclared callee declines in raise (docs/floating-
 Where the callee's own body is in the same input and nothing declares it, a lift of that body
 bounds how many argument words it reads (frontend/callee-body.ts). Every call the body makes that
 nothing lays out is taken at each argument register that may still hold the body's own incoming
-value, so a forwarding thunk bounds at every register. The bound says what the callee READS, never
+value, so a forwarding thunk bounds at every register, short of the registers that inner call's own
+callee's body is proven not to read (call-plan.ts `entryWords`). That is the one count the bound
+caps, and only inside a body lift, where the call is never emitted: the inner callee reads none of
+those registers, so they add nothing to what the body reads. The inner body is asked only where the
+call takes some register at all.
+
+A BODY IS LIFTED READING ITS OWN CALLEES' BODIES, at every depth (`calleeBodyReads`). Each body is
+lifted once, handed the same readers, so a 9-word call inside a body lifts where its own callee's
+body sizes the stack block, and the caller's bound rests on bodies as many levels down as the calls
+go (kl2dct's `sub_08037530` calls `sub_08037AF8`, whose body stages nine words for `EntityCreate`).
+Two kinds of body are read without a lift of their own. A call to the function being lifted is
+sized by the incoming stack words its own entry loads (`Frontend.entryStackWords`) and is never a
+lift of itself: Thumb alone scans an entry, since on an ABI that may skip an argument register
+(`evenWordAlignedArgs`) a scan cannot prove each register below the highest is an argument. And bodies
+that call each other, met through calls that each ask the other, are read per strongly connected
+component (Tarjan): once a component of more than one body closes, each member is lifted again
+reading every member as a body that does not lift and every other body by its settled answer, so
+no answer depends on which member a call asked first. A lift notes which bodies answered it, and
+`DecompileResult.calleeBodiesBelow` names the handed-in bodies reached only below the ones the top
+lift asked.
+
+The bound says what the callee READS, never
 what the caller passes: a source call hands an unused parameter, or a K&R call extra arguments, all
 the same. So it never caps the count, and `setx(a + 1, 4)`, `tick(5)` and `rd1(a, b, 7)` lift as
 they do without the body. The bound answers only for registers at or past it, since whether those
@@ -1066,7 +1087,15 @@ cli elf-bodies.ts):
   function's declaration. Any other call stays unnamed, and that body does not lift. Jumps are never
   named, since a `j`/`b` to the entry is a loop's back edge, so a tail-calling body bounds nothing.
   Naming a call only lets the body lift: the bound still takes every call nothing declares at every
-  argument register.
+  argument register that may hold the body's incoming value, short of what that call's own callee's
+  body is proven not to read, where that body is in hand.
+- A Thumb body read off the ELF whose function the project still includes as assembly (the
+  `INCLUDE_ASM` `.s` of a function it has not decompiled) is lifted from that file, where asmlift's
+  own assembly of it gives the linked bytes (cli splat-bodies.ts). Its own guessed
+  callees are read the same way, and theirs in turn, until a round reads no new body off the
+  project's assembly (cli main.ts), each name once, since a body lifts reading its callees' bodies.
+  Only those bodies have their callees read: the benchmark harness hands a row the ELF bodies its
+  own freeze holds, and the project's assembly is a reading it never freezes.
 - The agbcc frontend reads no objdump text. A GBA callee written in ARM is entered through an
   interworking veneer (`bx pc; nop`, then an ARM `b sym`), and its ARM words are handed in as
   they are. They are not lifted: a straight-line scan (frontend/arm-body.ts) counts the argument
@@ -1089,6 +1118,19 @@ in both. The repro's decomp.yaml names the objdump the bodies were frozen with, 
 re-reads them off the checkout's ELF and refuses a drifted file (apps/benchmark run/symbol-drift.ts).
 The bodies are one input of a row and not all of them: a row reads its vendored symbol map too, and
 a drifted map is a different input again, which the same gate refuses.
+
+A Thumb jump table's dispatch (`ldr rT, [rT]; mov pc, rT`) may hold code of the function's own
+between the table load and the `mov pc`, which the frontend keeps in a block of its own
+(`JumpTable.extras`, thumb.ts `dispatchExtraRefusal`). GCC's PRE inserts a value live across the
+dispatch "just before the tablejump" (gcse.c `insert_insn_end_bb`), so what it admits is what PRE
+inserts: a data-processing op or a single load writing its first operand, and, where reload gives
+PRE's pseudo a stack home, the `str rS, [sp, #k]` that spills it (kl2dct's `EntityCreate` stores
+five values so; kleod's matching one keeps its four in registers, and one more line of it stores
+one). That store is lowered
+as any other block's store to the frame word, and the frame's own reading judges it. A store of a
+register the unlifted idiom wrote, any other store, a call, a flag read, or a write to the jump
+target, sp, pc or lr refuses. What the idiom left in a register no extra rewrote is a marker a read
+of which declines; a `str` extra reads its register and rewrites none.
 
 ## A float, across the tower
 

@@ -433,7 +433,8 @@ function unliftedReads(
 }
 
 /** The entry parameters a lift of `callee` out of `text` counts, once every call in it nothing lays
- *  out is taken at every argument register, and one past the highest incoming stack word among them
+ *  out is taken at every argument register that may hold an incoming value (short of what its own
+ *  callee's body is proven not to read), and one past the highest incoming stack word among them
  *  (`entryArgRank`): an argument slot past the registers is minted only below a stack word the body
  *  loads, so that count is a word it reads. Undefined where no lift proves it. */
 function liftedReads(
