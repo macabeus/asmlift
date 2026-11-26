@@ -515,10 +515,12 @@ describe('the ranking tie-break', () => {
   });
 });
 
-// ONE ARM INTO SEVERAL CLOSED SIBLINGS (switch-recover.ts `closedSiblingRegions`, the `siblings` rung
+// ONE ARM INTO SEVERAL CLOSED SIBLINGS (switch-recover.ts `closedSiblingExit`, the `siblings` rung
 // of structure.ts `CASE_EXIT_RUNGS`): agbcc's cross-jump of `case 0: if (c) { a(); h0(); } else {
 // b(); h1(); } break;` onto `case 1: h0(); break;` and `case 2: h1(); break;` (kl2dct sub_0800BF80).
-// No fall-through and no case-label goto spells an arm entering two cases, so each is copied into it.
+// No case-label goto spells an arm entering two cases, and a fall-through reaches one of them: case 0,
+// directly above case 1, keeps its fall-through into it and takes a copy of case 2, and under
+// `/tail-copies` (`copyEveryTailEntrant`) a copy of each.
 const intoTwo = ({ bb2 = '  br ^bb9()' } = {}) => `fn xs {
 ^bb0(%0: s32, %1: s32):
   switch_br %0, ^bb1(), ^bb2(), ^bb3(), ^bb4(), ^bb9() {cases=[0;1;2;3]}
@@ -541,8 +543,19 @@ ${bb2}
 }`;
 
 describe('an arm entering two closed siblings takes a copy of each', () => {
-  test('case 0 holds both bodies once more, and the program is the IR', () => {
+  test('case 0 falls into case 1 and holds case 2 once more, and the program is the IR', () => {
     const { src, agreement, shipped } = lifted(intoTwo());
+    expect(src).toMatch(
+      /case 0:\n\s*a\(a0\);\n\s*if \(a1 >= 0\) \{\n\s*h1\(a0\);\n\s*break;\n\s*\}\n\s*case 1:\n\s*h0\(a0\);/,
+    );
+    expect(src.match(/h0\(/g)).toHaveLength(1);
+    expect(src.match(/h1\(/g)).toHaveLength(2);
+    judgedAlike(agreement);
+    judgedAlike(shipped);
+  });
+
+  test('under `/tail-copies` case 0 holds both bodies once more, and the program is the IR', () => {
+    const { src, agreement, shipped } = lifted(intoTwo(), { copyEveryTailEntrant: true });
     expect(src).toMatch(
       /case 0:\n\s*a\(a0\);\n\s*if \(a1 >= 0\) \{\n\s*h1\(a0\);\n\s*\} else \{\n\s*h0\(a0\);\n\s*\}\n\s*break;/,
     );
@@ -563,7 +576,7 @@ describe('an arm entering two closed siblings takes a copy of each', () => {
     const fn = parse(intoTwo());
     verify(fn);
     recoverTypes(fn);
-    expect(() => structure(fn, {}, { caseExitFlags: false })).toThrow(/a case body reaches several sibling cases/);
+    expect(() => structure(fn, {}, { exitRungs: false })).toThrow(/a case body reaches several sibling cases/);
   });
 });
 
@@ -640,11 +653,15 @@ const AGBCC_SW_RETSIB = `sw_retsib:
 const retsibOpts = { prototypes: { sw_retsib: { params: ['u8', 'u8'], returns: 'u8' } } };
 
 describe('an arm entering two returning siblings of a switch with no merge takes a copy of each', () => {
-  test('agbcc: every case returns its own constant, the arms entering two with a copy of each', () => {
+  test('agbcc: every case returns its own constant, the arms entering two with a copy of each but a fall-through', () => {
     const src = decompile('sw_retsib', AGBCC_SW_RETSIB, ARMV4T_AGBCC, retsibOpts).source;
     expect(src).not.toMatch(/goto|ASMLIFT_ERROR/);
     expect(src).toMatch(/case 1:\n\s*return 1;/);
     expect(src).toMatch(/case 2:\n\s*return 2;/);
+    // case 6's last block is laid out right above case 0's `return 0;`, and falls into it
+    // (`closedSiblingExit`); its two other paths take copies of case 1 and case 2
+    expect(src).toMatch(/case 6:\n\s*if \(v0 == 0\) return 1;\n\s*if \(v0 == 1\) return 2;\n\s*case 0:\n\s*return 0;/);
+    expect(src.match(/return 0;/g)).toHaveLength(4);
     expect(src.match(/return 1;/g)).toHaveLength(4);
     expect(src.match(/return 2;/g)).toHaveLength(4);
   });

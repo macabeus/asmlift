@@ -269,13 +269,14 @@ testCopies('an arm reaching two siblings is never closed over a dropped edge: co
   const fallsTo = (n: number) => `\tb\t.Lc${n}\n`;
   const armB = '\tbl\tsideB\n' + LEAVE,
     armC = '\tbl\tsideC\n' + LEAVE;
-  // (c) reaches two different siblings, both closed `break` arms. The copies write each into case 0
-  // once more (switch-recover.ts `closedSiblingRegions`, the `siblings` rung), so every path keeps
-  // its edge: case 0 runs sideC() or sideB(), then the switch's end.
+  // (c) reaches two different siblings, both closed `break` arms. Case 0 sits directly above case 1,
+  // so it keeps its fall-through into it and case 2's body is copied into it once more
+  // (switch-recover.ts `closedSiblingExit`, the `siblings` rung): every path keeps its edge, case 0
+  // running sideC() or sideB(), then the switch's end.
   const reachesTwo = conv(['\tcmp\tr2, #0\n\tbeq\t.Lc1\n' + fallsTo(2), armB, armC], tail);
   const copied = lift(reachesTwo);
   expect(copied).toMatch(
-    /case 0:\s*if \(a2 != 0\) \{\s*sideC\(\);\s*\} else \{\s*sideB\(\);\s*\}\s*break;\s*case 1:\s*sideB\(\);\s*break;\s*case 2:\s*sideC\(\);\s*break;\s*\}\s*return sideZ\(\);/,
+    /case 0:\s*if \(a2 != 0\) \{\s*sideC\(\);\s*break;\s*\}\s*case 1:\s*sideB\(\);\s*break;\s*case 2:\s*sideC\(\);\s*break;\s*\}\s*return sideZ\(\);/,
   );
   // The default reads the join past early returns: case 1 and the default reach only the return
   // tail (sideZ's call), so they return, and the join is case 2's body, below the switch. Case 0's

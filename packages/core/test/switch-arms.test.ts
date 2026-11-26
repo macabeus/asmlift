@@ -23,6 +23,7 @@ import { structure as structureJoined } from '../src/structure/structure';
 import type { StructureOptions } from '../src/structure/structure';
 import {
   type ArmExit,
+  copyClosedSiblings,
   copySharedFallTargets,
   makeSwitchRecovery,
   __testing as switchRangesForTest,
@@ -825,6 +826,56 @@ test('copySharedFallTargets copies a region-less sibling only where `sidewaysEnd
   expect(one.get(e2)).toBe(exits.get(e2));
   expect(one.get(e1)).toEqual({ kind: 'break', escapedTo: new Set([s]) });
   expect(kept).toBe(1);
+});
+
+test('copyClosedSiblings holds every sibling to the one-sibling test, and the arm laid out above one keeps it', () => {
+  const blk = (): Block => ({ params: [], ops: [mkOp('br')] });
+  const [e, s1, s2, x, f] = [blk(), blk(), blk(), blk(), blk()];
+  const layout = [e, s1, s2, x, f];
+  const layoutIndex = (b: Block) => layout.indexOf(b);
+  const asked = { asked: true, onMet: () => {} };
+  const entrant: ArmExit = {
+    kind: 'unstructurable',
+    why: 'w',
+    reaches: { siblings: new Set([s1, s2]), region: new Set([e]) },
+  };
+  const closed = new Map<Block, ArmExit>([
+    [e, entrant],
+    [s1, { kind: 'break', region: new Set([s1]) }],
+    [s2, { kind: 'break', region: new Set([s2]) }],
+  ]);
+  // every sibling copied where no fall-through is kept (`/tail-copies`)…
+  const reading = { faller: false, layoutIndex };
+  expect(copyClosedSiblings(closed, asked, reading).get(e)).toEqual({
+    kind: 'break',
+    region: new Set([e, s1, s2]),
+  });
+  // …and by default the arm laid out right above `s1` falls into it and copies `s2` alone
+  let kept = 0;
+  expect(copyClosedSiblings(closed, asked, { ...reading, faller: true, onFallerKept: () => kept++ }).get(e)).toEqual({
+    kind: 'fallthrough',
+    to: s1,
+    breaks: true,
+    region: new Set([e, s2]),
+  });
+  expect(kept).toBe(1);
+  // not where another arm falls into `s1` already
+  const fallen = new Map(closed).set(f, { kind: 'fallthrough', to: s1, breaks: false, region: new Set([f]) });
+  expect(copyClosedSiblings(fallen, asked, { ...reading, faller: true }).get(e)?.kind).toBe('break');
+  // nor where the sibling below the arm is not one it reaches
+  const apart = (b: Block) => [e, x, s1, s2].indexOf(b);
+  expect(copyClosedSiblings(closed, asked, { faller: true, layoutIndex: apart }).get(e)?.kind).toBe('break');
+  // A sibling that leaves sideways only forward is copied as `copySharedFallTargets` copies it: the
+  // entrant steps where it steps. Refused by `sidewaysEnds`, or with none, the entrant stays.
+  const sideways = new Map(closed).set(s2, { kind: 'break', escapedTo: new Set([x]) });
+  expect(copyClosedSiblings(sideways, asked, reading).get(e)).toBe(entrant);
+  expect(copyClosedSiblings(sideways, asked, { ...reading, sidewaysEnds: () => false }).get(e)).toBe(entrant);
+  for (const faller of [false, true]) {
+    expect(copyClosedSiblings(sideways, asked, { ...reading, faller, sidewaysEnds: (b) => b === x }).get(e)).toEqual({
+      kind: 'break',
+      escapedTo: new Set([x]),
+    });
+  }
 });
 
 // The same copies with NO PRE: IDO 7.1 has no gcse, and the tail cases 2, 3 and the default share

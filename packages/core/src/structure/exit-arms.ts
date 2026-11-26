@@ -14,6 +14,7 @@ import {
   EXIT_TAIL_GATES,
   type ExitTailCandidate,
 } from './loop-gates';
+import type { RungAsk } from './structure-options';
 
 /** What {@link earlyReturnArm} reads beyond its arguments: block dominance and forward
  *  reachability, both of them whole-function facts computed once per `structure()`. */
@@ -346,7 +347,7 @@ export function earlyReturnArm(
   exitTailGates: readonly Gate<ExitTailCandidate>[] = EXIT_TAIL_GATES,
   bypass: ArmCopies = NO_COPIES,
   bypassTailGates: readonly Gate<BypassTailCandidate>[] = BYPASS_TAIL_GATES,
-  armHead?: { readonly asked: boolean; onMet: () => void },
+  armHead?: RungAsk,
 ): Set<Block> | null {
   // does the loop's own exit path run it? forward only (`offExitPathOf`)
   const offExitPath = offExitPathOf(exit, dom);

@@ -895,6 +895,6 @@ describe("a loop's arms entering one return tail own its head", () => {
     const fn = parse(headsIr);
     verify(fn);
     recoverTypes(fn);
-    expect(() => structure(fn, {}, { caseExitFlags: false })).toThrow(/cannot structure/);
+    expect(() => structure(fn, {}, { exitRungs: false })).toThrow(/cannot structure/);
   });
 });

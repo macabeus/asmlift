@@ -16768,9 +16768,11 @@ export const SYNTHETIC: SynthSpec[] = [
   },
   // sw_xjsib2 (kl2dct sub_0800BF80): case 7 ends each of its two paths the way case 1 and case 3 do,
   // and agbcc's cross-jump sends both paths into those bodies. One arm entering two siblings has no
-  // fall-through or case-label goto spelling, so each sibling, a closed `break` arm, is copied into
-  // it (switch-recover.ts `closedSiblingRegions`, the `siblings` rung of structure.ts
-  // `CASE_EXIT_RUNGS`). The other four toolchains keep the calls in place, and are controls.
+  // case-label goto spelling and falls into one of them at most: it keeps its fall-through into the
+  // closed `break` arm laid out right after it and takes a copy of the other, or under
+  // `/tail-copies` a copy of each (switch-recover.ts `closedSiblingExit`, the `siblings` rung of
+  // structure.ts `CASE_EXIT_RUNGS`). The other four toolchains keep the calls in place, and are
+  // controls.
   {
     sym: 'sw_xjsib2',
     src:

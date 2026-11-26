@@ -224,7 +224,7 @@ import { testRereadsOnly } from './redundant-test';
 import { unspelledEpilogues } from './retspell';
 import { isRet, joinPastReturnsAsked, joinsPastReturns, leftOutOf, sharedRetsOf } from './return-joins';
 import { StructureError } from './structure-error';
-import { type StructureHooks, type StructureOptions, calledOnly } from './structure-options';
+import { type RungAsk, type StructureHooks, type StructureOptions, calledOnly } from './structure-options';
 import {
   type ArmExit,
   copyClosedSiblings,
@@ -465,8 +465,8 @@ interface JumpRanking {
  *    would lift with it can be one the join lifts without it (an ido7.1 nest of a loop in a
  *    switch in a case, leaving for an effect-free `return` merge). That join's own ladder asks
  *    it where it never asks the join, and its copies' ladder after a declined join does.
- *  - `siblings`: a case body that reaches two or more closed sibling cases, each copied into it
- *    (switch-recover.ts `closedSiblingRegions`). Held to `merge`'s ladders, for the same reason: a
+ *  - `siblings`: a case body that reaches two or more closed sibling cases, copied into it but
+ *    the one it keeps its fall-through into (switch-recover.ts `closedSiblingExit`). Held to `merge`'s ladders, for the same reason: a
  *    function the copies lift with it can be one the join lifts without it (case 0 of a Thumb table
  *    whose two paths enter cases 1 and 2, the join ending the switch at case 2's body). */
 const CASE_EXIT_RUNGS = ['flags', 'merge', 'siblings'] as const;
@@ -665,7 +665,7 @@ function structureWithinBudget(
   // it unasked declined and one met a head; never where the caller structures the join after this
   // run. Where every one declines, the refusal of the runs before them stands.
   const withHeads = (readings: readonly JoinReading[]): SFn | null => {
-    if (!unasked.met || hooks.joinFollows === true || hooks.caseExitFlags === false) {
+    if (!unasked.met || hooks.joinFollows === true || hooks.exitRungs === false) {
       return null;
     }
     for (const r of readings) {
@@ -882,7 +882,7 @@ function structureLadder(
       sfn === null &&
       caseExit.met.has(rung) &&
       (rung === 'flags' || ((reading.copies || !reading.asked) && hooks.joinFollows !== true)) &&
-      hooks.caseExitFlags !== false
+      hooks.exitRungs !== false
     ) {
       refused = undefined;
       caseExit = { asked: new Set(CASE_EXIT_RUNGS.slice(0, n + 1)), met: new Set() };
@@ -5781,47 +5781,73 @@ function structureRanked(
         // the jumps instead (`jumpSharedFallTargets` over just those siblings), and the copies keep
         // the rest (`default:` siblings), so the two settings differ exactly where `onCaseCopied`
         // fires.
-        const copiedInto = new Set<Block>();
-        const severalSiblings = { asked: caseExit.asked.has('siblings'), onMet: () => caseExit.met.add('siblings') };
-        const copyOver = (from: ReadonlyMap<Block, ArmExit>, onCopied?: (to: Block) => void) =>
-          copyClosedSiblings(
-            from,
-            severalSiblings,
-            copySharedFallTargets(
-              preChain,
-              dflt,
+        const severalSiblings: RungAsk = {
+          asked: caseExit.asked.has('siblings'),
+          onMet: () => caseExit.met.add('siblings'),
+        };
+        // `keepSibling`: may an arm into several closed siblings keep its fall-through into the one
+        // the asm lays out right after it (`copyClosedSiblings`)? `onSiblingKept` fires where one does.
+        const readExits = (keepSibling: boolean, onSiblingKept?: () => void) => {
+          const copiedInto = new Set<Block>();
+          const sideways = (s: Block) => forwardToMerge(s, b, at, siblings);
+          const several = { faller: keepSibling, layoutIndex, onFallerKept: onSiblingKept, sidewaysEnds: sideways };
+          const copyOver = (from: ReadonlyMap<Block, ArmExit>, onCopied?: (to: Block) => void) =>
+            copyClosedSiblings(
               from,
-              !copyEveryTailEntrant,
-              hooks.onTailFallerKept,
-              (s) => forwardToMerge(s, b, at, siblings),
-              onCopied,
-            ),
-          );
-        // An arm into several closed siblings takes their copies at every merge, the `stop` reading's
-        // included: the copies of a default-block sibling it reaches write the code after the switch
-        // into that arm alone, which otherwise declines (`copyClosedSiblings`).
-        const copied = copies
-          ? copyOver(walked, (to) => {
-              copiedInto.add(to);
-              hooks.onCaseCopied?.();
-            })
-          : copyClosedSiblings(walked, severalSiblings);
-        const exits =
-          copiedInto.size > 0 && jumpToSharedCases && spellSwitchFallthrough
-            ? copyOver(jumpSharedFallTargets(preChain, dflt, walked, copiedInto))
-            : copied;
-        // …and, asked for, the arms still entering one case arm's body two or more at a time get
-        // the one fall-through and `goto`s to its label (`jumpSharedFallTargets`, THE JUMPS below).
-        const jumped = gotos && spellSwitchFallthrough ? jumpSharedFallTargets(preChain, dflt, exits) : exits;
-        const falls = [...jumped.values()].some((e) => e.kind === 'fallthrough');
-        const chain = !spellSwitchFallthrough && falls ? null : chainArms(preChain, dflt, jumped);
-        const refusal = chain === null ? null : armRefusal(jumped, chain);
-        const declines = chain === null || refusal !== null;
-        // unasked, a reading the flag could change only notes it where it declines
-        if (!caseExit.asked.has('flags') && declines && flagTargets.length > 0) {
-          caseExit.met.add('flags');
+              severalSiblings,
+              several,
+              copySharedFallTargets(
+                preChain,
+                dflt,
+                from,
+                !copyEveryTailEntrant,
+                hooks.onTailFallerKept,
+                sideways,
+                onCopied,
+              ),
+            );
+          // An arm into several closed siblings takes their copies at every merge, the `stop`
+          // reading's included: the copies of a default-block sibling it reaches write the code after
+          // the switch into that arm alone, which otherwise declines (`copyClosedSiblings`).
+          const copied = copies
+            ? copyOver(walked, (to) => {
+                copiedInto.add(to);
+                hooks.onCaseCopied?.();
+              })
+            : copyClosedSiblings(walked, severalSiblings, several);
+          const exits =
+            copiedInto.size > 0 && jumpToSharedCases && spellSwitchFallthrough
+              ? copyOver(jumpSharedFallTargets(preChain, dflt, walked, copiedInto))
+              : copied;
+          // …and, asked for, the arms still entering one case arm's body two or more at a time get
+          // the one fall-through and `goto`s to its label (`jumpSharedFallTargets`, THE JUMPS below).
+          const jumped = gotos && spellSwitchFallthrough ? jumpSharedFallTargets(preChain, dflt, exits) : exits;
+          const falls = [...jumped.values()].some((e) => e.kind === 'fallthrough');
+          const chain = !spellSwitchFallthrough && falls ? null : chainArms(preChain, dflt, jumped);
+          const refusal = chain === null ? null : armRefusal(jumped, chain);
+          const declines = chain === null || refusal !== null;
+          // unasked, a reading the flag could change only notes it where it declines
+          if (!caseExit.asked.has('flags') && declines && flagTargets.length > 0) {
+            caseExit.met.add('flags');
+          }
+          return { exits: jumped, falls, chain, refusal, declines };
+        };
+        // The arm above a sibling keeps its fall-through only where that reading declines nothing,
+        // as the one-sibling copies' keeper does not need to be: an arm already falling into the
+        // sibling, or the emission's own refusals of a fall-through, can refuse the one a copy would
+        // spell. Then every sibling is copied, the reading `/tail-copies` makes.
+        let kept = false;
+        const first = readExits(!copyEveryTailEntrant, () => {
+          kept = true;
+        });
+        if (!kept) {
+          return first;
         }
-        return { exits: jumped, falls, chain, refusal, declines };
+        if (!first.declines) {
+          hooks.onTailFallerKept?.();
+          return first;
+        }
+        return readExits(false);
       };
       // THE EMISSION'S PER-ARM REFUSALS, the one definition of them. Every refusal the emission
       // below throws is a null chain (which a fall-through in a language without one forces too —

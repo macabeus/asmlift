@@ -40,13 +40,13 @@ const dropping = (id: string): StructureHooks => {
 };
 
 // The fixtures are held at the loop-exit refusal, so no run asks the case body's exit flag
-// (`caseExitFlags`, case-exit-flag.test.ts), which spells that exit.
+// (`exitRungs`, case-exit-flag.test.ts), which spells that exit.
 const lift = (ir: string, hooks: StructureHooks = {}) => {
   const fn = parse(ir);
   verify(fn);
   recoverTypes(fn);
   recomputeDerivedParams(fn);
-  const sfn = structure(fn, { spellCountedLoopsFor: true }, { caseExitFlags: false, ...hooks });
+  const sfn = structure(fn, { spellCountedLoopsFor: true }, { exitRungs: false, ...hooks });
   return { sfn, src: cBackend.emit(sfn), agreement: irAgreement(ir, sfn, SEEDS) };
 };
 
@@ -298,7 +298,7 @@ test('the refusal over a `u32` counter is reported, so rank.ts can hand the loop
             fired++;
           },
           // the exit flag would spell the loop's exit without the `for` (case-exit-flag.test.ts)
-          caseExitFlags: false,
+          exitRungs: false,
         },
       );
     return { run, fired: () => fired };
