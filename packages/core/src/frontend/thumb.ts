@@ -8312,7 +8312,9 @@ function lowerTerminator(fill: ThumbFill, cur: BlockCursor): void {
     // writes them at each case target's entry instead (`openBlockCursor`).
     if (cur.dispatchScrutinee !== null) {
       const opaque = [...jt.leaves].filter(([, left]) => left === 'opaque').map(([r]) => r);
-      for (const r of opaque.filter((r) => !jt.extras.some((ins) => ins.ops[0] === r))) {
+      // a `str` extra (a frame-home store) READS its first operand, so it rewrites nothing
+      const rewritten = (r: string): boolean => jt.extras.some((ins) => ins.mnemonic !== 'str' && ins.ops[0] === r);
+      for (const r of opaque.filter((r) => !rewritten(r))) {
         ssa.writeVar(
           reg(r),
           bi,
